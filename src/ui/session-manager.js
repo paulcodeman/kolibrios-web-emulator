@@ -404,11 +404,11 @@
     };
   }
 
-  function resolveSwipeDirection(dx, dy, durationMs) {
+  function resolveSwipeDirection(dx, dy, durationMs, allowLongHold) {
     const elapsed = Math.max(0, durationMs | 0);
     const absX = Math.abs(dx | 0);
     const absY = Math.abs(dy | 0);
-    if (elapsed > TOUCH_SWIPE_MAX_DURATION_MS) {
+    if (!allowLongHold && elapsed > TOUCH_SWIPE_MAX_DURATION_MS) {
       return "";
     }
     if (absX < TOUCH_SWIPE_MIN_DISTANCE && absY < TOUCH_SWIPE_MIN_DISTANCE) {
@@ -1394,14 +1394,26 @@
       this.touchSwipeLastY = touch.clientY | 0;
     }
 
-    resolveTouchSwipeDirection() {
+    reanchorTouchSwipe(touch) {
+      if (!touch) {
+        return;
+      }
+      this.touchSwipeStartX = touch.clientX | 0;
+      this.touchSwipeStartY = touch.clientY | 0;
+      this.touchSwipeLastX = touch.clientX | 0;
+      this.touchSwipeLastY = touch.clientY | 0;
+      this.touchSwipeStartMs = Date.now();
+    }
+
+    resolveTouchSwipeDirection(allowLongHold) {
       if (!this.touchSwipeEligible) {
         return "";
       }
       return resolveSwipeDirection(
         (this.touchSwipeLastX - this.touchSwipeStartX) | 0,
         (this.touchSwipeLastY - this.touchSwipeStartY) | 0,
-        Date.now() - (this.touchSwipeStartMs || 0)
+        Date.now() - (this.touchSwipeStartMs || 0),
+        !!allowLongHold
       );
     }
 
@@ -1483,18 +1495,30 @@
     }
 
     tryActivateHeldTouchSwipe(event, touch) {
-      if (this.touchSwipeHeldKey) {
+      const held = this.touchSwipeHeldKey || "";
+      const direction = this.resolveTouchSwipeDirection(!!held);
+      if (!direction) {
+        return !!held;
+      }
+      if (!held) {
+        this.releaseTouchSwipeMouse(event, touch);
+        if (!this.pressVirtualKey(direction)) {
+          return false;
+        }
+        this.touchSwipeHeldKey = direction;
+        this.reanchorTouchSwipe(touch);
         return true;
       }
-      const direction = this.resolveTouchSwipeDirection();
-      if (!direction) {
-        return false;
+      if (direction === held) {
+        return true;
       }
-      this.releaseTouchSwipeMouse(event, touch);
+      this.releaseVirtualKey(held);
       if (!this.pressVirtualKey(direction)) {
+        this.touchSwipeHeldKey = "";
         return false;
       }
       this.touchSwipeHeldKey = direction;
+      this.reanchorTouchSwipe(touch);
       return true;
     }
 
@@ -2580,14 +2604,26 @@
       this.desktopSwipeEligible = true;
     }
 
-    resolveDesktopSwipeDirection() {
+    reanchorDesktopSwipe(touch) {
+      if (!touch) {
+        return;
+      }
+      this.desktopSwipeStartX = touch.clientX | 0;
+      this.desktopSwipeStartY = touch.clientY | 0;
+      this.desktopSwipeLastX = touch.clientX | 0;
+      this.desktopSwipeLastY = touch.clientY | 0;
+      this.desktopSwipeStartMs = Date.now();
+    }
+
+    resolveDesktopSwipeDirection(allowLongHold) {
       if (!this.desktopSwipeEligible) {
         return "";
       }
       return resolveSwipeDirection(
         (this.desktopSwipeLastX - this.desktopSwipeStartX) | 0,
         (this.desktopSwipeLastY - this.desktopSwipeStartY) | 0,
-        Date.now() - (this.desktopSwipeStartMs || 0)
+        Date.now() - (this.desktopSwipeStartMs || 0),
+        !!allowLongHold
       );
     }
 
@@ -2636,23 +2672,41 @@
     }
 
     tryActivateHeldDesktopSwipe(event, touch) {
-      if (this.desktopSwipeHeldKey) {
+      const held = this.desktopSwipeHeldKey || "";
+      const direction = this.resolveDesktopSwipeDirection(!!held);
+      if (!direction) {
+        return !!held;
+      }
+      if (!held) {
+        const target = this.getSwipeTargetProcess();
+        if (!target || typeof target.pressVirtualKey !== "function") {
+          return false;
+        }
+        this.releaseDesktopSwipeMouse(event, touch);
+        if (!target.pressVirtualKey(direction)) {
+          return false;
+        }
+        this.desktopSwipeHeldKey = direction;
+        this.desktopSwipeTarget = target;
+        this.reanchorDesktopSwipe(touch);
         return true;
       }
-      const direction = this.resolveDesktopSwipeDirection();
-      if (!direction) {
-        return false;
+      if (direction === held) {
+        return true;
       }
-      const target = this.getSwipeTargetProcess();
-      if (!target || typeof target.pressVirtualKey !== "function") {
-        return false;
+      const target = this.desktopSwipeTarget || this.getSwipeTargetProcess();
+      if (!target || typeof target.pressVirtualKey !== "function" || typeof target.releaseVirtualKey !== "function") {
+        return true;
       }
-      this.releaseDesktopSwipeMouse(event, touch);
+      target.releaseVirtualKey(held);
       if (!target.pressVirtualKey(direction)) {
+        this.desktopSwipeHeldKey = "";
+        this.desktopSwipeTarget = target;
         return false;
       }
       this.desktopSwipeHeldKey = direction;
       this.desktopSwipeTarget = target;
+      this.reanchorDesktopSwipe(touch);
       return true;
     }
 
