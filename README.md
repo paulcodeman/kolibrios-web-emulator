@@ -30,22 +30,15 @@ BCDCLK autotest:
 node tools/autotest-bcdclk.js [path-to-bcdclk.kex] [max_ms]
 ```
 
-## GitHub Pages
+## Live Demo
 
-This repository includes a GitHub Actions workflow that publishes the static app to GitHub Pages.
-
-After enabling `Settings -> Pages -> Source -> GitHub Actions`, the emulator will be available at:
+Try it in the browser:
 
 ```text
 https://paulcodeman.github.io/kolibrios-web-emulator/
 ```
 
-The Pages deployment uploads only:
-
-- `index.html`
-- `src/`
-
-That keeps the published site aligned with the browser entry point and avoids shipping local debug artifacts.
+The project is a static HTML/JS app, so the same entry point can also be opened locally via `file://`.
 
 ## Layout
 
