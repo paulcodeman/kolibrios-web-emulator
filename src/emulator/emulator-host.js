@@ -384,14 +384,19 @@
         } else if (releaseMask || (this.mouseButtons & 0x1f) === 0) {
           this.activeButtonSerial = 0;
         }
+        const mouseEventOccurred = !!(pressMask || releaseMask || wheelX || wheelY || moved);
         const mouseEventQueued =
-          !!(pressMask || releaseMask || wheelX || wheelY || moved) &&
-          typeof this.isEventAllowed === "function" &&
-          this.isEventAllowed(6);
+          mouseEventOccurred &&
+          typeof this.shouldRecordMouseEvent === "function" &&
+          this.shouldRecordMouseEvent();
         if (mouseEventQueued) {
           this.queueEvent(6);
         }
-        if (buttonEventQueued || mouseEventQueued) {
+        const shouldWakeForMouse =
+          mouseEventQueued &&
+          typeof this.isEventEnabledByMask === "function" &&
+          this.isEventEnabledByMask(6);
+        if (buttonEventQueued || shouldWakeForMouse) {
           this.wakeExecution();
         }
       },
@@ -543,6 +548,9 @@
         if (!button) {
           return false;
         }
+        if (typeof this.isHostThreadActive === "function" && !this.isHostThreadActive()) {
+          return false;
+        }
         const id = button.id & 0x00ffffff;
         if (id === 0xffff) {
           return false;
@@ -560,6 +568,16 @@
         this.removeQueuedEvent(3);
         this.queueEvent(3);
         this.wakeExecution();
+      },
+
+      shouldRecordMouseEvent() {
+        if (((this.eventMask >>> 31) & 1) !== 0 && typeof this.isHostThreadActive === "function" && !this.isHostThreadActive()) {
+          return false;
+        }
+        if (((this.eventMask >>> 30) & 1) !== 0 && !this.mouseInside) {
+          return false;
+        }
+        return true;
       },
 
       getUiColor(offset, fallback) {
@@ -905,6 +923,10 @@
           this.log(`Host session getActiveThreadSlot failed: ${err}`);
           return this.threadSlot >>> 0;
         }
+      },
+
+      isHostThreadActive() {
+        return (this.getHostActiveThreadSlot() >>> 0) === (this.threadSlot >>> 0);
       },
 
       getHostThreadSlotByProcessId(pid) {

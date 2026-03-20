@@ -1943,6 +1943,12 @@
         const esi = this.readReg(REG.ESI);
         const edi = this.readReg(REG.EDI);
         this.ensureSkinThemeLoaded();
+        this.removeQueuedEvent(1);
+        this.keyBuffer.length = 0;
+        this.removeQueuedEvent(2);
+        this.pendingButtonResult = 1;
+        this.removeQueuedEvent(3);
+        this.activeButtonSerial = 0;
     
         const winX = ebx >> 16;
         const winY = ecx >> 16;
@@ -2175,14 +2181,54 @@
         this.writeReg(REG.EAX, (((dd & 0xff) << 16) | ((mm & 0xff) << 8) | (yy & 0xff)) >>> 0);
       },
 
-      sysGetKey() {
+      findReadableKeyBufferIndex() {
         if (!this.keyBuffer.length) {
-          this.removeQueuedEvent(2);
+          return -1;
+        }
+        const active = typeof this.isHostThreadActive === "function"
+          ? this.isHostThreadActive()
+          : true;
+        if (active) {
+          for (let i = 0; i < this.keyBuffer.length; i += 1) {
+            const entry = this.keyBuffer[i];
+            if (entry && !entry.hotkey) {
+              return i;
+            }
+          }
+        }
+        for (let i = 0; i < this.keyBuffer.length; i += 1) {
+          const entry = this.keyBuffer[i];
+          if (entry && entry.hotkey) {
+            return i;
+          }
+        }
+        return -1;
+      },
+
+      hasPendingKeyEvent() {
+        return this.findReadableKeyBufferIndex() >= 0;
+      },
+
+      hasPendingButtonEvent() {
+        if ((this.pendingButtonResult >>> 0) === 1) {
+          return false;
+        }
+        return typeof this.isHostThreadActive === "function"
+          ? this.isHostThreadActive()
+          : true;
+      },
+
+      sysGetKey() {
+        const keyIndex = this.findReadableKeyBufferIndex();
+        if (keyIndex < 0) {
+          if (!this.keyBuffer.length) {
+            this.removeQueuedEvent(2);
+          }
           this.writeReg(REG.EAX, 1);
           return;
         }
 
-        const entry = this.keyBuffer.shift();
+        const entry = this.keyBuffer.splice(keyIndex, 1)[0];
         let value = 1;
         if (entry) {
           if (entry.hotkey) {
@@ -2201,7 +2247,7 @@
           }
         }
 
-        if (this.keyBuffer.length) {
+        if (this.hasPendingKeyEvent()) {
           this.removeQueuedEvent(2);
           this.queueEvent(2);
         } else {
@@ -2813,6 +2859,13 @@
       },
 
       sysGetButton() {
+        if (!this.hasPendingButtonEvent()) {
+          if ((this.pendingButtonResult >>> 0) === 1) {
+            this.removeQueuedEvent(3);
+          }
+          this.writeReg(REG.EAX, 1);
+          return;
+        }
         const value = this.pendingButtonResult >>> 0;
         this.writeReg(REG.EAX, value);
         this.pendingButtonResult = 1;
@@ -6188,28 +6241,75 @@
         if (!eventId) {
           return;
         }
-        const last = this.eventQueue.length ? this.eventQueue[this.eventQueue.length - 1] : 0;
-        if (last === eventId && (eventId === 1 || eventId === 6)) {
-          return;
+        for (let i = 0; i < this.eventQueue.length; i += 1) {
+          if ((this.eventQueue[i] | 0) === (eventId | 0)) {
+            return;
+          }
         }
         this.eventQueue.push(eventId);
       },
 
-      dequeueEvent() {
-        if (!this.eventQueue.length) {
-          return 0;
+      isPersistentBufferedEvent(eventId) {
+        return eventId === 1 || eventId === 2 || eventId === 3;
+      },
+
+      hasQueuedEvent(eventId) {
+        if (!eventId || !this.eventQueue.length) {
+          return false;
         }
         for (let i = 0; i < this.eventQueue.length; i += 1) {
-          const eventId = this.eventQueue[i];
+          if ((this.eventQueue[i] | 0) === (eventId | 0)) {
+            return true;
+          }
+        }
+        return false;
+      },
+
+      getNextQueuedEventId() {
+        const preferred = [9, 8, 7, 6, 5, 3, 2, 1];
+        for (let i = 0; i < preferred.length; i += 1) {
+          const eventId = preferred[i];
+          if (!this.hasQueuedEvent(eventId) || !this.isEventAllowed(eventId)) {
+            continue;
+          }
+          if (eventId === 2 && !this.hasPendingKeyEvent()) {
+            continue;
+          }
+          if (eventId === 3 && !this.hasPendingButtonEvent()) {
+            continue;
+          }
+          return eventId;
+        }
+        for (let i = 0; i < this.eventQueue.length; i += 1) {
+          const eventId = this.eventQueue[i] | 0;
+          if (eventId === 4) {
+            continue;
+          }
+          if (eventId === 2 && !this.hasPendingKeyEvent()) {
+            continue;
+          }
+          if (eventId === 3 && !this.hasPendingButtonEvent()) {
+            continue;
+          }
           if (this.isEventAllowed(eventId)) {
-            this.eventQueue.splice(i, 1);
             return eventId;
           }
         }
         return 0;
       },
 
-      isEventAllowed(eventId) {
+      dequeueEvent() {
+        const eventId = this.getNextQueuedEventId();
+        if (!eventId) {
+          return 0;
+        }
+        if (!this.isPersistentBufferedEvent(eventId)) {
+          this.removeQueuedEvent(eventId);
+        }
+        return eventId;
+      },
+
+      isEventEnabledByMask(eventId) {
         if (!eventId) {
           return false;
         }
@@ -6217,13 +6317,11 @@
         if (bit < 0 || bit > 30) {
           return true;
         }
-        if (eventId === 6) {
-          const filterOutside = ((this.eventMask >>> 30) & 1) !== 0;
-          if (filterOutside && !this.mouseInside) {
-            return false;
-          }
-        }
         return ((this.eventMask >>> bit) & 1) !== 0;
+      },
+
+      isEventAllowed(eventId) {
+        return this.isEventEnabledByMask(eventId);
       }
     
     });
