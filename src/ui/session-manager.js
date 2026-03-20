@@ -638,6 +638,8 @@
       this.touchSwipeLastY = 0;
       this.touchSwipeStartMs = 0;
       this.touchSwipeEligible = false;
+      this.touchSwipeHeldKey = "";
+      this.touchSwipeMouseSuppressed = false;
       this.boundDocMouseMove = (event) => this.handleDocumentMouseMove(event);
       this.boundDocMouseUp = (event) => this.handleDocumentMouseUp(event);
       this.boundDocTouchMove = (event) => this.handleDocumentTouchMove(event);
@@ -1321,7 +1323,11 @@
       this.resizeEdge = "";
       this.pressedSystemButton = "";
       this.pressedSystemHot = false;
+      this.releaseVirtualKey(this.touchSwipeHeldKey);
+      this.touchSwipeHeldKey = "";
+      this.touchSwipeMouseSuppressed = false;
       this.activeTouchId = null;
+      this.resetTouchSwipeTracking();
       if (this.shellEl) {
         this.shellEl.style.cursor = "default";
       }
@@ -1332,7 +1338,7 @@
       if (!this.captureMode) {
         return;
       }
-      if (this.captureMode === "app") {
+      if (this.captureMode === "app" && !this.touchSwipeMouseSuppressed) {
         this.emulator.setMouseState(
           this.emulator.mouseX | 0,
           this.emulator.mouseY | 0,
@@ -1370,6 +1376,8 @@
       this.touchSwipeLastX = touch.clientX | 0;
       this.touchSwipeLastY = touch.clientY | 0;
       this.touchSwipeStartMs = Date.now();
+      this.touchSwipeHeldKey = "";
+      this.touchSwipeMouseSuppressed = false;
       this.touchSwipeEligible =
         !this.rolledUp &&
         !this.stopped &&
@@ -1386,39 +1394,32 @@
       this.touchSwipeLastY = touch.clientY | 0;
     }
 
-    consumeTouchSwipeDirection() {
+    resolveTouchSwipeDirection() {
       if (!this.touchSwipeEligible) {
-        this.resetTouchSwipeTracking();
         return "";
       }
-      const direction = resolveSwipeDirection(
+      return resolveSwipeDirection(
         (this.touchSwipeLastX - this.touchSwipeStartX) | 0,
         (this.touchSwipeLastY - this.touchSwipeStartY) | 0,
         Date.now() - (this.touchSwipeStartMs || 0)
       );
-      this.resetTouchSwipeTracking();
-      return direction;
     }
 
-    queueVirtualKey(code) {
+    buildVirtualKeyPayload(code) {
       if (this.removed || this.stopped || !this.emulator || typeof this.emulator.queueBrowserKeyEvent !== "function") {
-        return false;
+        return null;
       }
       const key = String(code || "");
       if (!key) {
-        return false;
+        return null;
       }
       const translated = keyboard.translateDomKeyboardEvent
         ? keyboard.translateDomKeyboardEvent({ code: key, key })
         : null;
       if (!translated) {
-        return false;
+        return null;
       }
-      if (this.manager.getActiveProcess() !== this) {
-        this.manager.setActiveProcess(this, { focusShell: false });
-      }
-      this.focusShell();
-      const payload = {
+      return {
         asciiCode: translated.asciiCode | 0,
         scanCode: translated.scanCode | 0,
         extended: !!translated.extended,
@@ -1427,14 +1428,73 @@
         controlKeys: this.controlKeyMask & 0x7ff,
         hotkey: false
       };
+    }
+
+    pressVirtualKey(code) {
+      const payload = this.buildVirtualKeyPayload(code);
+      if (!payload) {
+        return false;
+      }
+      if (this.manager.getActiveProcess() !== this) {
+        this.manager.setActiveProcess(this, { focusShell: false });
+      }
+      this.focusShell();
       this.emulator.queueBrowserKeyEvent({
         ...payload,
         released: false
       });
+      return true;
+    }
+
+    releaseVirtualKey(code) {
+      const payload = this.buildVirtualKeyPayload(code);
+      if (!payload) {
+        return false;
+      }
       this.emulator.queueBrowserKeyEvent({
         ...payload,
         released: true
       });
+      return true;
+    }
+
+    tapVirtualKey(code) {
+      if (!this.pressVirtualKey(code)) {
+        return false;
+      }
+      return this.releaseVirtualKey(code);
+    }
+
+    releaseTouchSwipeMouse(event, touch) {
+      if (this.touchSwipeMouseSuppressed || this.captureMode !== "app" || !this.captureButtonMask) {
+        return;
+      }
+      const releaseEvent = createSyntheticPointerEvent(event, touch, 0, 0);
+      this.forwardMouseEvent(
+        releaseEvent,
+        0,
+        this.captureButtonMask | 0,
+        false,
+        0,
+        0,
+        this.getPointerInfo(releaseEvent).inside
+      );
+      this.touchSwipeMouseSuppressed = true;
+    }
+
+    tryActivateHeldTouchSwipe(event, touch) {
+      if (this.touchSwipeHeldKey) {
+        return true;
+      }
+      const direction = this.resolveTouchSwipeDirection();
+      if (!direction) {
+        return false;
+      }
+      this.releaseTouchSwipeMouse(event, touch);
+      if (!this.pressVirtualKey(direction)) {
+        return false;
+      }
+      this.touchSwipeHeldKey = direction;
       return true;
     }
 
@@ -1647,6 +1707,10 @@
         return;
       }
       this.updateTouchSwipeTracking(touch);
+      if (this.tryActivateHeldTouchSwipe(event, touch) || this.touchSwipeMouseSuppressed) {
+        event.preventDefault();
+        return;
+      }
       this.handleDocumentMouseMove(createSyntheticPointerEvent(
         event,
         touch,
@@ -1665,10 +1729,19 @@
         return;
       }
       this.updateTouchSwipeTracking(touch);
-      const direction = this.consumeTouchSwipeDirection();
+      if (this.touchSwipeHeldKey) {
+        this.releaseVirtualKey(this.touchSwipeHeldKey);
+        this.touchSwipeHeldKey = "";
+        if (this.touchSwipeMouseSuppressed) {
+          this.endCapture();
+          event.preventDefault();
+          return;
+        }
+      }
+      const direction = this.resolveTouchSwipeDirection();
       this.handleDocumentMouseUp(createSyntheticPointerEvent(event, touch, 0, 0));
       if (direction) {
-        this.queueVirtualKey(direction);
+        this.tapVirtualKey(direction);
       }
       event.preventDefault();
     }
@@ -1677,6 +1750,8 @@
       if (this.activeTouchId === null) {
         return;
       }
+      this.releaseVirtualKey(this.touchSwipeHeldKey);
+      this.touchSwipeHeldKey = "";
       this.resetTouchSwipeTracking();
       this.cancelCapture();
       event.preventDefault();
@@ -1930,6 +2005,9 @@
       this.desktopSwipeLastY = 0;
       this.desktopSwipeStartMs = 0;
       this.desktopSwipeEligible = false;
+      this.desktopSwipeHeldKey = "";
+      this.desktopSwipeMouseSuppressed = false;
+      this.desktopSwipeTarget = null;
       this.boundDesktopTouchMove = (event) => this.handleDocumentDesktopTouchMove(event);
       this.boundDesktopTouchEnd = (event) => this.handleDocumentDesktopTouchEnd(event);
       this.boundDesktopTouchCancel = (event) => this.handleDocumentDesktopTouchCancel(event);
@@ -2496,21 +2574,21 @@
       this.desktopSwipeLastX = touch.clientX | 0;
       this.desktopSwipeLastY = touch.clientY | 0;
       this.desktopSwipeStartMs = Date.now();
+      this.desktopSwipeHeldKey = "";
+      this.desktopSwipeMouseSuppressed = false;
+      this.desktopSwipeTarget = null;
       this.desktopSwipeEligible = true;
     }
 
-    consumeDesktopSwipeDirection() {
+    resolveDesktopSwipeDirection() {
       if (!this.desktopSwipeEligible) {
-        this.resetDesktopSwipeTracking();
         return "";
       }
-      const direction = resolveSwipeDirection(
+      return resolveSwipeDirection(
         (this.desktopSwipeLastX - this.desktopSwipeStartX) | 0,
         (this.desktopSwipeLastY - this.desktopSwipeStartY) | 0,
         Date.now() - (this.desktopSwipeStartMs || 0)
       );
-      this.resetDesktopSwipeTracking();
-      return direction;
     }
 
     getSwipeTargetProcess() {
@@ -2534,12 +2612,64 @@
       return null;
     }
 
-    queueSwipeKey(code) {
+    tapSwipeKey(code) {
       const target = this.getSwipeTargetProcess();
-      if (!target || typeof target.queueVirtualKey !== "function") {
+      if (!target || typeof target.tapVirtualKey !== "function") {
         return false;
       }
-      return !!target.queueVirtualKey(code);
+      return !!target.tapVirtualKey(code);
+    }
+
+    releaseDesktopSwipeMouse(event, touch) {
+      if (this.desktopSwipeMouseSuppressed) {
+        return;
+      }
+      this.forwardDesktopMouseEvent(
+        createSyntheticPointerEvent(event, touch, 0, 0),
+        0,
+        0x01,
+        false,
+        0,
+        0
+      );
+      this.desktopSwipeMouseSuppressed = true;
+    }
+
+    tryActivateHeldDesktopSwipe(event, touch) {
+      if (this.desktopSwipeHeldKey) {
+        return true;
+      }
+      const direction = this.resolveDesktopSwipeDirection();
+      if (!direction) {
+        return false;
+      }
+      const target = this.getSwipeTargetProcess();
+      if (!target || typeof target.pressVirtualKey !== "function") {
+        return false;
+      }
+      this.releaseDesktopSwipeMouse(event, touch);
+      if (!target.pressVirtualKey(direction)) {
+        return false;
+      }
+      this.desktopSwipeHeldKey = direction;
+      this.desktopSwipeTarget = target;
+      return true;
+    }
+
+    releaseHeldDesktopSwipeKey() {
+      if (!this.desktopSwipeHeldKey) {
+        return false;
+      }
+      const target = this.desktopSwipeTarget || this.getSwipeTargetProcess();
+      if (!target || typeof target.releaseVirtualKey !== "function") {
+        this.desktopSwipeHeldKey = "";
+        this.desktopSwipeTarget = null;
+        return false;
+      }
+      const ok = !!target.releaseVirtualKey(this.desktopSwipeHeldKey);
+      this.desktopSwipeHeldKey = "";
+      this.desktopSwipeTarget = null;
+      return ok;
     }
 
     beginDesktopTouchCapture(touch) {
@@ -2561,6 +2691,7 @@
       document.removeEventListener("touchend", this.boundDesktopTouchEnd);
       document.removeEventListener("touchcancel", this.boundDesktopTouchCancel);
       window.removeEventListener("blur", this.boundDesktopBlur);
+      this.releaseHeldDesktopSwipeKey();
       this.desktopTouchId = null;
       this.resetDesktopSwipeTracking();
     }
@@ -2569,19 +2700,21 @@
       if (this.desktopTouchId === null) {
         return;
       }
-      this.forwardDesktopMouseEvent(
-        createSyntheticPointerEvent(
-          null,
-          { clientX: this.desktopTouchClientX, clientY: this.desktopTouchClientY },
+      if (!this.desktopSwipeMouseSuppressed) {
+        this.forwardDesktopMouseEvent(
+          createSyntheticPointerEvent(
+            null,
+            { clientX: this.desktopTouchClientX, clientY: this.desktopTouchClientY },
+            0,
+            0
+          ),
+          0,
+          0x01,
+          false,
           0,
           0
-        ),
-        0,
-        0x01,
-        false,
-        0,
-        0
-      );
+        );
+      }
       this.endDesktopTouchCapture();
     }
 
@@ -2607,6 +2740,10 @@
         return;
       }
       this.recordDesktopTouch(touch);
+      if (this.tryActivateHeldDesktopSwipe(event, touch) || this.desktopSwipeMouseSuppressed) {
+        event.preventDefault();
+        return;
+      }
       this.handleDesktopMouseMove(createSyntheticPointerEvent(event, touch, 0x01, 0));
       event.preventDefault();
     }
@@ -2620,10 +2757,18 @@
         return;
       }
       this.recordDesktopTouch(touch);
-      const direction = this.consumeDesktopSwipeDirection();
+      if (this.desktopSwipeHeldKey) {
+        this.releaseHeldDesktopSwipeKey();
+        if (this.desktopSwipeMouseSuppressed) {
+          this.endDesktopTouchCapture();
+          event.preventDefault();
+          return;
+        }
+      }
+      const direction = this.resolveDesktopSwipeDirection();
       this.handleDesktopMouseUp(createSyntheticPointerEvent(event, touch, 0, 0));
       if (direction) {
-        this.queueSwipeKey(direction);
+        this.tapSwipeKey(direction);
       }
       this.endDesktopTouchCapture();
       event.preventDefault();
@@ -2633,6 +2778,7 @@
       if (this.desktopTouchId === null) {
         return;
       }
+      this.releaseHeldDesktopSwipeKey();
       this.resetDesktopSwipeTracking();
       this.cancelDesktopTouchCapture();
       event.preventDefault();
