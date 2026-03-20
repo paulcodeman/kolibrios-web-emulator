@@ -1,0 +1,20 @@
+# OS and editor metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Node/local dependency caches
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Project-generated diagnostics and captures
+artifacts/
+temp/
+*.log
+tmp-*
+*.tmp
+

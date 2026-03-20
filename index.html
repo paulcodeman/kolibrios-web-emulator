@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KolibriOS KEX Emulator</title>
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <div class="title-block">
+          <div class="title">KolibriOS KEX Emulator</div>
+          <div class="subtitle">Browser-first, GPU-backed canvas</div>
+        </div>
+        <div class="status" id="status">Idle</div>
+      </header>
+
+      <section class="controls">
+        <label class="file-picker">
+          <input id="fileInput" type="file" accept=".kex,.bin,.com" />
+          <span>Select .kex</span>
+        </label>
+        <button id="pickRootBtn" type="button">Pick FS Root</button>
+        <button id="clearRootBtn" type="button" disabled>Clear FS Root</button>
+        <div id="fsRootStatus" class="fs-root-status">FS root: not mounted</div>
+        <button id="runBtn" class="primary" disabled>Run</button>
+        <button id="stopBtn" disabled>Stop</button>
+        <label class="toggle">
+          <input id="traceSyscalls" type="checkbox" />
+          <span>Trace syscalls</span>
+        </label>
+        <label class="toggle">
+          <input id="traceImages" type="checkbox" />
+          <span>Trace images</span>
+        </label>
+        <label class="toggle">
+          <input id="traceOpcodes" type="checkbox" />
+          <span>Trace opcodes</span>
+        </label>
+      </section>
+
+      <section class="main">
+        <div class="screen-panel" id="screenPanel">
+          <div class="screen-title">Workspace</div>
+          <div class="workspace" id="workspace">
+            <div class="workspace-empty" id="workspaceEmpty">Run starts a new process window here.</div>
+          </div>
+          <div class="screen-footer" id="sessionInfo">Session idle</div>
+        </div>
+
+        <div class="side-panel">
+          <div class="card">
+            <div class="card-title">Image Info</div>
+            <pre id="info" class="mono">No image loaded.</pre>
+          </div>
+          <div class="card">
+            <div class="card-title">Log</div>
+            <pre id="log" class="mono">Ready.</pre>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script src="src/boot.js"></script>
+    <script src="src/vendor/lzma_worker-min.js"></script>
+    <script src="src/vendor/fflate-umd.js"></script>
+    <script src="src/core/utils.js"></script>
+    <script src="src/core/loader.js"></script>
+    <script src="src/gfx/text.js"></script>
+    <script src="src/gfx/kolibri-font-assets.js"></script>
+    <script src="src/gfx/kolibri-font.js"></script>
+    <script src="src/gfx/kolibri-skin-assets.js"></script>
+    <script src="src/gfx/kolibri-skin.js"></script>
+    <script src="src/gfx/surface.js"></script>
+    <script src="src/emulator/core-access.js"></script>
+    <script src="src/emulator/host-libs/registry.js"></script>
+    <script src="src/emulator/host-libs/http.obj.js"></script>
+    <script src="src/emulator/host-libs/proc_lib.obj.js"></script>
+    <script src="src/emulator/host-libs/cnv_png.obj.js"></script>
+    <script src="src/emulator/host-libs/libimg.obj.js"></script>
+    <script src="src/emulator/host-libs/libini.obj.js"></script>
+    <script src="src/emulator/host-libs/runtime.js"></script>
+    <script src="src/emulator/emulator-host.js"></script>
+    <script src="src/emulator/core-runtime.js"></script>
+    <script src="src/emulator/core-execute.js"></script>
+    <script src="src/emulator/emulator-syscalls.js"></script>
+    <script src="src/emulator/emulator.js"></script>
+    <script src="src/ui/browser-fs.js"></script>
+    <script src="src/ui/app-ui.js"></script>
+    <script src="src/ui/session-manager.js"></script>
+    <script src="src/app.js"></script>
+  </body>
+</html>

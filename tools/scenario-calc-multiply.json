@@ -1,0 +1,15 @@
+{
+  "name": "calc-multiply",
+  "timeoutMs": 2000,
+  "settleMs": 40,
+  "steps": [
+    { "action": "waitForButton", "label": "5", "timeoutMs": 2000 },
+    { "action": "clickButton", "label": "5" },
+    { "action": "assertNumber", "value": "5", "exact": false, "timeoutMs": 1800 },
+    { "action": "clickButton", "label": "*" },
+    { "action": "clickButton", "label": "3" },
+    { "action": "assertNumber", "value": "3", "exact": false, "timeoutMs": 1800 },
+    { "action": "clickButton", "label": "=" },
+    { "action": "assertNumber", "value": "15", "exact": false, "timeoutMs": 1800 }
+  ]
+}

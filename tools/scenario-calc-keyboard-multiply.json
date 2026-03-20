@@ -1,0 +1,15 @@
+{
+  "name": "calc-keyboard-multiply",
+  "timeoutMs": 2000,
+  "settleMs": 40,
+  "steps": [
+    { "action": "waitForButton", "label": "5", "timeoutMs": 2000 },
+    { "action": "pressKey", "ascii": 53, "scan": 6, "settleMs": 120 },
+    { "action": "assertNumber", "value": "5", "exact": false, "timeoutMs": 1800 },
+    { "action": "pressKey", "ascii": 42, "scan": 55, "settleMs": 120 },
+    { "action": "pressKey", "ascii": 51, "scan": 4, "settleMs": 120 },
+    { "action": "assertNumber", "value": "3", "exact": false, "timeoutMs": 1800 },
+    { "action": "pressKey", "ascii": 13, "scan": 28, "settleMs": 120 },
+    { "action": "assertNumber", "value": "15", "exact": false, "timeoutMs": 1800 }
+  ]
+}
