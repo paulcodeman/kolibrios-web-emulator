@@ -6833,13 +6833,10 @@
         if (!this.tscBase) {
           this.tscBase = Date.now();
         }
-        const elapsedMs = Math.max(0, Date.now() - this.tscBase);
-        const cpuFreqHz = typeof this.getReportedCpuFrequencyHz === "function"
-          ? BigInt(this.getReportedCpuFrequencyHz() >>> 0)
-          : 1000000000n;
-        const ticks = (BigInt(elapsedMs) * cpuFreqHz) / 1000n;
-        this.writeReg(REG.EAX, Number(ticks & 0xffffffffn) >>> 0);
-        this.writeReg(REG.EDX, Number((ticks >> 32n) & 0xffffffffn) >>> 0);
+        const t = (Date.now() - this.tscBase) >>> 0;
+        const ticks = (t * 1000) >>> 0;
+        this.writeReg(REG.EAX, ticks >>> 0);
+        this.writeReg(REG.EDX, 0);
         this.writeReg(REG.EIP, (addr + 2) >>> 0);
         return true;
       }
