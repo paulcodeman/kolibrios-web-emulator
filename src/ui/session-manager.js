@@ -1293,19 +1293,19 @@
       const pointer = this.getPointerInfo(event);
       const screen = this.manager.getWorkspacePointerPosition(event);
       const inside = insideOverride === undefined ? pointer.inside : !!insideOverride;
-      this.manager.broadcastMousePosition(screen.x, screen.y);
-      this.emulator.setMouseState(
-        pointer.x,
-        pointer.y,
+      this.manager.forwardGlobalMouseEvent(
+        screen.x,
+        screen.y,
         getDomButtonsMask(event.buttons),
-        inside,
         pressMask | 0,
         releaseMask | 0,
+        !!moved,
         wheelX | 0,
         wheelY | 0,
-        !!moved,
-        screen.x | 0,
-        screen.y | 0
+        {
+          primaryProcess: this,
+          primaryInside: inside
+        }
       );
     }
 
@@ -1364,16 +1364,19 @@
         return;
       }
       if (this.captureMode === "app" && !this.touchSwipeMouseSuppressed) {
-        this.emulator.setMouseState(
-          this.emulator.mouseX | 0,
-          this.emulator.mouseY | 0,
+        this.manager.forwardGlobalMouseEvent(
+          this.emulator.mouseScreenX | 0,
+          this.emulator.mouseScreenY | 0,
           0,
-          false,
           0,
           this.captureButtonMask | 0,
+          false,
           0,
           0,
-          false
+          {
+            primaryProcess: this,
+            primaryInside: false
+          }
         );
       }
       this.endCapture();
@@ -1619,13 +1622,22 @@
       const resizeHit = this.hitTestResize(pointer.x, pointer.y);
       if (resizeHit) {
         this.shellEl.style.cursor = getResizeCursor(resizeHit);
+        if (!this.stopped) {
+          this.forwardMouseEvent(event, 0, 0, true, 0, 0, pointer.inside);
+        }
         return;
       }
       const chromeHit = this.hitTestChrome(pointer.x, pointer.y);
       if (chromeHit === "titlebar") {
         this.shellEl.style.cursor = this.maximized ? "default" : "move";
+        if (!this.stopped) {
+          this.forwardMouseEvent(event, 0, 0, true, 0, 0, pointer.inside);
+        }
       } else if (chromeHit === "close" || chromeHit === "minimize") {
         this.shellEl.style.cursor = "default";
+        if (!this.stopped) {
+          this.forwardMouseEvent(event, 0, 0, true, 0, 0, pointer.inside);
+        }
       } else {
         this.shellEl.style.cursor = "default";
         if (!this.stopped) {
@@ -1657,10 +1669,6 @@
         return;
       }
       const pointer = this.getPointerInfo(event);
-      if (this.hitTestChrome(pointer.x, pointer.y)) {
-        event.preventDefault();
-        return;
-      }
       const wheelX = event.deltaX > 0 ? 1 : (event.deltaX < 0 ? -1 : 0);
       const wheelY = event.deltaY > 0 ? 1 : (event.deltaY < 0 ? -1 : 0);
       if (!wheelX && !wheelY) {
@@ -2622,32 +2630,86 @@
       });
     }
 
-    forwardDesktopMouseEvent(event, pressMask, releaseMask, moved, wheelX, wheelY) {
-      const pointer = this.getWorkspacePointerPosition(event);
-      const buttons = getDomButtonsMask(event.buttons);
-      const viewport = this.getViewportSize();
-      const inside =
-        pointer.x >= 0 &&
-        pointer.y >= 0 &&
-        pointer.x < (viewport.width | 0) &&
-        pointer.y < (viewport.height | 0);
-      this.broadcastMousePosition(pointer.x, pointer.y);
-      const targets = this.getDesktopInputProcesses();
-      for (let i = 0; i < targets.length; i += 1) {
-        targets[i].emulator.setMouseState(
-          pointer.x | 0,
-          pointer.y | 0,
+    getProcessMouseState(process, screenX, screenY) {
+      if (!process || process.removed || !process.emulator) {
+        return null;
+      }
+      const x = screenX | 0;
+      const y = screenY | 0;
+      if ((process.windowPositionMode | 0) === WINDOW_Z_DESKTOP || !process.emulator.windowDefined) {
+        const viewport = this.getViewportSize();
+        return {
+          x,
+          y,
+          screenX: x,
+          screenY: y,
+          inside:
+            x >= 0 &&
+            y >= 0 &&
+            x < (viewport.width | 0) &&
+            y < (viewport.height | 0)
+        };
+      }
+      const localX = (x - (process.actualX | 0)) | 0;
+      const localY = (y - (process.actualY | 0)) | 0;
+      const insideRect =
+        localX >= 0 &&
+        localY >= 0 &&
+        localX < (process.windowWidth | 0) &&
+        localY < (process.getVisibleHeight() | 0);
+      return {
+        x: localX,
+        y: localY,
+        screenX: x,
+        screenY: y,
+        inside: insideRect && process.pointInWindowShape(localX, localY)
+      };
+    }
+
+    forwardGlobalMouseEvent(screenX, screenY, buttons, pressMask, releaseMask, moved, wheelX, wheelY, options) {
+      const x = screenX | 0;
+      const y = screenY | 0;
+      const opts = options || {};
+      const primaryProcess = opts.primaryProcess || null;
+      const hasPrimaryInside = Object.prototype.hasOwnProperty.call(opts, "primaryInside");
+      const primaryInside = !!opts.primaryInside;
+      for (let i = 0; i < this.processes.length; i += 1) {
+        const process = this.processes[i];
+        if (!process || process.removed || !process.emulator || !process.emulator.running) {
+          continue;
+        }
+        const state = this.getProcessMouseState(process, x, y);
+        if (!state) {
+          continue;
+        }
+        process.emulator.setMouseState(
+          state.x | 0,
+          state.y | 0,
           buttons | 0,
-          inside,
+          process === primaryProcess && hasPrimaryInside ? primaryInside : !!state.inside,
           pressMask | 0,
           releaseMask | 0,
           wheelX | 0,
           wheelY | 0,
           !!moved,
-          pointer.x | 0,
-          pointer.y | 0
+          x,
+          y
         );
       }
+    }
+
+    forwardDesktopMouseEvent(event, pressMask, releaseMask, moved, wheelX, wheelY) {
+      const pointer = this.getWorkspacePointerPosition(event);
+      this.forwardGlobalMouseEvent(
+        pointer.x,
+        pointer.y,
+        getDomButtonsMask(event.buttons),
+        pressMask,
+        releaseMask,
+        moved,
+        wheelX,
+        wheelY
+      );
     }
 
     handleDesktopMouseDown(event) {
@@ -2943,25 +3005,24 @@
     }
 
     syncProcessMousePosition(process, screenX, screenY) {
-      if (!process || process.removed || !process.emulator) {
+      const state = this.getProcessMouseState(process, screenX, screenY);
+      if (!state || !process || !process.emulator) {
         return;
       }
-      const localX = (screenX - process.actualX) | 0;
-      const localY = (screenY - process.actualY) | 0;
-      const insideRect =
-        localX >= 0 &&
-        localY >= 0 &&
-        localX < (process.windowWidth | 0) &&
-        localY < (process.getVisibleHeight() | 0);
-      const inside = insideRect && process.pointInWindowShape(localX, localY);
       if (typeof process.emulator.setMousePosition === "function") {
-        process.emulator.setMousePosition(localX, localY, inside, screenX, screenY);
+        process.emulator.setMousePosition(
+          state.x | 0,
+          state.y | 0,
+          !!state.inside,
+          state.screenX | 0,
+          state.screenY | 0
+        );
       } else {
-        process.emulator.mouseX = localX;
-        process.emulator.mouseY = localY;
-        process.emulator.mouseScreenX = screenX | 0;
-        process.emulator.mouseScreenY = screenY | 0;
-        process.emulator.mouseInside = !!inside;
+        process.emulator.mouseX = state.x | 0;
+        process.emulator.mouseY = state.y | 0;
+        process.emulator.mouseScreenX = state.screenX | 0;
+        process.emulator.mouseScreenY = state.screenY | 0;
+        process.emulator.mouseInside = !!state.inside;
       }
     }
 

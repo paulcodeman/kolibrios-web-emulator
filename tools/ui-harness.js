@@ -1979,17 +1979,15 @@ class HeadlessUiHarness {
     }
     const screenX = x | 0;
     const screenY = y | 0;
-    const localX = (screenX - (process.actualX | 0)) | 0;
-    const localY = (screenY - (process.actualY | 0)) | 0;
-    process.emulator.setMouseState(localX, localY, 0, true, 0, 0, 0, 0, true, screenX, screenY);
+    this.forwardGlobalMouseState(screenX, screenY, 0, 0, 0, true, 0, 0);
     if (moveDelay > 0) {
       await sleep(moveDelay);
     }
-    process.emulator.setMouseState(localX, localY, 1, true, 1, 0, 0, 0, false, screenX, screenY);
+    this.forwardGlobalMouseState(screenX, screenY, 1, 1, 0, false, 0, 0);
     if (pressDelay > 0) {
       await sleep(pressDelay);
     }
-    process.emulator.setMouseState(localX, localY, 0, true, 0, 1, 0, 0, false, screenX, screenY);
+    this.forwardGlobalMouseState(screenX, screenY, 0, 0, 1, false, 0, 0);
     if (releaseDelay > 0) {
       await sleep(releaseDelay);
     }
@@ -2011,6 +2009,76 @@ class HeadlessUiHarness {
     });
   }
 
+  getProcessMouseState(process, screenX, screenY) {
+    if (!process || process.removed || !process.emulator) {
+      return null;
+    }
+    const x = screenX | 0;
+    const y = screenY | 0;
+    if ((process.windowPositionMode | 0) === WINDOW_Z_DESKTOP || !process.emulator.windowDefined) {
+      const viewport = this.getViewportSize();
+      return {
+        x,
+        y,
+        screenX: x,
+        screenY: y,
+        inside:
+          x >= 0 &&
+          y >= 0 &&
+          x < (viewport.width | 0) &&
+          y < (viewport.height | 0)
+      };
+    }
+    const localX = (x - (process.actualX | 0)) | 0;
+    const localY = (y - (process.actualY | 0)) | 0;
+    const width = process.surface ? (process.surface.width | 0) : this.baseWidth;
+    const height = process.surface ? (process.surface.height | 0) : this.baseHeight;
+    const insideRect = localX >= 0 && localY >= 0 && localX < width && localY < height;
+    let inside = insideRect;
+    const shape = process.windowShape;
+    if (inside && shape && shape.data instanceof Uint8Array) {
+      if (localX >= (shape.width | 0) || localY >= (shape.height | 0)) {
+        inside = false;
+      } else {
+        inside = !!shape.data[localY * (shape.width | 0) + localX];
+      }
+    }
+    return {
+      x: localX,
+      y: localY,
+      screenX: x,
+      screenY: y,
+      inside
+    };
+  }
+
+  forwardGlobalMouseState(screenX, screenY, buttons, pressMask, releaseMask, moved, wheelX, wheelY) {
+    const x = screenX | 0;
+    const y = screenY | 0;
+    for (const process of this.processes) {
+      if (!process || process.removed || !process.emulator || !process.emulator.running) {
+        continue;
+      }
+      const state = this.getProcessMouseState(process, x, y);
+      if (!state) {
+        continue;
+      }
+      process.emulator.setMouseState(
+        state.x | 0,
+        state.y | 0,
+        buttons | 0,
+        !!state.inside,
+        pressMask | 0,
+        releaseMask | 0,
+        wheelX | 0,
+        wheelY | 0,
+        !!moved,
+        x,
+        y
+      );
+    }
+  }
+
   async clickDesktop(x, y, options) {
     const opts = options || {};
     const moveDelay = opts.moveDelayMs === undefined ? this.actionDelayMs : Math.max(0, opts.moveDelayMs | 0);
@@ -2019,27 +2087,13 @@ class HeadlessUiHarness {
     const settleDelay = opts.settleMs === undefined ? this.actionDelayMs : Math.max(0, opts.settleMs | 0);
     this.assertRunning();
     const targets = this.getDesktopInputProcesses();
-    if (!targets.length) {
-      throw new Error("No desktop processes are available to receive mouse input.");
+    if (!targets.length && !this.processes.length) {
+      throw new Error("No processes are available to receive mouse input.");
     }
     const screenX = x | 0;
     const screenY = y | 0;
     const send = (buttons, pressMask, releaseMask, moved) => {
-      for (const process of targets) {
-        process.emulator.setMouseState(
-          screenX,
-          screenY,
-          buttons | 0,
-          true,
-          pressMask | 0,
-          releaseMask | 0,
-          0,
-          0,
-          !!moved,
-          screenX,
-          screenY
-        );
-      }
+      this.forwardGlobalMouseState(screenX, screenY, buttons | 0, pressMask | 0, releaseMask | 0, !!moved, 0, 0);
     };
     send(0, 0, 0, true);
     if (moveDelay > 0) {
