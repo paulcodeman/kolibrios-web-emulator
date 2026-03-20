@@ -2858,6 +2858,12 @@
       },
 
       getReportedFreeRamBytes() {
+        if (this.hostSession && typeof this.hostSession.getReportedFreeRamBytes === "function") {
+          const hostFree = Number(this.hostSession.getReportedFreeRamBytes());
+          if (hostFree > 0) {
+            return Math.max(0, Math.min(0xffffffff, Math.floor(hostFree))) >>> 0;
+          }
+        }
         const cap = this.getProcessMemoryCapacity();
         if (!cap) {
           return 0;
@@ -2873,6 +2879,12 @@
       },
 
       getReportedTotalRamBytes() {
+        if (this.hostSession && typeof this.hostSession.getReportedTotalRamBytes === "function") {
+          const hostTotal = Number(this.hostSession.getReportedTotalRamBytes());
+          if (hostTotal > 0) {
+            return Math.max(0, Math.min(0xffffffff, Math.floor(hostTotal))) >>> 0;
+          }
+        }
         const cap = this.getProcessMemoryCapacity();
         if (!cap) {
           return 0;
@@ -3614,10 +3626,7 @@
             return;
           }
           case 5:
-            if (!this.cpuFreqHz) {
-              this.cpuFreqHz = 1000000000;
-            }
-            this.writeReg(REG.EAX, this.cpuFreqHz >>> 0);
+            this.writeReg(REG.EAX, this.getReportedCpuFrequencyHz() >>> 0);
             return;
           case 6:
             this.writeReg(REG.EAX, 2);
@@ -4566,8 +4575,14 @@
             break;
           }
           case 3:
-            this.writeReg(REG.EAX, 0);
-            this.writeReg(REG.EDX, 0);
+            {
+              const value = typeof this.readReportedMsr === "function"
+                ? this.readReportedMsr(this.readReg(REG.EDX) >>> 0)
+                : { low: 0, high: 0 };
+              this.writeReg(REG.EAX, value && value.low !== undefined ? (value.low >>> 0) : 0);
+              this.writeReg(REG.EBX, value && value.high !== undefined ? (value.high >>> 0) : 0);
+              this.writeReg(REG.EDX, value && value.high !== undefined ? (value.high >>> 0) : 0);
+            }
             break;
           case 4:
             this.writeReg(REG.EAX, 0);

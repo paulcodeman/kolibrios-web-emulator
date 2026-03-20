@@ -52,6 +52,27 @@
     return decodeCp866Z(source.subarray(0, end));
   }
 
+  function packAsciiDword(text, offset) {
+    let value = 0;
+    const source = String(text || "");
+    const start = offset | 0;
+    for (let i = 0; i < 4; i += 1) {
+      const index = start + i;
+      const code = index < source.length ? (source.charCodeAt(index) & 0x7f) : 0x20;
+      value |= (code & 0xff) << (i * 8);
+    }
+    return value >>> 0;
+  }
+
+  function encodeCpuidBrandDwords(text) {
+    const source = String(text || "").slice(0, 48).padEnd(48, " ");
+    const out = [];
+    for (let offset = 0; offset < 48; offset += 4) {
+      out.push(packAsciiDword(source, offset));
+    }
+    return out;
+  }
+
   function installEmulatorHost(Emulator, shared) {
     if (!Emulator || !Emulator.prototype) {
       throw new Error("installEmulatorHost requires an Emulator class.");
@@ -128,6 +149,153 @@
         ) ? performance.now() : Date.now();
       },
 
+      getReportedCpuFrequencyHz() {
+        let hz = this.cpuFreqHz && Number.isFinite(this.cpuFreqHz)
+          ? Number(this.cpuFreqHz)
+          : 0;
+        if (!(hz > 0) && this.hostSession && typeof this.hostSession.getReportedCpuFrequencyHz === "function") {
+          hz = Number(this.hostSession.getReportedCpuFrequencyHz());
+        }
+        if (!(hz > 0)) {
+          hz = 2400000000;
+        }
+        hz = Math.max(1, Math.min(0xffffffff, Math.round(hz)));
+        this.cpuFreqHz = hz >>> 0;
+        return this.cpuFreqHz >>> 0;
+      },
+
+      getReportedCpuidLeaf(leaf, subleaf) {
+        const requestLeaf = leaf >>> 0;
+        const requestSubleaf = subleaf >>> 0;
+        if (this.hostSession && typeof this.hostSession.getReportedCpuidLeaf === "function") {
+          const hostLeaf = this.hostSession.getReportedCpuidLeaf(requestLeaf >>> 0, requestSubleaf >>> 0);
+          if (hostLeaf && typeof hostLeaf === "object") {
+            return {
+              eax: (hostLeaf.eax >>> 0),
+              ebx: (hostLeaf.ebx >>> 0),
+              ecx: (hostLeaf.ecx >>> 0),
+              edx: (hostLeaf.edx >>> 0)
+            };
+          }
+        }
+        if (!this.reportedCpuidCache) {
+          const stepping = 3;
+          const model = 0x0f;
+          const family = 0x06;
+          const processorType = 0;
+          const extModel = 0;
+          const extFamily = 0;
+          const leaf1Eax = (
+            (stepping & 0x0f) |
+            ((model & 0x0f) << 4) |
+            ((family & 0x0f) << 8) |
+            ((processorType & 0x03) << 12) |
+            ((extModel & 0x0f) << 16) |
+            ((extFamily & 0xff) << 20)
+          ) >>> 0;
+          const leaf1Edx = (
+            (1 << 4) |
+            (1 << 5) |
+            (1 << 8) |
+            (1 << 15) |
+            (1 << 23) |
+            (1 << 24) |
+            (1 << 25) |
+            (1 << 26)
+          ) >>> 0;
+          const brandDwords = encodeCpuidBrandDwords("KolibriOS Web Emulator");
+          this.reportedCpuidCache = {
+            leaf1Eax,
+            leaf1Ebx: ((8 << 8) | (1 << 16)) >>> 0,
+            leaf1Ecx: 0,
+            leaf1Edx,
+            brandDwords
+          };
+        }
+        const cache = this.reportedCpuidCache;
+        switch (requestLeaf) {
+          case 0:
+            return {
+              eax: 1,
+              ebx: 0x756e6547,
+              ecx: 0x6c65746e,
+              edx: 0x49656e69
+            };
+          case 1:
+            return {
+              eax: cache.leaf1Eax >>> 0,
+              ebx: cache.leaf1Ebx >>> 0,
+              ecx: cache.leaf1Ecx >>> 0,
+              edx: cache.leaf1Edx >>> 0
+            };
+          case 0x80000000:
+            return {
+              eax: 0x80000004,
+              ebx: 0,
+              ecx: 0,
+              edx: 0
+            };
+          case 0x80000001:
+          case 0x80000007:
+            return {
+              eax: 0,
+              ebx: 0,
+              ecx: 0,
+              edx: 0
+            };
+          case 0x80000002:
+          case 0x80000003:
+          case 0x80000004: {
+            const index = ((requestLeaf - 0x80000002) * 4) >>> 0;
+            return {
+              eax: cache.brandDwords[index] >>> 0,
+              ebx: cache.brandDwords[index + 1] >>> 0,
+              ecx: cache.brandDwords[index + 2] >>> 0,
+              edx: cache.brandDwords[index + 3] >>> 0
+            };
+          }
+          default:
+            return {
+              eax: 0,
+              ebx: 0,
+              ecx: 0,
+              edx: 0
+            };
+        }
+      },
+
+      readReportedMsr(msr) {
+        const reg = msr >>> 0;
+        if (this.hostSession && typeof this.hostSession.readReportedMsr === "function") {
+          const value = this.hostSession.readReportedMsr(reg >>> 0);
+          if (value && typeof value === "object") {
+            return {
+              low: value.low >>> 0,
+              high: value.high >>> 0
+            };
+          }
+        }
+        const cpuFreqHz = this.getReportedCpuFrequencyHz();
+        const ratio100 = Math.max(1, Math.min(0x1f, Math.round(cpuFreqHz / 100000000)));
+        switch (reg) {
+          case 0x2a:
+            return {
+              low: (ratio100 << 22) >>> 0,
+              high: 0
+            };
+          case 0x2c:
+            return {
+              low: (ratio100 << 24) >>> 0,
+              high: 0
+            };
+          default:
+            return {
+              low: 0,
+              high: 0
+            };
+        }
+      },
+
       trimCpuBusySamples(nowMs) {
         if (!Array.isArray(this.cpuBusySamples)) {
           this.cpuBusySamples = [];
@@ -168,9 +336,7 @@
           busyMs += Math.max(0, now - Number(this.cpuBusyActiveStartMs));
         }
         busyMs = Math.max(0, Math.min(1000, busyMs));
-        const cpuFreqHz = this.cpuFreqHz && Number.isFinite(this.cpuFreqHz)
-          ? Math.max(1, Number(this.cpuFreqHz))
-          : 1000000000;
+        const cpuFreqHz = this.getReportedCpuFrequencyHz();
         return Math.round((busyMs / 1000) * cpuFreqHz) >>> 0;
       },
 

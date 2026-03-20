@@ -21,6 +21,8 @@
   const MIN_WINDOW_HEIGHT = DEFAULT_TITLEBAR_HEIGHT + 8;
   const MAX_WINDOW_WIDTH = 4096;
   const MAX_WINDOW_HEIGHT = 4096;
+  const DEFAULT_CPU_FREQ_HZ = 2400000000;
+  const DEFAULT_SYSTEM_RAM_BYTES = 512 * 1024 * 1024;
   const WINDOW_STATE_MAXIMIZED = 0x01;
   const WINDOW_STATE_USED = 0x80;
   const WINDOW_STATE_MINIMIZED = 0x02;
@@ -2282,7 +2284,86 @@
     }
 
     getIdleCount() {
-      return 0;
+      const cpuFreqHz = this.getReportedCpuFrequencyHz();
+      let busy = 0;
+      for (let i = 0; i < this.processes.length; i += 1) {
+        const process = this.processes[i];
+        if (!process || process.removed || !process.emulator || typeof process.emulator.getReportedCpuUsage !== "function") {
+          continue;
+        }
+        busy += process.emulator.getReportedCpuUsage() >>> 0;
+        if (busy >= cpuFreqHz) {
+          return 0;
+        }
+      }
+      return Math.max(0, cpuFreqHz - busy) >>> 0;
+    }
+
+    getReportedCpuFrequencyHz() {
+      let hz = 0;
+      const config = KosEmu && KosEmu.config ? KosEmu.config : null;
+      if (config && Number.isFinite(Number(config.cpuFreqHz))) {
+        hz = Number(config.cpuFreqHz);
+      }
+      if (!(hz > 0)) {
+        hz = DEFAULT_CPU_FREQ_HZ;
+      }
+      return Math.max(1, Math.min(0xffffffff, Math.round(hz))) >>> 0;
+    }
+
+    getApproxProcessMemoryBytes(process) {
+      const emulator = process && process.emulator ? process.emulator : null;
+      if (!emulator) {
+        return 0;
+      }
+      let committed = Math.max(
+        emulator.processReservedSize >>> 0,
+        emulator.stackBase >>> 0,
+        emulator.image && emulator.image.header ? (emulator.image.header.memorySize >>> 0) : 0
+      ) >>> 0;
+      if (emulator.heapEnabled) {
+        committed = Math.max(
+          committed >>> 0,
+          emulator.heapTop >>> 0,
+          emulator.heapLowTop >>> 0
+        ) >>> 0;
+      }
+      if (!committed) {
+        committed = 0x10000;
+      }
+      return ((committed + 0xfff) & ~0xfff) >>> 0;
+    }
+
+    getReportedTotalRamBytes() {
+      let total = 0;
+      if (typeof navigator !== "undefined" && navigator && Number.isFinite(Number(navigator.deviceMemory))) {
+        total = Math.round(Number(navigator.deviceMemory) * 1024 * 1024 * 1024);
+      }
+      const used = this.processes.reduce((sum, process) => {
+        if (!process || process.removed) {
+          return sum;
+        }
+        return sum + this.getApproxProcessMemoryBytes(process);
+      }, 0);
+      if (!(total > 0)) {
+        total = Math.max(DEFAULT_SYSTEM_RAM_BYTES, used + (64 * 1024 * 1024));
+      }
+      total = Math.max(total, used + (64 * 1024 * 1024));
+      return Math.max(1, Math.min(0xffffffff, Math.round(total))) >>> 0;
+    }
+
+    getReportedFreeRamBytes() {
+      const total = this.getReportedTotalRamBytes();
+      const used = Math.min(
+        total >>> 0,
+        this.processes.reduce((sum, process) => {
+          if (!process || process.removed) {
+            return sum;
+          }
+          return sum + this.getApproxProcessMemoryBytes(process);
+        }, 0)
+      ) >>> 0;
+      return Math.max(0, total - used) >>> 0;
     }
 
     getDesktopBackgroundInfo() {

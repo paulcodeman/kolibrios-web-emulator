@@ -1,8 +1,12 @@
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const vm = require("vm");
 const { createNodeFileProviders } = require("./kos-fs");
 const { writeSurfacePng } = require("./surface-snapshot");
+
+const DEFAULT_CPU_FREQ_HZ = 2400000000;
+const DEFAULT_SYSTEM_RAM_BYTES = 512 * 1024 * 1024;
 
 const REG = {
   EAX: 0,
@@ -664,7 +668,102 @@ class HeadlessUiHarness {
   }
 
   getIdleCount() {
-    return 0;
+    const cpuFreqHz = this.getReportedCpuFrequencyHz();
+    let busy = 0;
+    for (let i = 0; i < this.processes.length; i += 1) {
+      const process = this.processes[i];
+      if (!process || process.removed || !process.emulator || typeof process.emulator.getReportedCpuUsage !== "function") {
+        continue;
+      }
+      busy += process.emulator.getReportedCpuUsage() >>> 0;
+      if (busy >= cpuFreqHz) {
+        return 0;
+      }
+    }
+    return Math.max(0, cpuFreqHz - busy) >>> 0;
+  }
+
+  getReportedCpuFrequencyHz() {
+    let hz = 0;
+    try {
+      const cpus = os.cpus();
+      if (Array.isArray(cpus) && cpus.length && Number.isFinite(Number(cpus[0].speed))) {
+        hz = Number(cpus[0].speed) * 1000000;
+      }
+    } catch (err) {
+      hz = 0;
+    }
+    if (!(hz > 0)) {
+      hz = DEFAULT_CPU_FREQ_HZ;
+    }
+    return Math.max(1, Math.min(0xffffffff, Math.round(hz))) >>> 0;
+  }
+
+  getApproxProcessMemoryBytes(process) {
+    const emulator = process && process.emulator ? process.emulator : null;
+    if (!emulator) {
+      return 0;
+    }
+    let committed = Math.max(
+      emulator.processReservedSize >>> 0,
+      emulator.stackBase >>> 0,
+      emulator.image && emulator.image.header ? (emulator.image.header.memorySize >>> 0) : 0
+    ) >>> 0;
+    if (emulator.heapEnabled) {
+      committed = Math.max(
+        committed >>> 0,
+        emulator.heapTop >>> 0,
+        emulator.heapLowTop >>> 0
+      ) >>> 0;
+    }
+    if (!committed) {
+      committed = 0x10000;
+    }
+    return ((committed + 0xfff) & ~0xfff) >>> 0;
+  }
+
+  getReportedTotalRamBytes() {
+    let total = 0;
+    try {
+      total = Number(os.totalmem()) || 0;
+    } catch (err) {
+      total = 0;
+    }
+    const used = this.processes.reduce((sum, process) => {
+      if (!process || process.removed) {
+        return sum;
+      }
+      return sum + this.getApproxProcessMemoryBytes(process);
+    }, 0);
+    if (!(total > 0)) {
+      total = Math.max(DEFAULT_SYSTEM_RAM_BYTES, used + (64 * 1024 * 1024));
+    }
+    total = Math.max(total, used + (64 * 1024 * 1024));
+    return Math.max(1, Math.min(0xffffffff, Math.round(total))) >>> 0;
+  }
+
+  getReportedFreeRamBytes() {
+    let free = 0;
+    try {
+      free = Number(os.freemem()) || 0;
+    } catch (err) {
+      free = 0;
+    }
+    if (!(free > 0)) {
+      const total = this.getReportedTotalRamBytes();
+      const used = Math.min(
+        total >>> 0,
+        this.processes.reduce((sum, process) => {
+          if (!process || process.removed) {
+            return sum;
+          }
+          return sum + this.getApproxProcessMemoryBytes(process);
+        }, 0)
+      ) >>> 0;
+      return Math.max(0, total - used) >>> 0;
+    }
+    const total = this.getReportedTotalRamBytes();
+    return Math.max(0, Math.min(total >>> 0, Math.round(free))) >>> 0;
   }
 
   getDesktopBackgroundInfo() {

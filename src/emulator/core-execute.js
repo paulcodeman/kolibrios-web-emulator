@@ -6833,31 +6833,26 @@
         if (!this.tscBase) {
           this.tscBase = Date.now();
         }
-        const t = (Date.now() - this.tscBase) >>> 0;
-        const ticks = (t * 1000) >>> 0;
-        this.writeReg(REG.EAX, ticks >>> 0);
-        this.writeReg(REG.EDX, 0);
+        const elapsedMs = Math.max(0, Date.now() - this.tscBase);
+        const cpuFreqHz = typeof this.getReportedCpuFrequencyHz === "function"
+          ? BigInt(this.getReportedCpuFrequencyHz() >>> 0)
+          : 1000000000n;
+        const ticks = (BigInt(elapsedMs) * cpuFreqHz) / 1000n;
+        this.writeReg(REG.EAX, Number(ticks & 0xffffffffn) >>> 0);
+        this.writeReg(REG.EDX, Number((ticks >> 32n) & 0xffffffffn) >>> 0);
         this.writeReg(REG.EIP, (addr + 2) >>> 0);
         return true;
       }
       if (op2 === 0xa2) {
         const eax = this.readReg(REG.EAX) >>> 0;
-        if (eax === 0) {
-          this.writeReg(REG.EAX, 1);
-          this.writeReg(REG.EBX, 0x756e6547);
-          this.writeReg(REG.EDX, 0x49656e69);
-          this.writeReg(REG.ECX, 0x6c65746e);
-        } else if (eax === 1) {
-          this.writeReg(REG.EAX, 0);
-          this.writeReg(REG.EBX, 0);
-          this.writeReg(REG.ECX, 0);
-          this.writeReg(REG.EDX, 0);
-        } else {
-          this.writeReg(REG.EAX, 0);
-          this.writeReg(REG.EBX, 0);
-          this.writeReg(REG.ECX, 0);
-          this.writeReg(REG.EDX, 0);
-        }
+        const ecx = this.readReg(REG.ECX) >>> 0;
+        const leaf = typeof this.getReportedCpuidLeaf === "function"
+          ? this.getReportedCpuidLeaf(eax >>> 0, ecx >>> 0)
+          : null;
+        this.writeReg(REG.EAX, leaf ? (leaf.eax >>> 0) : 0);
+        this.writeReg(REG.EBX, leaf ? (leaf.ebx >>> 0) : 0);
+        this.writeReg(REG.ECX, leaf ? (leaf.ecx >>> 0) : 0);
+        this.writeReg(REG.EDX, leaf ? (leaf.edx >>> 0) : 0);
         this.writeReg(REG.EIP, (addr + 2) >>> 0);
         return true;
       }
