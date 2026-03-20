@@ -1361,13 +1361,14 @@
         }
       },
 
-      requestYield(delayMs, mode) {
+      requestYield(delayMs, mode, options) {
+        const skipPresentFlush = !!(options && options.skipPresentFlush);
         this.yieldRequested = true;
         this.yieldMode = mode ? String(mode) : "yield";
         if (delayMs > this.yieldDelay) {
           this.yieldDelay = delayMs;
         }
-        if (this.surfaceDirty && !this.inRedraw) {
+        if (!skipPresentFlush && this.surfaceDirty && !this.inRedraw) {
           this.presentIfNeeded(true);
         }
       },
@@ -1379,7 +1380,9 @@
         if (!forceWake && this.timer && this.yieldMode === "sleep") {
           return;
         }
-        if (this.timer) {
+        if (typeof this.cancelScheduledStep === "function") {
+          this.cancelScheduledStep();
+        } else if (this.timer) {
           clearTimeout(this.timer);
           this.timer = null;
         }

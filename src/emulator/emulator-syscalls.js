@@ -4230,16 +4230,29 @@
         if (this.inRedraw && !force) {
           return;
         }
+        const canYieldForPresent =
+          this.running &&
+          !this.yieldRequested &&
+          !this.inRedraw &&
+          this.windowDefined &&
+          (this.useImmediateScheduler || typeof requestAnimationFrame === "function") &&
+          typeof this.requestYield === "function";
         const now =
           typeof performance !== "undefined" && typeof performance.now === "function"
             ? performance.now()
             : Date.now();
         if (!force && now - this.lastPresentAt < 16) {
+          if (canYieldForPresent) {
+            this.requestYield(0, "present", { skipPresentFlush: true });
+          }
           return;
         }
         this.lastPresentAt = now;
         this.surface.present();
         this.surfaceDirty = false;
+        if (canYieldForPresent) {
+          this.requestYield(0, "present", { skipPresentFlush: true });
+        }
       },
 
       sysStyleSettings() {

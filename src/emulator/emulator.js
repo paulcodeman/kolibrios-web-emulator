@@ -834,6 +834,7 @@ class Emulator {
     this.minMemSize = 16 * 1024 * 1024;
     this.running = false;
     this.timer = null;
+    this.timerKind = "";
     this.immediatePort = null;
     this.immediatePending = false;
     const isNodeLike =
@@ -1332,10 +1333,7 @@ class Emulator {
     const finalReason = reason ? String(reason) : (this.lastStopReason || "stopped");
     this.lastStopReason = finalReason;
     this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+    this.cancelScheduledStep();
     this.immediatePending = false;
     if (typeof this.syncOwnedNamedMemoryAreas === "function") {
       this.syncOwnedNamedMemoryAreas();
@@ -1496,10 +1494,21 @@ class Emulator {
 
   scheduleStep(delay) {
     if (delay > 0 || !this.useImmediateScheduler) {
+      this.timerKind = "timeout";
       this.timer = setTimeout(() => {
         this.timer = null;
+        this.timerKind = "";
         this.step();
       }, delay);
+      return;
+    }
+    if (this.yieldMode === "present" && typeof requestAnimationFrame === "function") {
+      this.timerKind = "raf";
+      this.timer = requestAnimationFrame(() => {
+        this.timer = null;
+        this.timerKind = "";
+        this.step();
+      });
       return;
     }
     if (!this.immediatePort) {
@@ -1517,11 +1526,25 @@ class Emulator {
     this.immediatePort.postMessage(0);
   }
 
+  cancelScheduledStep() {
+    if (!this.timer) {
+      return;
+    }
+    if (this.timerKind === "raf" && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(this.timer);
+    } else {
+      clearTimeout(this.timer);
+    }
+    this.timer = null;
+    this.timerKind = "";
+  }
+
   step() {
     if (!this.running) {
       return;
     }
     this.timer = null;
+    this.timerKind = "";
     this.stepInterpreter();
   }
 
