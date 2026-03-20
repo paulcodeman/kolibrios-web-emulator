@@ -348,6 +348,59 @@
     return (buttons | 0) & 0x1f;
   }
 
+  function findTouchInList(touchList, identifier) {
+    if (!touchList || identifier === null || identifier === undefined) {
+      return null;
+    }
+    const targetId = identifier | 0;
+    for (let i = 0; i < touchList.length; i += 1) {
+      const touch = touchList[i];
+      if (touch && (touch.identifier | 0) === targetId) {
+        return touch;
+      }
+    }
+    return null;
+  }
+
+  function getRelevantTouch(event, identifier) {
+    if (!event) {
+      return null;
+    }
+    if (identifier !== null && identifier !== undefined) {
+      return (
+        findTouchInList(event.changedTouches, identifier) ||
+        findTouchInList(event.touches, identifier) ||
+        findTouchInList(event.targetTouches, identifier) ||
+        null
+      );
+    }
+    if (event.changedTouches && event.changedTouches.length) {
+      return event.changedTouches[0];
+    }
+    if (event.touches && event.touches.length) {
+      return event.touches[0];
+    }
+    if (event.targetTouches && event.targetTouches.length) {
+      return event.targetTouches[0];
+    }
+    return null;
+  }
+
+  function createSyntheticPointerEvent(sourceEvent, touch, buttons, button) {
+    const source = sourceEvent || null;
+    return {
+      clientX: touch ? (touch.clientX | 0) : 0,
+      clientY: touch ? (touch.clientY | 0) : 0,
+      button: button === undefined ? 0 : (button | 0),
+      buttons: buttons === undefined ? 0 : (buttons | 0),
+      preventDefault() {
+        if (source && typeof source.preventDefault === "function") {
+          source.preventDefault();
+        }
+      }
+    };
+  }
+
   function getSkinButtonRect(button, windowWidth) {
     if (!button || (button.width | 0) <= 0 || (button.height | 0) <= 0) {
       return null;
@@ -556,8 +609,12 @@
       this.displayReady = false;
       this.controlKeyMask = 0;
       this.windowPositionMode = WINDOW_Z_NORMAL;
+      this.activeTouchId = null;
       this.boundDocMouseMove = (event) => this.handleDocumentMouseMove(event);
       this.boundDocMouseUp = (event) => this.handleDocumentMouseUp(event);
+      this.boundDocTouchMove = (event) => this.handleDocumentTouchMove(event);
+      this.boundDocTouchEnd = (event) => this.handleDocumentTouchEnd(event);
+      this.boundDocTouchCancel = (event) => this.handleDocumentTouchCancel(event);
       this.boundDocBlur = () => this.cancelCapture();
     }
 
@@ -606,6 +663,7 @@
       this.shellEl.addEventListener("mousemove", (event) => this.handleMouseMove(event));
       this.shellEl.addEventListener("mouseup", (event) => this.handleMouseUp(event));
       this.shellEl.addEventListener("mouseleave", (event) => this.handleMouseLeave(event));
+      this.shellEl.addEventListener("touchstart", (event) => this.handleTouchStart(event), { passive: false });
       this.shellEl.addEventListener("wheel", (event) => this.handleWheel(event), { passive: false });
       this.shellEl.addEventListener("contextmenu", (event) => event.preventDefault());
       this.shellEl.addEventListener("dblclick", (event) => this.handleDoubleClick(event));
@@ -1217,18 +1275,25 @@
       }
       document.addEventListener("mousemove", this.boundDocMouseMove);
       document.addEventListener("mouseup", this.boundDocMouseUp);
+      document.addEventListener("touchmove", this.boundDocTouchMove, { passive: false });
+      document.addEventListener("touchend", this.boundDocTouchEnd, { passive: false });
+      document.addEventListener("touchcancel", this.boundDocTouchCancel, { passive: false });
       window.addEventListener("blur", this.boundDocBlur);
     }
 
     endCapture() {
       document.removeEventListener("mousemove", this.boundDocMouseMove);
       document.removeEventListener("mouseup", this.boundDocMouseUp);
+      document.removeEventListener("touchmove", this.boundDocTouchMove);
+      document.removeEventListener("touchend", this.boundDocTouchEnd);
+      document.removeEventListener("touchcancel", this.boundDocTouchCancel);
       window.removeEventListener("blur", this.boundDocBlur);
       this.captureMode = "";
       this.captureButtonMask = 0;
       this.resizeEdge = "";
       this.pressedSystemButton = "";
       this.pressedSystemHot = false;
+      this.activeTouchId = null;
       if (this.shellEl) {
         this.shellEl.style.cursor = "default";
       }
@@ -1253,6 +1318,22 @@
         );
       }
       this.endCapture();
+    }
+
+    handleTouchStart(event) {
+      if (this.removed || this.activeTouchId !== null) {
+        event.preventDefault();
+        return;
+      }
+      const touch = getRelevantTouch(event, null);
+      if (!touch) {
+        return;
+      }
+      this.activeTouchId = touch.identifier | 0;
+      this.handleMouseDown(createSyntheticPointerEvent(event, touch, 0x01, 0));
+      if (!this.captureMode) {
+        this.activeTouchId = null;
+      }
     }
 
     handleMouseDown(event) {
@@ -1435,6 +1516,43 @@
           this.endCapture();
         }
       }
+    }
+
+    handleDocumentTouchMove(event) {
+      if (this.activeTouchId === null) {
+        return;
+      }
+      const touch = getRelevantTouch(event, this.activeTouchId);
+      if (!touch) {
+        return;
+      }
+      this.handleDocumentMouseMove(createSyntheticPointerEvent(
+        event,
+        touch,
+        this.captureButtonMask || 0x01,
+        0
+      ));
+      event.preventDefault();
+    }
+
+    handleDocumentTouchEnd(event) {
+      if (this.activeTouchId === null) {
+        return;
+      }
+      const touch = getRelevantTouch(event, this.activeTouchId);
+      if (!touch) {
+        return;
+      }
+      this.handleDocumentMouseUp(createSyntheticPointerEvent(event, touch, 0, 0));
+      event.preventDefault();
+    }
+
+    handleDocumentTouchCancel(event) {
+      if (this.activeTouchId === null) {
+        return;
+      }
+      this.cancelCapture();
+      event.preventDefault();
     }
 
     performSystemButton(button) {
@@ -1676,12 +1794,20 @@
       this.boundDesktopMouseUp = (event) => this.handleDesktopMouseUp(event);
       this.boundDesktopMouseLeave = (event) => this.handleDesktopMouseLeave(event);
       this.boundDesktopWheel = (event) => this.handleDesktopWheel(event);
+      this.desktopTouchId = null;
+      this.desktopTouchClientX = 0;
+      this.desktopTouchClientY = 0;
+      this.boundDesktopTouchMove = (event) => this.handleDocumentDesktopTouchMove(event);
+      this.boundDesktopTouchEnd = (event) => this.handleDocumentDesktopTouchEnd(event);
+      this.boundDesktopTouchCancel = (event) => this.handleDocumentDesktopTouchCancel(event);
+      this.boundDesktopBlur = () => this.cancelDesktopTouchCapture();
       this.workspaceEl.addEventListener("mousemove", this.boundWorkspaceMouseMove);
       window.addEventListener("resize", this.boundWindowResize);
       this.desktopCanvasEl.addEventListener("mousedown", this.boundDesktopMouseDown);
       this.desktopCanvasEl.addEventListener("mousemove", this.boundDesktopMouseMove);
       this.desktopCanvasEl.addEventListener("mouseup", this.boundDesktopMouseUp);
       this.desktopCanvasEl.addEventListener("mouseleave", this.boundDesktopMouseLeave);
+      this.desktopCanvasEl.addEventListener("touchstart", (event) => this.handleDesktopTouchStart(event), { passive: false });
       this.desktopCanvasEl.addEventListener("wheel", this.boundDesktopWheel, { passive: false });
       this.desktopCanvasEl.addEventListener("contextmenu", (event) => event.preventDefault());
       this.resetScreenWorkArea();
@@ -2206,6 +2332,103 @@
     handleDesktopWheel(event) {
       event.preventDefault();
       this.forwardDesktopMouseEvent(event, 0, 0, false, 0, -(event.deltaY | 0));
+    }
+
+    recordDesktopTouch(touch) {
+      if (!touch) {
+        return;
+      }
+      this.desktopTouchClientX = touch.clientX | 0;
+      this.desktopTouchClientY = touch.clientY | 0;
+    }
+
+    beginDesktopTouchCapture(touch) {
+      if (!touch) {
+        return false;
+      }
+      this.desktopTouchId = touch.identifier | 0;
+      this.recordDesktopTouch(touch);
+      document.addEventListener("touchmove", this.boundDesktopTouchMove, { passive: false });
+      document.addEventListener("touchend", this.boundDesktopTouchEnd, { passive: false });
+      document.addEventListener("touchcancel", this.boundDesktopTouchCancel, { passive: false });
+      window.addEventListener("blur", this.boundDesktopBlur);
+      return true;
+    }
+
+    endDesktopTouchCapture() {
+      document.removeEventListener("touchmove", this.boundDesktopTouchMove);
+      document.removeEventListener("touchend", this.boundDesktopTouchEnd);
+      document.removeEventListener("touchcancel", this.boundDesktopTouchCancel);
+      window.removeEventListener("blur", this.boundDesktopBlur);
+      this.desktopTouchId = null;
+    }
+
+    cancelDesktopTouchCapture() {
+      if (this.desktopTouchId === null) {
+        return;
+      }
+      this.forwardDesktopMouseEvent(
+        createSyntheticPointerEvent(
+          null,
+          { clientX: this.desktopTouchClientX, clientY: this.desktopTouchClientY },
+          0,
+          0
+        ),
+        0,
+        0x01,
+        false,
+        0,
+        0
+      );
+      this.endDesktopTouchCapture();
+    }
+
+    handleDesktopTouchStart(event) {
+      if (this.desktopTouchId !== null) {
+        event.preventDefault();
+        return;
+      }
+      const touch = getRelevantTouch(event, null);
+      if (!touch) {
+        return;
+      }
+      this.beginDesktopTouchCapture(touch);
+      this.handleDesktopMouseDown(createSyntheticPointerEvent(event, touch, 0x01, 0));
+    }
+
+    handleDocumentDesktopTouchMove(event) {
+      if (this.desktopTouchId === null) {
+        return;
+      }
+      const touch = getRelevantTouch(event, this.desktopTouchId);
+      if (!touch) {
+        return;
+      }
+      this.recordDesktopTouch(touch);
+      this.handleDesktopMouseMove(createSyntheticPointerEvent(event, touch, 0x01, 0));
+      event.preventDefault();
+    }
+
+    handleDocumentDesktopTouchEnd(event) {
+      if (this.desktopTouchId === null) {
+        return;
+      }
+      const touch = getRelevantTouch(event, this.desktopTouchId);
+      if (!touch) {
+        return;
+      }
+      this.recordDesktopTouch(touch);
+      this.handleDesktopMouseUp(createSyntheticPointerEvent(event, touch, 0, 0));
+      this.endDesktopTouchCapture();
+      event.preventDefault();
+    }
+
+    handleDocumentDesktopTouchCancel(event) {
+      if (this.desktopTouchId === null) {
+        return;
+      }
+      this.cancelDesktopTouchCapture();
+      event.preventDefault();
     }
 
     syncProcessMousePosition(process, screenX, screenY) {
