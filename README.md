@@ -37,7 +37,7 @@ This repository includes a GitHub Actions workflow that publishes the static app
 After enabling `Settings -> Pages -> Source -> GitHub Actions`, the emulator will be available at:
 
 ```text
-https://<user>.github.io/<repo>/
+https://paulcodeman.github.io/kolibrios-web-emulator/
 ```
 
 The Pages deployment uploads only:
