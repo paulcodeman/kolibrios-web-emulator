@@ -787,6 +787,29 @@
       this.emulator.traceOpcodes = !!next.traceOpcodes;
     }
 
+    refreshSkinTheme() {
+      if (!this.emulator || this.removed) {
+        return false;
+      }
+      const currentPath = String(this.emulator.skinPath || "/sys/default.skn");
+      if (typeof this.emulator.resetSkinTheme === "function") {
+        this.emulator.resetSkinTheme();
+      }
+      this.emulator.skinPath = currentPath;
+      if (typeof this.emulator.ensureSkinThemeLoaded === "function") {
+        this.emulator.ensureSkinThemeLoaded();
+      }
+      this.lastChromeSkin = null;
+      this.lastChromeKey = "";
+      if (this.emulator.running) {
+        this.emulator.removeQueuedEvent(1);
+        this.emulator.queueEvent(1);
+        this.emulator.wakeExecution();
+      }
+      this.scheduleChromeRender(true);
+      return true;
+    }
+
     start() {
       this.emulator.load(this.image);
       this.emulator.run();
@@ -3181,6 +3204,17 @@
       for (let i = 0; i < this.processes.length; i += 1) {
         this.processes[i].applyTraceConfig(this.traceConfig);
       }
+    }
+
+    refreshSkinThemes() {
+      let updated = false;
+      for (let i = 0; i < this.processes.length; i += 1) {
+        updated = this.processes[i].refreshSkinTheme() || updated;
+      }
+      if (updated) {
+        this.onProcessVisualStateChanged();
+      }
+      return updated;
     }
 
     setActiveProcess(process, options) {

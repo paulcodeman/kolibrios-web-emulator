@@ -396,6 +396,9 @@
         this.savedFsRootLabel = "";
         this.savedFsRootPendingPermission = false;
         this.log(`Restored browser FS root: ${root.summaryText()}`);
+        if (this.sessionManager && typeof this.sessionManager.refreshSkinThemes === "function") {
+          this.sessionManager.refreshSkinThemes();
+        }
         this.setStatus(`Mounted ${root.label}`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -445,6 +448,9 @@
           }
         }
         this.log(`Mounted browser FS root: ${root.summaryText()}`);
+        if (this.sessionManager && typeof this.sessionManager.refreshSkinThemes === "function") {
+          this.sessionManager.refreshSkinThemes();
+        }
         this.setStatus(`Mounted ${root.label}`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -471,6 +477,9 @@
         }
       }
       this.updateFsRootStatus();
+      if (this.sessionManager && typeof this.sessionManager.refreshSkinThemes === "function") {
+        this.sessionManager.refreshSkinThemes();
+      }
       this.updateSessionState();
       this.log("Browser FS root cleared.");
     }
