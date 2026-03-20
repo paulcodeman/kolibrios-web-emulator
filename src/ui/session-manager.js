@@ -11,6 +11,9 @@
   const DEFAULT_SURFACE_HEIGHT = 600;
   const DEFAULT_TITLEBAR_HEIGHT = 21;
   const DEFAULT_ROLLUP_EXTRA = 3;
+  const TOUCH_SWIPE_MIN_DISTANCE = 42;
+  const TOUCH_SWIPE_AXIS_RATIO = 1.35;
+  const TOUCH_SWIPE_MAX_DURATION_MS = 450;
   const CASCADE_STEP_X = 28;
   const CASCADE_STEP_Y = 24;
   const WINDOW_RESIZE_BORDER = 6;
@@ -401,6 +404,25 @@
     };
   }
 
+  function resolveSwipeDirection(dx, dy, durationMs) {
+    const elapsed = Math.max(0, durationMs | 0);
+    const absX = Math.abs(dx | 0);
+    const absY = Math.abs(dy | 0);
+    if (elapsed > TOUCH_SWIPE_MAX_DURATION_MS) {
+      return "";
+    }
+    if (absX < TOUCH_SWIPE_MIN_DISTANCE && absY < TOUCH_SWIPE_MIN_DISTANCE) {
+      return "";
+    }
+    if (absX >= TOUCH_SWIPE_MIN_DISTANCE && absX >= (absY * TOUCH_SWIPE_AXIS_RATIO)) {
+      return dx < 0 ? "ArrowLeft" : "ArrowRight";
+    }
+    if (absY >= TOUCH_SWIPE_MIN_DISTANCE && absY >= (absX * TOUCH_SWIPE_AXIS_RATIO)) {
+      return dy < 0 ? "ArrowUp" : "ArrowDown";
+    }
+    return "";
+  }
+
   function getSkinButtonRect(button, windowWidth) {
     if (!button || (button.width | 0) <= 0 || (button.height | 0) <= 0) {
       return null;
@@ -610,6 +632,12 @@
       this.controlKeyMask = 0;
       this.windowPositionMode = WINDOW_Z_NORMAL;
       this.activeTouchId = null;
+      this.touchSwipeStartX = 0;
+      this.touchSwipeStartY = 0;
+      this.touchSwipeLastX = 0;
+      this.touchSwipeLastY = 0;
+      this.touchSwipeStartMs = 0;
+      this.touchSwipeEligible = false;
       this.boundDocMouseMove = (event) => this.handleDocumentMouseMove(event);
       this.boundDocMouseUp = (event) => this.handleDocumentMouseUp(event);
       this.boundDocTouchMove = (event) => this.handleDocumentTouchMove(event);
@@ -1320,6 +1348,96 @@
       this.endCapture();
     }
 
+    resetTouchSwipeTracking() {
+      this.touchSwipeStartX = 0;
+      this.touchSwipeStartY = 0;
+      this.touchSwipeLastX = 0;
+      this.touchSwipeLastY = 0;
+      this.touchSwipeStartMs = 0;
+      this.touchSwipeEligible = false;
+    }
+
+    beginTouchSwipeTracking(event, touch) {
+      if (!touch) {
+        this.resetTouchSwipeTracking();
+        return;
+      }
+      const pointerEvent = createSyntheticPointerEvent(event, touch, 0x01, 0);
+      const pointer = this.getPointerInfo(pointerEvent);
+      const client = this.getClientBounds();
+      this.touchSwipeStartX = touch.clientX | 0;
+      this.touchSwipeStartY = touch.clientY | 0;
+      this.touchSwipeLastX = touch.clientX | 0;
+      this.touchSwipeLastY = touch.clientY | 0;
+      this.touchSwipeStartMs = Date.now();
+      this.touchSwipeEligible =
+        !this.rolledUp &&
+        !this.stopped &&
+        !this.hitTestResize(pointer.x, pointer.y) &&
+        !this.hitTestChrome(pointer.x, pointer.y) &&
+        pointInRect(pointer.x, pointer.y, client);
+    }
+
+    updateTouchSwipeTracking(touch) {
+      if (!touch) {
+        return;
+      }
+      this.touchSwipeLastX = touch.clientX | 0;
+      this.touchSwipeLastY = touch.clientY | 0;
+    }
+
+    consumeTouchSwipeDirection() {
+      if (!this.touchSwipeEligible) {
+        this.resetTouchSwipeTracking();
+        return "";
+      }
+      const direction = resolveSwipeDirection(
+        (this.touchSwipeLastX - this.touchSwipeStartX) | 0,
+        (this.touchSwipeLastY - this.touchSwipeStartY) | 0,
+        Date.now() - (this.touchSwipeStartMs || 0)
+      );
+      this.resetTouchSwipeTracking();
+      return direction;
+    }
+
+    queueVirtualKey(code) {
+      if (this.removed || this.stopped || !this.emulator || typeof this.emulator.queueBrowserKeyEvent !== "function") {
+        return false;
+      }
+      const key = String(code || "");
+      if (!key) {
+        return false;
+      }
+      const translated = keyboard.translateDomKeyboardEvent
+        ? keyboard.translateDomKeyboardEvent({ code: key, key })
+        : null;
+      if (!translated) {
+        return false;
+      }
+      if (this.manager.getActiveProcess() !== this) {
+        this.manager.setActiveProcess(this, { focusShell: false });
+      }
+      this.focusShell();
+      const payload = {
+        asciiCode: translated.asciiCode | 0,
+        scanCode: translated.scanCode | 0,
+        extended: !!translated.extended,
+        modifier: !!translated.modifier,
+        lockKey: !!translated.lockKey,
+        controlKeys: this.controlKeyMask & 0x7ff,
+        hotkey: false
+      };
+      this.emulator.queueBrowserKeyEvent({
+        ...payload,
+        released: false
+      });
+      this.emulator.queueBrowserKeyEvent({
+        ...payload,
+        released: true
+      });
+      return true;
+    }
+
     handleTouchStart(event) {
       if (this.removed || this.activeTouchId !== null) {
         event.preventDefault();
@@ -1330,9 +1448,11 @@
         return;
       }
       this.activeTouchId = touch.identifier | 0;
+      this.beginTouchSwipeTracking(event, touch);
       this.handleMouseDown(createSyntheticPointerEvent(event, touch, 0x01, 0));
       if (!this.captureMode) {
         this.activeTouchId = null;
+        this.resetTouchSwipeTracking();
       }
     }
 
@@ -1526,6 +1646,7 @@
       if (!touch) {
         return;
       }
+      this.updateTouchSwipeTracking(touch);
       this.handleDocumentMouseMove(createSyntheticPointerEvent(
         event,
         touch,
@@ -1543,7 +1664,12 @@
       if (!touch) {
         return;
       }
+      this.updateTouchSwipeTracking(touch);
+      const direction = this.consumeTouchSwipeDirection();
       this.handleDocumentMouseUp(createSyntheticPointerEvent(event, touch, 0, 0));
+      if (direction) {
+        this.queueVirtualKey(direction);
+      }
       event.preventDefault();
     }
 
@@ -1551,6 +1677,7 @@
       if (this.activeTouchId === null) {
         return;
       }
+      this.resetTouchSwipeTracking();
       this.cancelCapture();
       event.preventDefault();
     }
@@ -1797,6 +1924,12 @@
       this.desktopTouchId = null;
       this.desktopTouchClientX = 0;
       this.desktopTouchClientY = 0;
+      this.desktopSwipeStartX = 0;
+      this.desktopSwipeStartY = 0;
+      this.desktopSwipeLastX = 0;
+      this.desktopSwipeLastY = 0;
+      this.desktopSwipeStartMs = 0;
+      this.desktopSwipeEligible = false;
       this.boundDesktopTouchMove = (event) => this.handleDocumentDesktopTouchMove(event);
       this.boundDesktopTouchEnd = (event) => this.handleDocumentDesktopTouchEnd(event);
       this.boundDesktopTouchCancel = (event) => this.handleDocumentDesktopTouchCancel(event);
@@ -2340,6 +2473,73 @@
       }
       this.desktopTouchClientX = touch.clientX | 0;
       this.desktopTouchClientY = touch.clientY | 0;
+      this.desktopSwipeLastX = touch.clientX | 0;
+      this.desktopSwipeLastY = touch.clientY | 0;
+    }
+
+    resetDesktopSwipeTracking() {
+      this.desktopSwipeStartX = 0;
+      this.desktopSwipeStartY = 0;
+      this.desktopSwipeLastX = 0;
+      this.desktopSwipeLastY = 0;
+      this.desktopSwipeStartMs = 0;
+      this.desktopSwipeEligible = false;
+    }
+
+    beginDesktopSwipeTracking(touch) {
+      if (!touch) {
+        this.resetDesktopSwipeTracking();
+        return;
+      }
+      this.desktopSwipeStartX = touch.clientX | 0;
+      this.desktopSwipeStartY = touch.clientY | 0;
+      this.desktopSwipeLastX = touch.clientX | 0;
+      this.desktopSwipeLastY = touch.clientY | 0;
+      this.desktopSwipeStartMs = Date.now();
+      this.desktopSwipeEligible = true;
+    }
+
+    consumeDesktopSwipeDirection() {
+      if (!this.desktopSwipeEligible) {
+        this.resetDesktopSwipeTracking();
+        return "";
+      }
+      const direction = resolveSwipeDirection(
+        (this.desktopSwipeLastX - this.desktopSwipeStartX) | 0,
+        (this.desktopSwipeLastY - this.desktopSwipeStartY) | 0,
+        Date.now() - (this.desktopSwipeStartMs || 0)
+      );
+      this.resetDesktopSwipeTracking();
+      return direction;
+    }
+
+    getSwipeTargetProcess() {
+      const desktopTargets = this.getDesktopInputProcesses();
+      const active = this.getActiveProcess();
+      if (
+        active &&
+        !active.removed &&
+        !active.stopped &&
+        active.emulator &&
+        desktopTargets.indexOf(active) >= 0
+      ) {
+        return active;
+      }
+      if (desktopTargets.length) {
+        return desktopTargets[0];
+      }
+      if (active && !active.removed && !active.stopped && active.emulator) {
+        return active;
+      }
+      return null;
+    }
+
+    queueSwipeKey(code) {
+      const target = this.getSwipeTargetProcess();
+      if (!target || typeof target.queueVirtualKey !== "function") {
+        return false;
+      }
+      return !!target.queueVirtualKey(code);
     }
 
     beginDesktopTouchCapture(touch) {
@@ -2347,6 +2547,7 @@
         return false;
       }
       this.desktopTouchId = touch.identifier | 0;
+      this.beginDesktopSwipeTracking(touch);
       this.recordDesktopTouch(touch);
       document.addEventListener("touchmove", this.boundDesktopTouchMove, { passive: false });
       document.addEventListener("touchend", this.boundDesktopTouchEnd, { passive: false });
@@ -2361,6 +2562,7 @@
       document.removeEventListener("touchcancel", this.boundDesktopTouchCancel);
       window.removeEventListener("blur", this.boundDesktopBlur);
       this.desktopTouchId = null;
+      this.resetDesktopSwipeTracking();
     }
 
     cancelDesktopTouchCapture() {
@@ -2418,7 +2620,11 @@
         return;
       }
       this.recordDesktopTouch(touch);
+      const direction = this.consumeDesktopSwipeDirection();
       this.handleDesktopMouseUp(createSyntheticPointerEvent(event, touch, 0, 0));
+      if (direction) {
+        this.queueSwipeKey(direction);
+      }
       this.endDesktopTouchCapture();
       event.preventDefault();
     }
@@ -2427,6 +2633,7 @@
       if (this.desktopTouchId === null) {
         return;
       }
+      this.resetDesktopSwipeTracking();
       this.cancelDesktopTouchCapture();
       event.preventDefault();
     }
