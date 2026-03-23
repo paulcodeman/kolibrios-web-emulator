@@ -4,7 +4,10 @@ const { HeadlessUiHarness } = require("./ui-harness");
 const DEFAULT_ROOT = process.env.KOS_ROOT || "C:\\Users\\Paul\\Desktop\\Kem\\kolibri_root";
 
 function hasUnhandledLogs(snapshot) {
-  return Array.isArray(snapshot.logs) && snapshot.logs.some((line) => /^Unhandled |Interpreter error|Host session |KX import /.test(line));
+  return Array.isArray(snapshot.logs) && snapshot.logs.some((line) => (
+    /^Unhandled |Interpreter error|Host session |KX import /.test(line) ||
+    /debug: import error:/.test(line)
+  ));
 }
 
 function sleep(ms) {

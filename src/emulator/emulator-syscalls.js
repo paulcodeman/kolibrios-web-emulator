@@ -54,6 +54,19 @@
   const KEYBOARD_LANGUAGE_ID = 1;
   const UTF8_ENCODER = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
   const UTF8_DECODER = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8") : null;
+  const FILE_API_DISPATCH = Object.freeze({
+    0: "sysFileRead",
+    1: "sysFileReadDir",
+    2: "sysFileCreate",
+    3: "sysFileWrite",
+    4: "sysFileSetEnd",
+    5: "sysFileGetInfo",
+    6: "sysFileSetInfo",
+    7: "sysFileStartApp",
+    8: "sysFileDelete",
+    9: "sysFileCreateFolder",
+    10: "sysFileRenameMove"
+  });
 
   function unpackSignedHigh16(value) {
     return (value >> 16) | 0;
@@ -1974,30 +1987,22 @@
           let outerWidth = Math.max(1, this.windowWidth | 0 || (this.surface ? (this.surface.width | 0) : 1));
           let outerHeight = Math.max(1, this.windowHeight | 0 || (this.surface ? (this.surface.height | 0) : 1));
           if (!this.windowDefined) {
-            const hostSize = typeof this.getHostScreenSize === "function"
-              ? (this.getHostScreenSize() || null)
-              : null;
-            const screenWidth = hostSize && hostSize.width !== undefined
-              ? Math.max(1, hostSize.width | 0)
-              : Math.max(1, this.surface ? (this.surface.width | 0) : 1);
-            const screenHeight = hostSize && hostSize.height !== undefined
-              ? Math.max(1, hostSize.height | 0)
-              : Math.max(1, this.surface ? (this.surface.height | 0) : 1);
+            const screen = this.getHostScreenInfo();
             hostX = winX | 0;
             hostY = winY | 0;
             outerWidth = (width + 1) | 0;
             outerHeight = (height + 1) | 0;
-            if (hostX < 0 || (hostX + outerWidth) > screenWidth) {
+            if (hostX < 0 || (hostX + outerWidth) > (screen.width | 0)) {
               hostX = 0;
             }
-            if (hostY < 0 || (hostY + outerHeight) > screenHeight) {
+            if (hostY < 0 || (hostY + outerHeight) > (screen.height | 0)) {
               hostY = 0;
             }
-            if ((hostX + outerWidth) > screenWidth) {
-              outerWidth = screenWidth | 0;
+            if ((hostX + outerWidth) > (screen.width | 0)) {
+              outerWidth = screen.width | 0;
             }
-            if ((hostY + outerHeight) > screenHeight) {
-              outerHeight = screenHeight | 0;
+            if ((hostY + outerHeight) > (screen.height | 0)) {
+              outerHeight = screen.height | 0;
             }
             this.windowHostX = hostX;
             this.windowHostY = hostY;
@@ -3211,17 +3216,9 @@
       },
 
       sysScreenSize() {
-        const hostSize = typeof this.getHostScreenSize === "function"
-          ? (this.getHostScreenSize() || null)
-          : null;
-        const screenWidth = hostSize && hostSize.width !== undefined
-          ? Math.max(1, hostSize.width | 0)
-          : Math.max(1, this.surface.width | 0);
-        const screenHeight = hostSize && hostSize.height !== undefined
-          ? Math.max(1, hostSize.height | 0)
-          : Math.max(1, this.surface.height | 0);
-        const width = Math.max(0, screenWidth - 1) & 0xffff;
-        const height = Math.max(0, screenHeight - 1) & 0xffff;
+        const screen = this.getHostScreenInfo();
+        const width = Math.max(0, (screen.width | 0) - 1) & 0xffff;
+        const height = Math.max(0, (screen.height | 0) - 1) & 0xffff;
         const value = (width << 16) | height;
         this.writeReg(REG.EAX, value >>> 0);
       },
@@ -3238,55 +3235,16 @@
             owner = 0;
           }
         } else {
-          const hostSize = typeof this.getHostScreenSize === "function"
-            ? (this.getHostScreenSize() || null)
-            : null;
-          const screenWidth = hostSize && hostSize.width !== undefined
-            ? Math.max(1, hostSize.width | 0)
-            : Math.max(1, this.surface.width | 0);
-          const screenHeight = hostSize && hostSize.height !== undefined
-            ? Math.max(1, hostSize.height | 0)
-            : Math.max(1, this.surface.height | 0);
-          if (x >= 0 && y >= 0 && x < screenWidth && y < screenHeight) {
-            if (this.windowDefined) {
-              const localX = (x - (this.windowHostX | 0)) | 0;
-              const localY = (y - (this.windowHostY | 0)) | 0;
-              const windowWidth = Math.max(1, this.windowWidth | 0);
-              const windowHeight = Math.max(1, this.windowHeight | 0);
-              if (localX >= 0 && localY >= 0 && localX < windowWidth && localY < windowHeight) {
-                const shape = this.windowShape;
-                owner = this.threadSlot >>> 0;
-                if (
-                  shape &&
-                  shape.data instanceof Uint8Array &&
-                  localX < (shape.width | 0) &&
-                  localY < (shape.height | 0) &&
-                  !shape.data[localY * (shape.width | 0) + localX]
-                ) {
-                  owner = 1;
-                }
-              } else {
-                owner = 1;
-              }
-            } else {
-              owner = 1;
-            }
-          }
+          owner = this.getFallbackPixelOwnerAt(x, y) >>> 0;
         }
         this.writeReg(REG.EAX, owner >>> 0);
       },
 
       sysPixelColor() {
         const encoded = this.readReg(REG.EBX) >>> 0;
-        const hostSize = typeof this.getHostScreenSize === "function"
-          ? (this.getHostScreenSize() || null)
-          : null;
-        const screenWidth = hostSize && hostSize.width !== undefined
-          ? Math.max(1, hostSize.width | 0)
-          : Math.max(1, this.surface.width | 0);
-        const screenHeight = hostSize && hostSize.height !== undefined
-          ? Math.max(1, hostSize.height | 0)
-          : Math.max(1, this.surface.height | 0);
+        const screen = this.getHostScreenInfo();
+        const screenWidth = screen.width | 0;
+        const screenHeight = screen.height | 0;
         const x = screenWidth > 0 ? (encoded % screenWidth) : 0;
         const y = screenWidth > 0 ? Math.floor(encoded / screenWidth) : 0;
         let color = 0;
@@ -3298,16 +3256,8 @@
               this.log(`Host pixel color lookup failed for ${x},${y}: ${err}`);
               color = 0;
             }
-          } else if (this.windowDefined && this.surface && this.surface.buffer32 instanceof Uint32Array) {
-            const localX = (x - (this.windowHostX | 0)) | 0;
-            const localY = (y - (this.windowHostY | 0)) | 0;
-            const windowWidth = Math.max(1, this.windowWidth | 0);
-            const windowHeight = Math.max(1, this.windowHeight | 0);
-            if (localX >= 0 && localY >= 0 && localX < windowWidth && localY < windowHeight) {
-              color = unpackSurfaceColor(
-                this.surface.buffer32[(localY * (this.surface.width | 0)) + localX] >>> 0
-              ) >>> 0;
-            }
+          } else {
+            color = unpackSurfaceColor(this.getFallbackPackedPixelAt(x, y)) >>> 0;
           }
         }
         this.writeReg(REG.EAX, color & 0x00ffffff);
@@ -4380,20 +4330,11 @@
           return;
         }
         if (sub === 5) {
-          const hostSize = typeof this.getHostScreenSize === "function"
-            ? (this.getHostScreenSize() || null)
-            : null;
-          const rect = this.hostSession && typeof this.hostSession.getScreenWorkArea === "function"
-            ? this.hostSession.getScreenWorkArea()
-            : null;
-          const left = rect ? (rect.left | 0) : 0;
-          const top = rect ? (rect.top | 0) : 0;
-          const right = rect
-            ? (rect.right | 0)
-            : Math.max(0, ((hostSize && hostSize.width !== undefined ? (hostSize.width | 0) : (this.surface.width | 0)) - 1) | 0);
-          const bottom = rect
-            ? (rect.bottom | 0)
-            : Math.max(0, ((hostSize && hostSize.height !== undefined ? (hostSize.height | 0) : (this.surface.height | 0)) - 1) | 0);
+          const workArea = this.getHostScreenWorkArea();
+          const left = workArea.left | 0;
+          const top = workArea.top | 0;
+          const right = workArea.right | 0;
+          const bottom = workArea.bottom | 0;
           this.writeReg(REG.EAX, ((((left & 0xffff) << 16) | (right & 0xffff))) >>> 0);
           this.writeReg(REG.EBX, ((((top & 0xffff) << 16) | (bottom & 0xffff))) >>> 0);
           return;
@@ -4984,48 +4925,9 @@
           return;
         }
         const sub = this.readMem32(infoPtr) >>> 0;
-        if (sub === 0) {
-          this.sysFileRead(infoPtr, encoded);
-          return;
-        }
-        if (sub === 1) {
-          this.sysFileReadDir(infoPtr, encoded);
-          return;
-        }
-        if (sub === 2) {
-          this.sysFileCreate(infoPtr, encoded);
-          return;
-        }
-        if (sub === 3) {
-          this.sysFileWrite(infoPtr, encoded);
-          return;
-        }
-        if (sub === 4) {
-          this.sysFileSetEnd(infoPtr, encoded);
-          return;
-        }
-        if (sub === 5) {
-          this.sysFileGetInfo(infoPtr, encoded);
-          return;
-        }
-        if (sub === 6) {
-          this.sysFileSetInfo(infoPtr, encoded);
-          return;
-        }
-        if (sub === 8) {
-          this.sysFileDelete(infoPtr, encoded);
-          return;
-        }
-        if (sub === 9) {
-          this.sysFileCreateFolder(infoPtr, encoded);
-          return;
-        }
-        if (sub === 10) {
-          this.sysFileRenameMove(infoPtr, encoded);
-          return;
-        }
-        if (sub === 7) {
-          this.sysFileStartApp(infoPtr, encoded);
+        const handlerName = FILE_API_DISPATCH[sub];
+        if (handlerName && typeof this[handlerName] === "function") {
+          this[handlerName](infoPtr, encoded);
           return;
         }
         if (!this.unknownSyscalls.has(7000 + sub)) {

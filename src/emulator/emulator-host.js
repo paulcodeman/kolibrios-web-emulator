@@ -349,6 +349,107 @@
         };
       },
 
+      getHostScreenInfo() {
+        const hostSize = typeof this.getHostScreenSize === "function"
+          ? (this.getHostScreenSize() || null)
+          : null;
+        return {
+          width: hostSize && hostSize.width !== undefined
+            ? Math.max(1, hostSize.width | 0)
+            : Math.max(1, this.surface ? (this.surface.width | 0) : 1),
+          height: hostSize && hostSize.height !== undefined
+            ? Math.max(1, hostSize.height | 0)
+            : Math.max(1, this.surface ? (this.surface.height | 0) : 1)
+        };
+      },
+
+      getHostScreenWorkArea() {
+        const screen = this.getHostScreenInfo();
+        const rect = this.hostSession && typeof this.hostSession.getScreenWorkArea === "function"
+          ? (this.hostSession.getScreenWorkArea() || null)
+          : null;
+        return {
+          left: rect ? (rect.left | 0) : 0,
+          top: rect ? (rect.top | 0) : 0,
+          right: rect ? (rect.right | 0) : Math.max(0, ((screen.width | 0) - 1) | 0),
+          bottom: rect ? (rect.bottom | 0) : Math.max(0, ((screen.height | 0) - 1) | 0)
+        };
+      },
+
+      isHostScreenPointVisible(x, y) {
+        const screen = this.getHostScreenInfo();
+        const px = x | 0;
+        const py = y | 0;
+        return px >= 0 && py >= 0 && px < (screen.width | 0) && py < (screen.height | 0);
+      },
+
+      getWindowLocalPointFromHost(x, y) {
+        if (!this.windowDefined) {
+          return null;
+        }
+        const localX = ((x | 0) - (this.windowHostX | 0)) | 0;
+        const localY = ((y | 0) - (this.windowHostY | 0)) | 0;
+        const windowWidth = Math.max(1, this.windowWidth | 0);
+        const windowHeight = Math.max(1, this.windowHeight | 0);
+        if (localX < 0 || localY < 0 || localX >= windowWidth || localY >= windowHeight) {
+          return null;
+        }
+        return {
+          x: localX | 0,
+          y: localY | 0
+        };
+      },
+
+      isWindowShapePixelVisible(localX, localY) {
+        const shape = this.windowShape;
+        if (!(shape && shape.data instanceof Uint8Array)) {
+          return true;
+        }
+        const x = localX | 0;
+        const y = localY | 0;
+        const width = shape.width | 0;
+        const height = shape.height | 0;
+        if (x < 0 || y < 0 || x >= width || y >= height) {
+          return true;
+        }
+        return !!shape.data[(y * width) + x];
+      },
+
+      getFallbackPixelOwnerAt(x, y) {
+        if (!this.isHostScreenPointVisible(x, y)) {
+          return 0;
+        }
+        if (!this.windowDefined) {
+          return 1;
+        }
+        const local = this.getWindowLocalPointFromHost(x, y);
+        if (!local) {
+          return 1;
+        }
+        return this.isWindowShapePixelVisible(local.x, local.y)
+          ? (this.threadSlot >>> 0)
+          : 1;
+      },
+
+      getFallbackPackedPixelAt(x, y) {
+        if (!this.isHostScreenPointVisible(x, y)) {
+          return 0;
+        }
+        const local = this.getWindowLocalPointFromHost(x, y);
+        if (
+          !local ||
+          !this.surface ||
+          !(this.surface.buffer32 instanceof Uint32Array)
+        ) {
+          return 0;
+        }
+        const surfaceWidth = this.surface.width | 0;
+        if (local.x < 0 || local.y < 0 || local.x >= surfaceWidth || local.y >= (this.surface.height | 0)) {
+          return 0;
+        }
+        return this.surface.buffer32[(local.y * surfaceWidth) + local.x] >>> 0;
+      },
+
       setMousePosition(x, y, inside, screenX, screenY) {
         this.mouseX = x | 0;
         this.mouseY = y | 0;
@@ -899,30 +1000,47 @@
         }
       },
 
-      getHostMaxThreadSlot() {
-        if (!this.hostSession || typeof this.hostSession.getMaxThreadSlot !== "function") {
-          return this.threadSlot >>> 0;
+      callHostSession(methodName, args, fallbackValue, failureLabel, errorFallbackValue) {
+        const session = this.hostSession;
+        const fn = session && session[methodName];
+        const getFallback = (value) => (
+          typeof value === "function"
+            ? value()
+            : value
+        );
+        if (typeof fn !== "function") {
+          return getFallback(fallbackValue);
         }
         try {
-          const value = this.hostSession.getMaxThreadSlot();
-          return Math.max(1, value | 0) >>> 0;
+          return fn.apply(session, Array.isArray(args) ? args : []);
         } catch (err) {
-          this.log(`Host session getMaxThreadSlot failed: ${err}`);
-          return this.threadSlot >>> 0;
+          this.log(`Host session ${failureLabel || methodName} failed: ${err}`);
+          return getFallback(
+            errorFallbackValue === undefined
+              ? fallbackValue
+              : errorFallbackValue
+          );
         }
       },
 
+      getHostMaxThreadSlot() {
+        const value = this.callHostSession(
+          "getMaxThreadSlot",
+          [],
+          () => this.threadSlot >>> 0,
+          "getMaxThreadSlot"
+        );
+        return Math.max(1, value | 0) >>> 0;
+      },
+
       getHostActiveThreadSlot() {
-        if (!this.hostSession || typeof this.hostSession.getActiveThreadSlot !== "function") {
-          return this.threadSlot >>> 0;
-        }
-        try {
-          const value = this.hostSession.getActiveThreadSlot();
-          return Math.max(1, value | 0) >>> 0;
-        } catch (err) {
-          this.log(`Host session getActiveThreadSlot failed: ${err}`);
-          return this.threadSlot >>> 0;
-        }
+        const value = this.callHostSession(
+          "getActiveThreadSlot",
+          [],
+          () => this.threadSlot >>> 0,
+          "getActiveThreadSlot"
+        );
+        return Math.max(1, value | 0) >>> 0;
       },
 
       isHostThreadActive() {
@@ -930,115 +1048,94 @@
       },
 
       getHostThreadSlotByProcessId(pid) {
-        if (!this.hostSession || typeof this.hostSession.getThreadSlotByProcessId !== "function") {
-          return (pid >>> 0) === (this.processId >>> 0) ? (this.threadSlot >>> 0) : 0;
-        }
-        try {
-          return this.hostSession.getThreadSlotByProcessId(pid >>> 0) >>> 0;
-        } catch (err) {
-          this.log(`Host session getThreadSlotByProcessId failed for pid ${pid}: ${err}`);
-          return (pid >>> 0) === (this.processId >>> 0) ? (this.threadSlot >>> 0) : 0;
-        }
+        const requestedPid = pid >>> 0;
+        return this.callHostSession(
+          "getThreadSlotByProcessId",
+          [requestedPid],
+          () => (requestedPid === (this.processId >>> 0) ? (this.threadSlot >>> 0) : 0),
+          `getThreadSlotByProcessId for pid ${requestedPid}`
+        ) >>> 0;
       },
 
       getHostThreadInfo(slot) {
-        if (!this.hostSession || typeof this.hostSession.getThreadInfo !== "function") {
-          return null;
-        }
-        try {
-          return this.hostSession.getThreadInfo(slot >>> 0) || null;
-        } catch (err) {
-          this.log(`Host session getThreadInfo failed for slot ${slot}: ${err}`);
-          return null;
-        }
+        return this.callHostSession(
+          "getThreadInfo",
+          [slot >>> 0],
+          null,
+          `getThreadInfo for slot ${slot >>> 0}`
+        ) || null;
       },
 
       getHostWindowStackSlot(position) {
-        if (!this.hostSession || typeof this.hostSession.getWindowStackSlot !== "function") {
-          return position >>> 0;
-        }
-        try {
-          return this.hostSession.getWindowStackSlot(position >>> 0) >>> 0;
-        } catch (err) {
-          this.log(`Host session getWindowStackSlot failed for position ${position}: ${err}`);
-          return position >>> 0;
-        }
+        const requestedPosition = position >>> 0;
+        return this.callHostSession(
+          "getWindowStackSlot",
+          [requestedPosition],
+          requestedPosition,
+          `getWindowStackSlot for position ${requestedPosition}`
+        ) >>> 0;
       },
 
       focusHostThreadSlot(slot) {
-        if (!this.hostSession || typeof this.hostSession.focusThreadSlot !== "function") {
-          return this.threadSlot >>> 0;
-        }
-        try {
-          return this.hostSession.focusThreadSlot(slot >>> 0) >>> 0;
-        } catch (err) {
-          this.log(`Host session focusThreadSlot failed for slot ${slot}: ${err}`);
-          return this.threadSlot >>> 0;
-        }
+        return this.callHostSession(
+          "focusThreadSlot",
+          [slot >>> 0],
+          () => this.threadSlot >>> 0,
+          `focusThreadSlot for slot ${slot >>> 0}`
+        ) >>> 0;
       },
 
       unfocusHostThreadSlot(slot) {
-        if (!this.hostSession || typeof this.hostSession.unfocusThreadSlot !== "function") {
-          return this.getHostActiveThreadSlot();
-        }
-        try {
-          return this.hostSession.unfocusThreadSlot(slot >>> 0) >>> 0;
-        } catch (err) {
-          this.log(`Host session unfocusThreadSlot failed for slot ${slot}: ${err}`);
-          return this.getHostActiveThreadSlot();
-        }
+        return this.callHostSession(
+          "unfocusThreadSlot",
+          [slot >>> 0],
+          () => this.getHostActiveThreadSlot(),
+          `unfocusThreadSlot for slot ${slot >>> 0}`
+        ) >>> 0;
       },
 
       terminateHostThreadSlot(slot) {
-        if (!this.hostSession || typeof this.hostSession.terminateThreadSlot !== "function") {
-          return false;
-        }
-        try {
-          return !!this.hostSession.terminateThreadSlot(slot >>> 0);
-        } catch (err) {
-          this.log(`Host session terminateThreadSlot failed for slot ${slot}: ${err}`);
-          return false;
-        }
+        return !!this.callHostSession(
+          "terminateThreadSlot",
+          [slot >>> 0],
+          false,
+          `terminateThreadSlot for slot ${slot >>> 0}`
+        );
       },
 
       terminateHostProcessId(pid) {
-        if (!this.hostSession || typeof this.hostSession.terminateProcessId !== "function") {
-          return false;
-        }
-        try {
-          return !!this.hostSession.terminateProcessId(pid >>> 0);
-        } catch (err) {
-          this.log(`Host session terminateProcessId failed for pid ${pid}: ${err}`);
-          return false;
-        }
+        return !!this.callHostSession(
+          "terminateProcessId",
+          [pid >>> 0],
+          false,
+          `terminateProcessId for pid ${pid >>> 0}`
+        );
       },
 
       startHostApplication(path, params, flags) {
-        if (!this.hostSession || typeof this.hostSession.startApplication !== "function") {
-          return {
-            errorCode: 5,
-            pid: 0
-          };
-        }
-        try {
-          const result = this.hostSession.startApplication({
+        const result = this.callHostSession(
+          "startApplication",
+          [{
             path: path ? String(path) : "",
             params: params ? String(params) : "",
             flags: flags >>> 0,
             parentThreadSlot: this.threadSlot >>> 0,
             parentPid: this.processId >>> 0
-          }) || {};
-          return {
-            errorCode: result.errorCode ? (result.errorCode >>> 0) : 0,
-            pid: result.pid ? (result.pid >>> 0) : 0
-          };
-        } catch (err) {
-          this.log(`Host session startApplication failed for '${path}': ${err}`);
-          return {
+          }],
+          {
+            errorCode: 5,
+            pid: 0
+          },
+          `startApplication for '${path}'`,
+          {
             errorCode: 31,
             pid: 0
-          };
-        }
+          }
+        ) || {};
+        return {
+          errorCode: result.errorCode ? (result.errorCode >>> 0) : 0,
+          pid: result.pid ? (result.pid >>> 0) : 0
+        };
       },
 
       buildSharedThreadState() {
@@ -1064,11 +1161,9 @@
       },
 
       createHostThread(entry, stack) {
-        if (!this.hostSession || typeof this.hostSession.createThread !== "function") {
-          return 0xffffffff >>> 0;
-        }
-        try {
-          const result = this.hostSession.createThread({
+        const result = this.callHostSession(
+          "createThread",
+          [{
             parentThreadSlot: this.threadSlot >>> 0,
             parentPid: this.processId >>> 0,
             entry: entry >>> 0,
@@ -1077,12 +1172,11 @@
             processPath: this.processPathOverride || "",
             processArgs: this.processArgs || "",
             sharedState: this.buildSharedThreadState()
-          }) || {};
-          return result.tid ? (result.tid >>> 0) : (0xffffffff >>> 0);
-        } catch (err) {
-          this.log(`Host session createThread failed: ${err}`);
-          return 0xffffffff >>> 0;
-        }
+          }],
+          { tid: 0xffffffff >>> 0 },
+          "createThread"
+        ) || {};
+        return result.tid ? (result.tid >>> 0) : (0xffffffff >>> 0);
       },
 
       setHostIpcArea(bufferPtr, size) {
@@ -1101,30 +1195,25 @@
         if (size && data.length !== size) {
           return 3;
         }
-        if (!this.hostSession || typeof this.hostSession.sendIpcMessage !== "function") {
-          return 4;
-        }
-        try {
-          return (this.hostSession.sendIpcMessage({
+        return (this.callHostSession(
+          "sendIpcMessage",
+          [{
             senderPid: this.processId >>> 0,
             targetPid: pid >>> 0,
             data
-          }) | 0) >>> 0;
-        } catch (err) {
-          this.log(`Host session sendIpcMessage failed for pid ${pid}: ${err}`);
-          return 4;
-        }
+          }],
+          4,
+          `sendIpcMessage for pid ${pid}`
+        ) | 0) >>> 0;
       },
 
       wakeHostSiblingThreads(forceWake) {
-        if (!this.hostSession || typeof this.hostSession.wakeSiblingThreads !== "function") {
-          return;
-        }
-        try {
-          this.hostSession.wakeSiblingThreads(this.threadSlot >>> 0, !!forceWake);
-        } catch (err) {
-          this.log(`Host session wakeSiblingThreads failed: ${err}`);
-        }
+        this.callHostSession(
+          "wakeSiblingThreads",
+          [this.threadSlot >>> 0, !!forceWake],
+          undefined,
+          "wakeSiblingThreads"
+        );
       },
 
       autoFitContentRect(x, y, width, height) {

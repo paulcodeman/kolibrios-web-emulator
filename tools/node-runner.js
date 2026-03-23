@@ -1,11 +1,9 @@
-const fs = require("fs");
-const path = require("path");
-const vm = require("vm");
-const { createNodeFileProviders } = require("./kos-fs");
-
-function buildExternalAppProcessPath(targetPath) {
-  return `/app/${path.basename(String(targetPath || ""))}`;
-}
+const {
+  buildExternalAppProcessPath,
+  createDefaultFileProviders,
+  loadKosRuntime,
+  readTargetImage
+} = require("./ui-harness");
 
 const target = process.argv[2];
 if (!target) {
@@ -14,58 +12,14 @@ if (!target) {
 }
 const maxMs = Number(process.argv[3] || 2000);
 
-const lzma = require("../src/vendor/lzma_worker-min.js");
-if (lzma && lzma.LZMA) {
-  global.LZMA = lzma.LZMA;
-}
-const fflate = require("../src/vendor/fflate-umd.js");
-if (fflate) {
-  global.fflate = fflate;
-}
-
 (async () => {
-  const scripts = [
-    "../src/boot.js",
-    "../src/core/utils.js",
-    "../src/core/loader.js",
-    "../src/gfx/text.js",
-    "../src/gfx/kolibri-font-assets.js",
-    "../src/gfx/kolibri-font.js",
-    "../src/gfx/kolibri-skin-assets.js",
-    "../src/gfx/kolibri-skin.js",
-    "../src/gfx/surface.js",
-    "../src/emulator/core-access.js",
-    "../src/emulator/host-libs/registry.js",
-    "../src/emulator/host-libs/http.obj.js",
-    "../src/emulator/host-libs/proc_lib.obj.js",
-    "../src/emulator/host-libs/cnv_png.obj.js",
-    "../src/emulator/host-libs/libimg.obj.js",
-    "../src/emulator/host-libs/libini.obj.js",
-    "../src/emulator/host-libs/runtime.js",
-    "../src/emulator/emulator-host.js",
-    "../src/emulator/core-runtime.js",
-    "../src/emulator/core-execute.js",
-    "../src/emulator/emulator-syscalls.js",
-    "../src/emulator/emulator.js",
-    "../src/ui/app-ui.js",
-    "../src/app.js"
-  ];
-  for (const rel of scripts) {
-    const filePath = path.resolve(__dirname, rel);
-    const code = fs.readFileSync(filePath, "utf8");
-    vm.runInThisContext(code, { filename: rel });
-  }
-
-const { Emulator, parseKex, createHeadlessSurface } = global.KosEmu;
-
-  const data = fs.readFileSync(target);
-  const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-  const image = parseKex(buffer, path.basename(target));
+  const { Emulator, createHeadlessSurface } = loadKosRuntime();
+  const image = readTargetImage(target);
 
   const surface = createHeadlessSurface(800, 600);
   const emulator = new Emulator(surface, (msg) => console.log(msg));
   const rootDir = process.env.KOS_ROOT || "C:\\Users\\Paul\\Desktop\\Kem\\kolibri_root";
-  const providers = createNodeFileProviders(target, rootDir);
+  const providers = createDefaultFileProviders(target, rootDir);
   emulator.processPathOverride = buildExternalAppProcessPath(target);
   emulator.fileProvider = providers.fileProvider;
   emulator.fileInfoProvider = providers.fileInfoProvider;

@@ -1017,21 +1017,30 @@ class Emulator {
     this.resetSkinTheme();
   }
 
-  load(image) {
-    this.image = image;
-    this.imageDataRaw = new Uint8Array(image.image);
-    this.imageData = new Uint8Array(image.image);
+  resetImageAnalysisState() {
     this.syscallSiteSet.clear();
     this.unknownSyscalls.clear();
     this.softInstructionSites.clear();
+    this.opcodeCounts.clear();
+    this.unknownPorts.clear();
+  }
+
+  resetEventState(queueInitialRedraw) {
+    this.eventQueue.length = 0;
+    this.eventMask = 0x7;
+    if (queueInitialRedraw) {
+      this.eventQueue.push(1);
+    }
+    this.lastTimerEventAt = 0;
+  }
+
+  resetExecutionState() {
     this.cpu = null;
     this.lastEip = 0;
     this.lastSyscall = null;
-    this.eventQueue.length = 0;
-    this.eventMask = 0x7;
-    this.eventQueue.push(1);
-    this.lastTimerEventAt = 0;
     this.tscBase = 0;
+    this.yieldRequested = false;
+    this.yieldDelay = 0;
     this.yieldMode = "";
     this.presentYieldPending = false;
     this.presentYieldDelay = 0;
@@ -1051,19 +1060,22 @@ class Emulator {
     this.heapHighTop = 0;
     this.stackBase = 0;
     this.processReservedSize = 0;
-    this.heapAllocs.clear();
-    this.heapFreeBlocks.length = 0;
-    this.opcodeCounts.clear();
-    this.unknownPorts.clear();
     this.lastImageHash = null;
     this.lastPaletteHash = null;
     this.imageDrawCount = 0;
     this.inRedraw = false;
     this.lastPresentAt = 0;
+    this.surfaceDirty = false;
     this.lastRegDumpAt = 0;
     this.lastTimeBcd = null;
+    this.cpuBusySamples.length = 0;
+    this.cpuBusySampleTotalMs = 0;
+    this.cpuBusyActiveStartMs = 0;
     this.lastStopReason = "";
     this.stopEventEmitted = false;
+  }
+
+  resetWindowState() {
     this.windowOriginX = 0;
     this.windowOriginY = 0;
     this.windowHostX = 0;
@@ -1077,19 +1089,22 @@ class Emulator {
     this.windowShapePtr = 0;
     this.windowShapeScale = 0;
     this.windowShape = null;
-    this.skinHeight = 18;
+    this.windowWidth = 0;
+    this.windowHeight = 0;
     this.buttonStyle = 1;
     this.fontSmoothingMode = 1;
     this.fontSizePx = 9;
     this.speakerDisabled = false;
     this.lowLevelHdAccessEnabled = false;
     this.lowLevelPciAccessEnabled = false;
+    this.resetSkinTheme();
+  }
+
+  resetInputState() {
     this.buttons.length = 0;
     this.nextButtonSerial = 1;
     this.activeButtonSerial = 0;
     this.pendingButtonResult = 1;
-    this.windowWidth = 0;
-    this.windowHeight = 0;
     this.mouseX = 0;
     this.mouseY = 0;
     this.mouseScreenX = 0;
@@ -1106,9 +1121,11 @@ class Emulator {
     this.controlKeyState = 0;
     this.keyBuffer.length = 0;
     this.lastDrawRectHeight = 0;
-    this.cpuBusySamples.length = 0;
-    this.cpuBusySampleTotalMs = 0;
-    this.cpuBusyActiveStartMs = 0;
+  }
+
+  resetResourceState() {
+    this.heapAllocs.clear();
+    this.heapFreeBlocks.length = 0;
     this.hostCallStubs.clear();
     this.loadedHostLibraries.clear();
     this.loadedDllLibraries.clear();
@@ -1169,7 +1186,18 @@ class Emulator {
     this.segSS = 0;
     this.segFS = 0;
     this.segGS = 0;
-    this.resetSkinTheme();
+  }
+
+  load(image) {
+    this.image = image;
+    this.imageDataRaw = new Uint8Array(image.image);
+    this.imageData = new Uint8Array(image.image);
+    this.resetImageAnalysisState();
+    this.resetExecutionState();
+    this.resetEventState(true);
+    this.resetWindowState();
+    this.resetInputState();
+    this.resetResourceState();
     this.ensureSkinThemeLoaded();
     const scanLimit = Math.max(0, Math.min(this.imageData.length >>> 0, this.image.header.imageSize >>> 0));
     const scanData = scanLimit > 0 ? this.imageData.subarray(0, scanLimit) : this.imageData;

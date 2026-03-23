@@ -89,16 +89,20 @@ function loadScenarioFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
+function createDefaultFileProviders(targetPath, rootDir) {
+  return createNodeFileProviders(targetPath, rootDir);
+}
+
 function createDefaultFileProvider(targetPath, rootDir) {
-  return createNodeFileProviders(targetPath, rootDir).fileProvider;
+  return createDefaultFileProviders(targetPath, rootDir).fileProvider;
 }
 
 function createDefaultFileInfoProvider(targetPath, rootDir) {
-  return createNodeFileProviders(targetPath, rootDir).fileInfoProvider;
+  return createDefaultFileProviders(targetPath, rootDir).fileInfoProvider;
 }
 
 function createDefaultFileMutationProvider(targetPath, rootDir) {
-  return createNodeFileProviders(targetPath, rootDir).fileMutationProvider;
+  return createDefaultFileProviders(targetPath, rootDir).fileMutationProvider;
 }
 
 function buildExternalAppProcessPath(targetPath) {
@@ -1223,9 +1227,10 @@ class HeadlessUiHarness {
     process.emulator.getHostScreenSize = () => this.getReportedScreenSize();
     process.emulator.getHostPixelOwnerAt = (x, y) => this.getPixelOwnerAt(x | 0, y | 0);
     process.emulator.getHostPixelColorAt = (x, y) => this.getPixelColorAt(x | 0, y | 0);
-    process.emulator.fileProvider = createDefaultFileProvider(process.targetPath || this.targetPath, this.rootDir);
-    process.emulator.fileInfoProvider = createDefaultFileInfoProvider(process.targetPath || this.targetPath, this.rootDir);
-    process.emulator.fileMutationProvider = createDefaultFileMutationProvider(process.targetPath || this.targetPath, this.rootDir);
+    const fileProviders = createDefaultFileProviders(process.targetPath || this.targetPath, this.rootDir);
+    process.emulator.fileProvider = fileProviders.fileProvider;
+    process.emulator.fileInfoProvider = fileProviders.fileInfoProvider;
+    process.emulator.fileMutationProvider = fileProviders.fileMutationProvider;
     process.emulator.traceOpcodes = global.process.env.KOS_TRACE_OPCODES === "1";
     process.emulator.traceSyscalls = global.process.env.KOS_TRACE_SYSCALLS === "1";
     process.emulator.traceImages = global.process.env.KOS_TRACE_IMAGES === "1";
@@ -2672,10 +2677,13 @@ async function main() {
 
 module.exports = {
   HeadlessUiHarness,
+  buildExternalAppProcessPath,
+  createDefaultFileProviders,
   createDefaultFileProvider,
   createDefaultFileInfoProvider,
   createDefaultFileMutationProvider,
   loadKosRuntime,
+  readTargetImage,
   loadScenarioFile,
   runScenarioFile
 };

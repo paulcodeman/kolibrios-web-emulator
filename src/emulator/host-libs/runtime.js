@@ -653,7 +653,7 @@
         return { eax: eax >>> 0 };
       },
 
-      queueHostIniEnumCallback(stateId, esp, finalReturnEip) {
+      queueHostIniEnumCallback(stateId, callerEsp, finalReturnEip) {
         const key = stateId >>> 0;
         const states = this.hostIniEnumStates instanceof Map ? this.hostIniEnumStates : null;
         const state = states ? (states.get(key) || null) : null;
@@ -666,13 +666,17 @@
         const sectionName = String(state.sectionNames[state.index] || "");
         state.index = ((state.index | 0) + 1) | 0;
         this.writeCString(state.secBufPtr >>> 0, sectionName, Math.max(1, state.secBufSize | 0));
-        const frameEsp = esp >>> 0;
-        this.writeMem32(frameEsp >>> 0, state.continuationPtr >>> 0);
-        this.writeMem32((frameEsp + 4) >>> 0, state.filePtr >>> 0);
-        this.writeMem32((frameEsp + 8) >>> 0, state.secBufPtr >>> 0);
-        this.writeMem32((frameEsp + 12) >>> 0, finalReturnEip >>> 0);
+        const frameBaseEsp = callerEsp >>> 0;
+        const callbackEsp = (frameBaseEsp - 12) >>> 0;
+        // Reuse the original stdcall frame so repeated callbacks do not grow the stack.
+        this.writeMem32(callbackEsp >>> 0, state.continuationPtr >>> 0);
+        this.writeMem32((callbackEsp + 4) >>> 0, state.filePtr >>> 0);
+        this.writeMem32((callbackEsp + 8) >>> 0, state.secBufPtr >>> 0);
+        if (finalReturnEip !== undefined) {
+          this.writeMem32(frameBaseEsp >>> 0, finalReturnEip >>> 0);
+        }
         return {
-          esp: frameEsp >>> 0,
+          esp: callbackEsp >>> 0,
           eip: state.callbackPtr >>> 0
         };
       },
@@ -704,7 +708,7 @@
         if (!secBufPtr) {
           return { eax: 0xffffffff >>> 0 };
         }
-        const continuationPtr = this.registerHostCallStub(`libini:enum_sections#${stateId}`, 0, (continuationContext) => {
+        const continuationPtr = this.registerHostCallStub(`libini:enum_sections#${stateId}`, 8, (continuationContext) => {
           const callbackResult = this.readReg(REG.EAX) >>> 0;
           if (callbackResult && this.hostIniEnumStates instanceof Map && this.hostIniEnumStates.has(stateId >>> 0)) {
             return this.queueHostIniEnumCallback(stateId >>> 0, continuationContext.esp >>> 0, continuationContext.returnEip >>> 0);
