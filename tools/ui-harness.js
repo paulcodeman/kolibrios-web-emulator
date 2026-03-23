@@ -769,8 +769,28 @@ class HeadlessUiHarness {
     return this.keyboardLanguageId >>> 0;
   }
 
+  notifyKeyboardLanguageChanged() {
+    let updated = false;
+    for (let i = 0; i < this.processes.length; i += 1) {
+      const process = this.processes[i];
+      if (!process || process.removed || !process.emulator || !process.emulator.running) {
+        continue;
+      }
+      process.emulator.removeQueuedEvent(1);
+      process.emulator.queueEvent(1);
+      process.emulator.wakeExecution();
+      updated = true;
+    }
+    return updated;
+  }
+
   setKeyboardLanguageId(value) {
-    this.keyboardLanguageId = Math.max(0, value | 0) >>> 0;
+    const next = Math.max(0, value | 0) >>> 0;
+    if (next === (this.keyboardLanguageId >>> 0)) {
+      return true;
+    }
+    this.keyboardLanguageId = next;
+    this.notifyKeyboardLanguageChanged();
     return true;
   }
 

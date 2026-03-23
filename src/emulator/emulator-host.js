@@ -668,7 +668,8 @@
 
       queueSystemButtonEvent(buttonId, mouseButtonMask) {
         const packedId = (buttonId | 0) & 0x00ffffff;
-        this.pendingButtonResult = (((packedId >>> 0) << 8) | ((mouseButtonMask | 0) & 0xff)) >>> 0;
+        const encodedButtons = (mouseButtonMask | 0) & 0x1e;
+        this.pendingButtonResult = (((packedId >>> 0) << 8) | (encodedButtons & 0xff)) >>> 0;
         this.removeQueuedEvent(3);
         this.queueEvent(3);
         this.wakeExecution();

@@ -2372,6 +2372,10 @@
       sysThreadInfo() {
         const ptr = this.readReg(REG.EBX) >>> 0;
         const maxSlot = this.getHostMaxThreadSlot ? (this.getHostMaxThreadSlot() >>> 0) : (this.threadSlot >>> 0);
+        const encodeSize = (value) => {
+          const size = value >>> 0;
+          return size > 0 ? ((size - 1) >>> 0) : 0;
+        };
         if (!ptr) {
           this.writeReg(REG.EAX, maxSlot >>> 0);
           return;
@@ -2397,13 +2401,13 @@
           view.setUint32(0x1e, (info.pid >>> 0), true);
           view.setUint32(0x22, (info.windowX >>> 0), true);
           view.setUint32(0x26, (info.windowY >>> 0), true);
-          view.setUint32(0x2a, (info.windowWidth >>> 0), true);
-          view.setUint32(0x2e, (info.windowHeight >>> 0), true);
+          view.setUint32(0x2a, encodeSize(info.windowWidth), true);
+          view.setUint32(0x2e, encodeSize(info.windowHeight), true);
           view.setUint16(0x32, (info.slotState >>> 0) & 0xffff, true);
           view.setUint32(0x36, (info.clientX >>> 0), true);
           view.setUint32(0x3a, (info.clientY >>> 0), true);
-          view.setUint32(0x3e, (info.clientWidth >>> 0), true);
-          view.setUint32(0x42, (info.clientHeight >>> 0), true);
+          view.setUint32(0x3e, encodeSize(info.clientWidth), true);
+          view.setUint32(0x42, encodeSize(info.clientHeight), true);
           buf[0x46] = info.windowState & 0xff;
           view.setUint32(0x47, (info.eventMask >>> 0), true);
           buf[0x4b] = info.keyboardMode & 0xff;
@@ -2413,8 +2417,8 @@
           view.setUint32(0x1a, (this.memLimit ? (this.memLimit - 1) : 0) >>> 0, true);
           view.setUint32(0x22, 0, true);
           view.setUint32(0x26, 0, true);
-          view.setUint32(0x2a, this.surface.width >>> 0, true);
-          view.setUint32(0x2e, this.surface.height >>> 0, true);
+          view.setUint32(0x2a, encodeSize(this.surface.width), true);
+          view.setUint32(0x2e, encodeSize(this.surface.height), true);
           view.setUint16(0x32, slot === (this.threadSlot >>> 0) ? 0 : 9, true);
           view.setUint32(0x36, 0, true);
           view.setUint32(0x3a, 0, true);

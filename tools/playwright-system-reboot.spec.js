@@ -34,7 +34,7 @@ function readBase64(kpath) {
   return fs.readFileSync(resolveExistingHostPath(kpath)).toString("base64");
 }
 
-test("system reboot syscall restarts the loaded app and exits fullscreen", async ({ page }) => {
+test("system reboot syscall restarts the loaded app and keeps fullscreen", async ({ page }) => {
   const demoBase64 = readBase64("DEMOS/BCDCLK");
 
   await page.addInitScript(() => {
@@ -120,7 +120,7 @@ test("system reboot syscall restarts the loaded app and exits fullscreen", async
     const app = window.__app;
     const session = app && app.sessionManager ? app.sessionManager : null;
     if (
-      document.fullscreenElement !== null ||
+      document.fullscreenElement !== document.getElementById("screenPanel") ||
       !session ||
       !Array.isArray(session.processes) ||
       session.processes.length !== 1
@@ -131,7 +131,7 @@ test("system reboot syscall restarts the loaded app and exits fullscreen", async
     return !!process && !process.removed && process !== window.__rebootProcessRef;
   });
 
-  await expect(button).toHaveText("Fullscreen");
+  await expect(button).toHaveText("Windowed");
   const state = await page.evaluate(() => {
     const app = window.__app;
     const session = app && app.sessionManager ? app.sessionManager : null;
@@ -139,10 +139,12 @@ test("system reboot syscall restarts the loaded app and exits fullscreen", async
     const process = session && session.processes.length ? session.processes[0] : null;
     return {
       processCount: session && Array.isArray(session.processes) ? session.processes.length : -1,
-      emptyVisible: !!(empty && !empty.hidden)
+      emptyVisible: !!(empty && !empty.hidden),
+      fullscreenTargetId: document.fullscreenElement ? String(document.fullscreenElement.id || "") : ""
     };
   });
 
   expect(state.processCount).toBe(1);
   expect(state.emptyVisible).toBe(false);
+  expect(state.fullscreenTargetId).toBe("screenPanel");
 });

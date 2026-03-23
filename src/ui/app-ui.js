@@ -125,6 +125,38 @@
     MetaLeft: 0x200,
     MetaRight: 0x400
   };
+  const KEYBOARD_LANGUAGE_IDS = Object.freeze({
+    EN: 1,
+    FI: 2,
+    GE: 3,
+    RU: 4,
+    FR: 5,
+    ET: 6,
+    UA: 7,
+    IT: 8,
+    BE: 9
+  });
+  const KEYBOARD_LAYOUT_SAMPLE_CODES = Object.freeze([
+    "KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP",
+    "KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK", "KeyL",
+    "KeyZ", "KeyX", "KeyC", "KeyV", "KeyB", "KeyN", "KeyM"
+  ]);
+  const CYRILLIC_RE = /[\u0400-\u04ff]/;
+  const LATIN_RE = /[A-Za-z]/;
+  const UKRAINIAN_RE = /[ІіЇїЄєҐґ]/;
+  const BELARUSIAN_RE = /[Ўў]/;
+  const BROWSER_LAYOUT_TEMPLATE_EN_NORMAL = Object.freeze([
+    [0,54],[1,27],[2,49],[3,50],[4,51],[5,52],[6,53],[7,54],[8,55],[9,56],[10,57],[11,48],[12,45],[13,61],[14,8],[15,9],[16,113],[17,119],[18,101],[19,114],[20,116],[21,121],[22,117],[23,105],[24,111],[25,112],[26,91],[27,93],[28,13],[29,126],[30,97],[31,115],[32,100],[33,102],[34,103],[35,104],[36,106],[37,107],[38,108],[39,59],[40,39],[41,96],[43,92],[44,122],[45,120],[46,99],[47,118],[48,98],[49,110],[50,109],[51,44],[52,46],[53,47],[55,52],[56,53],[57,32],[58,64],[59,50],[60,51],[61,52],[62,53],[63,54],[64,55],[65,56],[66,57],[67,48],[68,49],[69,50],[70,51],[71,180],[72,178],[73,184],[74,54],[75,176],[76,55],[77,179],[78,56],[79,181],[80,177],[81,183],[82,185],[83,182],[84,65],[85,66],[86,60],[87,68],[88,255],[89,70],[90,71],[91,72],[92,73],[93,74],[94,75],[95,76],[96,77],[97,78],[98,79],[99,80],[100,81],[101,82],[102,83],[103,84],[104,85],[105,86],[106,87],[107,88],[108,89],[109,90],[110,65],[111,66],[112,67],[113,68],[114,69],[115,70],[116,71],[117,72],[118,73],[119,74],[120,75],[121,76],[122,77],[123,78],[124,79],[125,80],[126,81],[127,82]
+  ]);
+  const BROWSER_LAYOUT_TEMPLATE_EN_SHIFT = Object.freeze([
+    [0,54],[1,27],[2,33],[3,64],[4,35],[5,36],[6,37],[7,94],[8,38],[9,42],[10,40],[11,41],[12,95],[13,43],[14,8],[15,9],[16,81],[17,87],[18,69],[19,82],[20,84],[21,89],[22,85],[23,73],[24,79],[25,80],[26,123],[27,125],[28,13],[29,126],[30,65],[31,83],[32,68],[33,70],[34,71],[35,72],[36,74],[37,75],[38,76],[39,58],[40,34],[41,126],[43,124],[44,90],[45,88],[46,67],[47,86],[48,66],[49,78],[50,77],[51,60],[52,62],[53,63],[55,52],[56,53],[57,32],[58,64],[59,50],[60,51],[61,52],[62,53],[63,54],[64,55],[65,56],[66,57],[67,48],[68,49],[69,50],[70,51],[71,180],[72,178],[73,184],[74,54],[75,176],[76,55],[77,179],[78,56],[79,181],[80,177],[81,183],[82,185],[83,182],[84,65],[85,66],[86,62],[87,68],[88,255],[89,70],[90,71],[91,72],[92,73],[93,74],[94,75],[95,76],[96,77],[97,78],[98,79],[99,80],[100,81],[101,82],[102,83],[103,84],[104,85],[105,86],[106,87],[107,88],[108,89],[109,90],[110,65],[111,66],[112,67],[113,68],[114,69],[115,70],[116,71],[117,72],[118,73],[119,74],[120,75],[121,76],[122,77],[123,78],[124,79],[125,80],[126,81],[127,82]
+  ]);
+  const BROWSER_LAYOUT_TEMPLATE_RU_NORMAL = Object.freeze([
+    [0,54],[1,27],[2,49],[3,50],[4,51],[5,52],[6,53],[7,54],[8,55],[9,56],[10,57],[11,48],[12,45],[13,61],[14,8],[15,9],[16,169],[17,230],[18,227],[19,170],[20,165],[21,173],[22,163],[23,232],[24,233],[25,167],[26,229],[27,234],[28,13],[30,228],[31,235],[32,162],[33,160],[34,175],[35,224],[36,174],[37,171],[38,164],[39,166],[40,237],[41,241],[42,45],[43,47],[44,239],[45,231],[46,225],[47,172],[48,168],[49,226],[50,236],[51,161],[52,238],[53,46],[54,45],[55,52],[56,53],[57,32],[58,64],[59,50],[60,51],[61,52],[62,53],[63,54],[64,55],[65,56],[66,57],[67,48],[68,49],[69,50],[70,51],[71,180],[72,178],[73,184],[74,54],[75,176],[76,55],[77,179],[78,56],[79,181],[80,177],[81,183],[82,185],[83,182],[84,65],[85,66],[86,60],[87,68],[88,255],[89,70],[90,71],[91,72],[92,73],[93,74],[94,75],[95,76],[96,77],[97,78],[98,79],[99,80],[100,81],[101,82],[102,83],[103,84],[104,85],[105,86],[106,87],[107,88],[108,89],[109,90],[110,65],[111,66],[112,67],[113,68],[114,69],[115,70],[116,71],[117,72],[118,73],[119,74],[120,75],[121,76],[122,77],[123,78],[124,79],[125,80],[126,81],[127,82]
+  ]);
+  const BROWSER_LAYOUT_TEMPLATE_RU_SHIFT = Object.freeze([
+    [0,54],[1,27],[2,33],[3,34],[4,78],[5,59],[6,37],[7,58],[8,63],[9,42],[10,40],[11,41],[12,95],[13,43],[14,8],[16,137],[17,150],[18,147],[19,138],[20,133],[21,141],[22,131],[23,152],[24,153],[25,135],[26,149],[27,154],[28,13],[30,148],[31,155],[32,130],[33,128],[34,143],[35,144],[36,142],[37,139],[38,132],[39,134],[40,157],[41,240],[42,45],[43,92],[44,159],[45,151],[46,145],[47,140],[48,136],[49,146],[50,156],[51,129],[52,158],[53,44],[54,45],[55,52],[56,53],[57,32],[58,64],[59,50],[60,51],[61,52],[62,53],[63,54],[64,55],[65,56],[66,57],[67,48],[68,49],[69,50],[70,51],[71,180],[72,178],[73,184],[74,54],[75,176],[76,55],[77,179],[78,56],[79,181],[80,177],[81,183],[82,185],[83,182],[84,65],[85,66],[86,62],[87,68],[88,255],[89,70],[90,71],[91,72],[92,73],[93,74],[94,75],[95,76],[96,77],[97,78],[98,79],[99,80],[100,81],[101,82],[102,83],[103,84],[104,85],[105,86],[106,87],[107,88],[108,89],[109,90],[110,65],[111,66],[112,67],[113,68],[114,69],[115,70],[116,71],[117,72],[118,73],[119,74],[120,75],[121,76],[122,77],[123,78],[124,79],[125,80],[126,81],[127,82]
+  ]);
 
   function isLockKey(code) {
     return code === "CapsLock" || code === "NumLock" || code === "ScrollLock";
@@ -227,6 +259,166 @@
     };
   }
 
+  function inferKeyboardLanguageIdFromText(text) {
+    const value = typeof text === "string" ? text : "";
+    if (!value) {
+      return 0;
+    }
+    if (UKRAINIAN_RE.test(value)) {
+      return KEYBOARD_LANGUAGE_IDS.UA;
+    }
+    if (BELARUSIAN_RE.test(value)) {
+      return KEYBOARD_LANGUAGE_IDS.BE;
+    }
+    if (CYRILLIC_RE.test(value)) {
+      return KEYBOARD_LANGUAGE_IDS.RU;
+    }
+    if (LATIN_RE.test(value)) {
+      return KEYBOARD_LANGUAGE_IDS.EN;
+    }
+    return 0;
+  }
+
+  function inferKeyboardLanguageIdFromLayoutMap(layoutMap) {
+    if (!layoutMap || typeof layoutMap.get !== "function") {
+      return 0;
+    }
+    let detectedCyrillic = 0;
+    let detectedLatin = 0;
+    let detectedUa = 0;
+    let detectedBe = 0;
+    for (let i = 0; i < KEYBOARD_LAYOUT_SAMPLE_CODES.length; i += 1) {
+      const text = layoutMap.get(KEYBOARD_LAYOUT_SAMPLE_CODES[i]);
+      const languageId = inferKeyboardLanguageIdFromText(text);
+      if (languageId === KEYBOARD_LANGUAGE_IDS.UA) {
+        detectedUa += 1;
+        continue;
+      }
+      if (languageId === KEYBOARD_LANGUAGE_IDS.BE) {
+        detectedBe += 1;
+        continue;
+      }
+      if (languageId === KEYBOARD_LANGUAGE_IDS.RU) {
+        detectedCyrillic += 1;
+        continue;
+      }
+      if (languageId === KEYBOARD_LANGUAGE_IDS.EN) {
+        detectedLatin += 1;
+      }
+    }
+    if (detectedUa > 0) {
+      return KEYBOARD_LANGUAGE_IDS.UA;
+    }
+    if (detectedBe > 0) {
+      return KEYBOARD_LANGUAGE_IDS.BE;
+    }
+    if (detectedCyrillic > 0) {
+      return KEYBOARD_LANGUAGE_IDS.RU;
+    }
+    const lowerQ = String(layoutMap.get("KeyQ") || "").toLowerCase();
+    const lowerA = String(layoutMap.get("KeyA") || "").toLowerCase();
+    const lowerY = String(layoutMap.get("KeyY") || "").toLowerCase();
+    const lowerZ = String(layoutMap.get("KeyZ") || "").toLowerCase();
+    if (lowerQ === "a" && lowerA === "q") {
+      return KEYBOARD_LANGUAGE_IDS.FR;
+    }
+    if (lowerY === "z" && lowerZ === "y") {
+      return KEYBOARD_LANGUAGE_IDS.GE;
+    }
+    if (detectedLatin > 0) {
+      return KEYBOARD_LANGUAGE_IDS.EN;
+    }
+    return 0;
+  }
+
+  function makeKeyboardLayoutFromPairs(pairs) {
+    const layout = new Uint8Array(128);
+    const source = Array.isArray(pairs) ? pairs : [];
+    for (let i = 0; i < source.length; i += 1) {
+      const item = source[i];
+      if (!item || item.length < 2) {
+        continue;
+      }
+      layout[item[0] & 0x7f] = item[1] & 0xff;
+    }
+    return layout;
+  }
+
+  function cloneKeyboardLayout(layout) {
+    return layout instanceof Uint8Array ? layout.slice(0, 128) : new Uint8Array(128);
+  }
+
+  function getKeyboardLayoutTemplatesForLanguage(languageId) {
+    switch (languageId | 0) {
+      case KEYBOARD_LANGUAGE_IDS.RU:
+        return {
+          normal: makeKeyboardLayoutFromPairs(BROWSER_LAYOUT_TEMPLATE_RU_NORMAL),
+          shift: makeKeyboardLayoutFromPairs(BROWSER_LAYOUT_TEMPLATE_RU_SHIFT),
+          alt: new Uint8Array(128)
+        };
+      default:
+        return {
+          normal: makeKeyboardLayoutFromPairs(BROWSER_LAYOUT_TEMPLATE_EN_NORMAL),
+          shift: makeKeyboardLayoutFromPairs(BROWSER_LAYOUT_TEMPLATE_EN_SHIFT),
+          alt: new Uint8Array(128)
+        };
+    }
+  }
+
+  function getKeyboardLayoutEntryFromCode(code) {
+    const entry = KEYBOARD_SCANCODES[String(code || "")] || null;
+    if (!entry) {
+      return null;
+    }
+    if (entry.extended || (entry.scanCode & 0xff) >= 0x80) {
+      return null;
+    }
+    return entry;
+  }
+
+  function setKeyboardLayoutEntry(layout, scanCode, value) {
+    if (!(layout instanceof Uint8Array)) {
+      return false;
+    }
+    const index = scanCode & 0x7f;
+    const next = value & 0xff;
+    if ((layout[index] & 0xff) === next) {
+      return false;
+    }
+    layout[index] = next;
+    return true;
+  }
+
+  function buildKeyboardLayoutsFromLayoutMap(layoutMap, languageId) {
+    const templates = getKeyboardLayoutTemplatesForLanguage(languageId);
+    const normal = cloneKeyboardLayout(templates.normal);
+    const shift = cloneKeyboardLayout(templates.shift);
+    const alt = cloneKeyboardLayout(templates.alt);
+    if (!layoutMap || typeof layoutMap.get !== "function") {
+      return { normal, shift, alt };
+    }
+    for (const code of Object.keys(KEYBOARD_SCANCODES)) {
+      const entry = getKeyboardLayoutEntryFromCode(code);
+      if (!entry) {
+        continue;
+      }
+      const key = layoutMap.get(code);
+      const normalByte = getCp866ByteFromKey(key);
+      if (normalByte) {
+        setKeyboardLayoutEntry(normal, entry.scanCode, normalByte);
+        const upperByte = getCp866ByteFromKey(String(key).toUpperCase());
+        const lowerByte = getCp866ByteFromKey(String(key).toLowerCase());
+        if (upperByte && upperByte !== normalByte) {
+          setKeyboardLayoutEntry(shift, entry.scanCode, upperByte);
+        } else if (lowerByte && lowerByte !== normalByte) {
+          setKeyboardLayoutEntry(shift, entry.scanCode, normalByte);
+          setKeyboardLayoutEntry(normal, entry.scanCode, lowerByte);
+        }
+      }
+    }
+    return { normal, shift, alt };
+  }
+
   class App {
     start() {
       this.bindDom();
@@ -249,8 +441,16 @@
       this.launcherOverlayPointerId = -1;
       this.launcherOverlayStartX = 0;
       this.launcherOverlayStartY = 0;
+      this.browserKeyboardLanguageRefreshTimer = 0;
+      this.browserKeyboardLanguageRefreshToken = 0;
       this.boundFullscreenChange = () => this.handleFullscreenChange();
       this.boundFullscreenError = () => this.handleFullscreenError();
+      this.boundWindowFocus = () => this.scheduleBrowserKeyboardLanguageRefresh(0);
+      this.boundVisibilityChange = () => {
+        if (!document.hidden) {
+          this.scheduleBrowserKeyboardLanguageRefresh(0);
+        }
+      };
       this.sessionManager = new KosEmu.ui.SessionManager(this, this.workspaceEl);
 
       if (this.fileInput) {
@@ -293,8 +493,11 @@
       document.addEventListener("fullscreenerror", this.boundFullscreenError);
       document.addEventListener("webkitfullscreenchange", this.boundFullscreenChange);
       document.addEventListener("webkitfullscreenerror", this.boundFullscreenError);
+      window.addEventListener("focus", this.boundWindowFocus);
+      document.addEventListener("visibilitychange", this.boundVisibilityChange);
 
       window.addEventListener("beforeunload", () => {
+        this.clearBrowserKeyboardLanguageRefreshTimer();
         this.flushMountedRoot();
         if (this.sessionManager) {
           this.sessionManager.stopAllProcesses("stopped");
@@ -312,6 +515,7 @@
       this.updateSessionState();
       this.setStatus("Session ready");
       this.restorePersistedRootFolder();
+      this.scheduleBrowserKeyboardLanguageRefresh(0);
     }
 
     bindDom() {
@@ -441,6 +645,129 @@
     handleFullscreenChange() {
       this.updateFullscreenButton();
       this.refreshSessionViewport();
+    }
+
+    clearBrowserKeyboardLanguageRefreshTimer() {
+      if (this.browserKeyboardLanguageRefreshTimer) {
+        clearTimeout(this.browserKeyboardLanguageRefreshTimer);
+        this.browserKeyboardLanguageRefreshTimer = 0;
+      }
+    }
+
+    applyBrowserKeyboardLanguageId(languageId) {
+      if (!this.sessionManager || typeof this.sessionManager.setKeyboardLanguageId !== "function") {
+        return false;
+      }
+      const next = Math.max(0, languageId | 0) >>> 0;
+      if (!next) {
+        return false;
+      }
+      return !!this.sessionManager.setKeyboardLanguageId(next);
+    }
+
+    applyBrowserKeyboardLayouts(layouts) {
+      if (!this.sessionManager || typeof this.sessionManager.setKeyboardLayout !== "function" || !layouts) {
+        return false;
+      }
+      let changed = false;
+      if (layouts.normal instanceof Uint8Array) {
+        changed = this.sessionManager.setKeyboardLayout(1, layouts.normal) || changed;
+      }
+      if (layouts.shift instanceof Uint8Array) {
+        changed = this.sessionManager.setKeyboardLayout(2, layouts.shift) || changed;
+      }
+      if (layouts.alt instanceof Uint8Array) {
+        changed = this.sessionManager.setKeyboardLayout(3, layouts.alt) || changed;
+      }
+      return changed;
+    }
+
+    updateBrowserKeyboardLayoutEntry(event) {
+      if (!this.sessionManager || typeof this.sessionManager.getKeyboardLayout !== "function" || typeof this.sessionManager.setKeyboardLayout !== "function") {
+        return false;
+      }
+      const entry = getKeyboardLayoutEntryFromCode(event && event.code);
+      if (!entry) {
+        return false;
+      }
+      const keyText = event && typeof event.key === "string" ? event.key : "";
+      const byte = getCp866ByteFromKey(keyText);
+      if (!byte) {
+        return false;
+      }
+      const scanCode = entry.scanCode & 0x7f;
+      const shiftPressed = !!(event && event.shiftKey);
+      const kind = shiftPressed ? 2 : 1;
+      const current = cloneKeyboardLayout(this.sessionManager.getKeyboardLayout(kind));
+      let changed = setKeyboardLayoutEntry(current, scanCode, byte);
+      if (changed) {
+        this.sessionManager.setKeyboardLayout(kind, current);
+      }
+      const oppositeText = shiftPressed ? String(keyText).toLowerCase() : String(keyText).toUpperCase();
+      const oppositeByte = getCp866ByteFromKey(oppositeText);
+      if (oppositeByte && oppositeByte !== byte) {
+        const oppositeKind = shiftPressed ? 1 : 2;
+        const opposite = cloneKeyboardLayout(this.sessionManager.getKeyboardLayout(oppositeKind));
+        if (setKeyboardLayoutEntry(opposite, scanCode, oppositeByte)) {
+          this.sessionManager.setKeyboardLayout(oppositeKind, opposite);
+          changed = true;
+        }
+      }
+      return changed;
+    }
+
+    async refreshBrowserKeyboardLanguage() {
+      const keyboardApi = typeof navigator !== "undefined" && navigator ? navigator.keyboard : null;
+      if (!keyboardApi || typeof keyboardApi.getLayoutMap !== "function") {
+        return 0;
+      }
+      const refreshToken = ((this.browserKeyboardLanguageRefreshToken | 0) + 1) | 0;
+      this.browserKeyboardLanguageRefreshToken = refreshToken;
+      let layoutMap = null;
+      try {
+        layoutMap = await keyboardApi.getLayoutMap();
+      } catch (err) {
+        return 0;
+      }
+      if ((this.browserKeyboardLanguageRefreshToken | 0) !== refreshToken) {
+        return 0;
+      }
+      const languageId = inferKeyboardLanguageIdFromLayoutMap(layoutMap);
+      if (languageId) {
+        this.applyBrowserKeyboardLanguageId(languageId);
+        this.applyBrowserKeyboardLayouts(buildKeyboardLayoutsFromLayoutMap(layoutMap, languageId));
+      }
+      return languageId | 0;
+    }
+
+    scheduleBrowserKeyboardLanguageRefresh(delayMs) {
+      const delay = Math.max(0, delayMs | 0);
+      this.clearBrowserKeyboardLanguageRefreshTimer();
+      this.browserKeyboardLanguageRefreshTimer = setTimeout(() => {
+        this.browserKeyboardLanguageRefreshTimer = 0;
+        void this.refreshBrowserKeyboardLanguage();
+      }, delay);
+    }
+
+    handleBrowserKeyboardSyncEvent(event) {
+      const languageId = inferKeyboardLanguageIdFromText(event && typeof event.key === "string" ? event.key : "");
+      if (languageId) {
+        this.applyBrowserKeyboardLanguageId(languageId);
+      }
+      this.updateBrowserKeyboardLayoutEntry(event);
+      const code = event && typeof event.code === "string" ? event.code : "";
+      const mightChangeLayout =
+        code === "AltLeft" ||
+        code === "AltRight" ||
+        code === "ShiftLeft" ||
+        code === "ShiftRight" ||
+        code === "MetaLeft" ||
+        code === "MetaRight" ||
+        code === "Space" ||
+        (!!event && (event.altKey || event.ctrlKey || event.metaKey));
+      if (mightChangeLayout) {
+        this.scheduleBrowserKeyboardLanguageRefresh(40);
+      }
     }
 
     normalizeLauncherOverlayDelay(value, fallback, min, max) {
@@ -653,8 +980,9 @@
       }
       const label = this.describeSystemAction(mode);
       this.log(`${label} requested by guest.`);
+      const preserveFullscreen = mode !== 2 && this.isWorkspaceFullscreen();
       let fullscreenPromise = null;
-      if (this.isWorkspaceFullscreen()) {
+      if (!preserveFullscreen && this.isWorkspaceFullscreen()) {
         fullscreenPromise = this.exitWorkspaceFullscreen();
       }
       if (this.sessionManager) {
@@ -673,6 +1001,9 @@
       if (mode !== 2) {
         try {
           await this.rebootCurrentSession();
+          if (preserveFullscreen) {
+            this.refreshSessionViewport();
+          }
         } catch (err) {
           restartError = err instanceof Error ? err.message : String(err);
           this.log(`${label} failed: ${restartError}`);
@@ -1196,7 +1527,11 @@
   KosEmu.ui.keyboard = {
     KEYBOARD_SCANCODES,
     CONTROL_KEY_MASKS,
+    KEYBOARD_LANGUAGE_IDS,
+    buildKeyboardLayoutsFromLayoutMap,
     getAsciiCodeFromKey,
+    inferKeyboardLanguageIdFromLayoutMap,
+    inferKeyboardLanguageIdFromText,
     isLockKey,
     isTrackedKeyboardCode,
     translateDomKeyboardEvent,
