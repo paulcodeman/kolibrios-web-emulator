@@ -1,0 +1,64 @@
+const { loadKosRuntime } = require("./ui-harness");
+
+const { Emulator, createHeadlessSurface } = loadKosRuntime();
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function assertEq(actual, expected, message) {
+  if (actual !== expected) {
+    throw new Error(`${message}: expected ${expected}, got ${actual}`);
+  }
+}
+
+try {
+  const surface = createHeadlessSurface(64, 64);
+  let presentCalls = 0;
+  surface.present = () => {
+    presentCalls += 1;
+  };
+
+  const emulator = new Emulator(surface, () => {});
+  emulator.running = true;
+  emulator.cpu = {};
+  emulator.windowDefined = true;
+  emulator.useImmediateScheduler = true;
+  emulator.maxInstructions = 3;
+  emulator.backgroundMaxInstructions = 3;
+  emulator.syscallSiteSet = new Set();
+  emulator.softInstructions = false;
+  emulator.readReg = () => 0;
+  emulator.readMem8 = () => 0x90;
+  emulator.executeCachedBasicBlock = () => 0;
+  emulator.executeAndBuildBasicBlock = () => 0;
+
+  let executed = 0;
+  emulator.executeBasicInstruction = () => {
+    executed += 1;
+    emulator.presentIfNeeded(false);
+    return true;
+  };
+
+  let scheduled = null;
+  emulator.scheduleStep = (delay) => {
+    scheduled = {
+      delay: delay | 0,
+      mode: emulator.yieldMode || ""
+    };
+  };
+
+  emulator.stepInterpreter();
+
+  assertEq(executed, 3, "present should not stop the current interpreter slice");
+  assertEq(presentCalls, 1, "present throttling should still coalesce repeated flushes");
+  assert(scheduled && scheduled.mode === "", "present throttling should not switch the scheduler into frame-wait mode");
+  assert(scheduled && scheduled.delay >= 1 && scheduled.delay <= 16, "present throttling should resume after the remaining frame budget");
+
+  console.log("Autotest OK: present scheduling coalesces rapid presents without stalling the current slice.");
+} catch (err) {
+  console.error(err instanceof Error ? err.stack || err.message : String(err));
+  process.exit(2);
+}

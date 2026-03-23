@@ -1402,6 +1402,9 @@
         if (!forceWake && this.timer && this.yieldMode === "sleep") {
           return;
         }
+        if (this.yieldMode === "present") {
+          this.yieldMode = "";
+        }
         if (typeof this.cancelScheduledStep === "function") {
           this.cancelScheduledStep();
         } else if (this.timer) {

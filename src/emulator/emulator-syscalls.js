@@ -2633,8 +2633,9 @@
         const pos0 = this.applyWindowOffset(x0, y0);
         const baseX = pos0.x;
         const baseY = pos0.y;
-        const stride = rowStride !== 0 ? rowStride : this.defaultImageStride(width, bpp);
-        if (stride <= 0) {
+        const rowBytes = this.defaultImageStride(width, bpp);
+        const stride = (rowBytes + (rowStride | 0)) | 0;
+        if (rowBytes <= 0 || stride <= 0) {
           return;
         }
     
@@ -2652,7 +2653,7 @@
             this.lastImageHash = hash;
             this.lastPaletteHash = palHash;
             this.log(
-              `image bpp=${bpp} src=0x${srcPtr.toString(16)} pal=0x${palettePtr.toString(16)} stride=${stride} pos=(${x0},${y0}) hash=0x${hash.toString(16)} palhash=0x${palHash.toString(16)}${changed ? "" : " (unchanged)"}`
+              `image bpp=${bpp} src=0x${srcPtr.toString(16)} pal=0x${palettePtr.toString(16)} stride=${stride} rowofs=${rowStride | 0} pos=(${x0},${y0}) hash=0x${hash.toString(16)} palhash=0x${palHash.toString(16)}${changed ? "" : " (unchanged)"}`
             );
           }
         }
@@ -4283,29 +4284,28 @@
         if (this.inRedraw && !force) {
           return;
         }
-        const canYieldForPresent =
+        const canThrottlePresent =
           this.running &&
-          !this.yieldRequested &&
           !this.inRedraw &&
           this.windowDefined &&
-          (this.useImmediateScheduler || typeof requestAnimationFrame === "function") &&
-          typeof this.requestYield === "function";
+          (this.useImmediateScheduler || typeof requestAnimationFrame === "function");
         const now =
           typeof performance !== "undefined" && typeof performance.now === "function"
             ? performance.now()
             : Date.now();
         if (!force && now - this.lastPresentAt < 16) {
-          if (canYieldForPresent) {
-            this.requestYield(0, "present", { skipPresentFlush: true });
+          if (canThrottlePresent) {
+            this.presentYieldPending = true;
+            this.presentYieldDelay = Math.max(
+              this.presentYieldDelay | 0,
+              Math.max(1, 16 - Math.max(0, (now - this.lastPresentAt) | 0))
+            );
           }
           return;
         }
         this.lastPresentAt = now;
         this.surface.present();
         this.surfaceDirty = false;
-        if (canYieldForPresent) {
-          this.requestYield(0, "present", { skipPresentFlush: true });
-        }
       },
 
       sysStyleSettings() {

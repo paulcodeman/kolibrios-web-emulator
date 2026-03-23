@@ -19,6 +19,45 @@
         return Math.max(1, this.maxInstructions | 0) | 0;
       },
 
+      getInterpreterSliceBudgetMs() {
+        const foreground = Math.max(0, this.maxSliceMs | 0) | 0;
+        if (this.windowDefined) {
+          return foreground;
+        }
+        return Math.max(foreground, this.backgroundMaxSliceMs | 0) | 0;
+      },
+
+      beginInterpreterSlice(startMs) {
+        const budgetMs = Math.max(
+          0,
+          typeof this.getInterpreterSliceBudgetMs === "function"
+            ? (this.getInterpreterSliceBudgetMs() | 0)
+            : 0
+        );
+        this.sliceDeadlineAt = budgetMs > 0 ? ((Number(startMs) || 0) + budgetMs) : 0;
+        this.sliceTimeCheckCounter = Math.max(1, this.sliceTimeCheckInterval | 0);
+      },
+
+      shouldYieldForTimeslice() {
+        const deadline = Number(this.sliceDeadlineAt) || 0;
+        if (!(deadline > 0) || !this.running || this.yieldRequested) {
+          return false;
+        }
+        const nextCounter = (this.sliceTimeCheckCounter | 0) - 1;
+        if (nextCounter > 0) {
+          this.sliceTimeCheckCounter = nextCounter;
+          return false;
+        }
+        this.sliceTimeCheckCounter = Math.max(1, this.sliceTimeCheckInterval | 0);
+        const now = typeof this.getWallClockMs === "function" ? this.getWallClockMs() : Date.now();
+        if (now < deadline) {
+          return false;
+        }
+        this.yieldRequested = true;
+        this.yieldMode = "";
+        return true;
+      },
+
       stepInterpreter() {
         if (!this.running || !this.cpu) {
           return;
@@ -26,9 +65,12 @@
         this.yieldRequested = false;
         this.yieldDelay = 0;
         this.yieldMode = "";
+        this.presentYieldPending = false;
+        this.presentYieldDelay = 0;
         let executed = 0;
         const busyStart = typeof this.getWallClockMs === "function" ? this.getWallClockMs() : Date.now();
         this.cpuBusyActiveStartMs = busyStart;
+        this.beginInterpreterSlice(busyStart);
         const budget = Math.max(
           1,
           typeof this.getInterpreterBudget === "function"
@@ -47,14 +89,17 @@
               }
               this.repeatCurrentInstruction = false;
               executed += 1;
+              this.shouldYieldForTimeslice();
               continue;
             }
             if (this.softInstructions && this.handleSoftInstruction(eip)) {
               executed += 1;
+              this.shouldYieldForTimeslice();
               continue;
             }
             if (this.invokeHostCallStub && this.invokeHostCallStub(eip)) {
               executed += 1;
+              this.shouldYieldForTimeslice();
               continue;
             }
             const b0 = this.readMem8(eip);
@@ -67,11 +112,13 @@
               }
               this.repeatCurrentInstruction = false;
               executed += 1;
+              this.shouldYieldForTimeslice();
               continue;
             }
             const cached = this.executeCachedBasicBlock(eip, budget - executed);
             if (cached > 0) {
               executed += cached;
+              this.shouldYieldForTimeslice();
               continue;
             }
             if (!this.running) {
@@ -80,6 +127,7 @@
             const built = this.executeAndBuildBasicBlock(eip, budget - executed);
             if (built > 0) {
               executed += built;
+              this.shouldYieldForTimeslice();
               continue;
             }
             if (!this.running) {
@@ -94,9 +142,12 @@
               break;
             }
             executed += 1;
+            this.shouldYieldForTimeslice();
           }
         } catch (err) {
           this.cpuBusyActiveStartMs = 0;
+          this.sliceDeadlineAt = 0;
+          this.sliceTimeCheckCounter = 0;
           if (executed > 0 && typeof this.noteCpuBusyTime === "function") {
             const busyEnd = typeof this.getWallClockMs === "function" ? this.getWallClockMs() : Date.now();
             this.noteCpuBusyTime(Math.max(0, busyEnd - busyStart));
@@ -109,6 +160,8 @@
           return;
         }
         this.cpuBusyActiveStartMs = 0;
+        this.sliceDeadlineAt = 0;
+        this.sliceTimeCheckCounter = 0;
         if (executed > 0 && typeof this.noteCpuBusyTime === "function") {
           const busyEnd = typeof this.getWallClockMs === "function" ? this.getWallClockMs() : Date.now();
           this.noteCpuBusyTime(Math.max(0, busyEnd - busyStart));
@@ -116,6 +169,13 @@
         if (!this.running) {
           return;
         }
+        if (!this.yieldRequested && this.presentYieldPending) {
+          this.yieldRequested = true;
+          this.yieldDelay = Math.max(0, this.presentYieldDelay | 0);
+          this.yieldMode = "";
+        }
+        this.presentYieldPending = false;
+        this.presentYieldDelay = 0;
         const delay = this.yieldRequested ? this.yieldDelay : 0;
         this.scheduleStep(delay);
       },
@@ -289,6 +349,9 @@
               next
             });
           }
+          if (this.shouldYieldForTimeslice()) {
+            break;
+          }
           if (next === current || !this.canStartBasicBlockAt(next)) {
             break;
           }
@@ -323,6 +386,9 @@
             return executed;
           }
           executed += 1;
+          if (this.shouldYieldForTimeslice()) {
+            break;
+          }
           if ((this.readReg(REG.EIP) >>> 0) !== entry.next) {
             break;
           }
