@@ -1,6 +1,8 @@
 (() => {
   const KosEmu = globalThis.KosEmu;
   const MAX_SURFACE_DIMENSION = 0x7fffffff;
+  const MAX_WEBGL_SURFACES = 8;
+  let activeWebGLSurfaceCount = 0;
 
   function packColor(color) {
     const r = (color >> 16) & 0xff;
@@ -71,6 +73,9 @@ class WebGLSurface {
   constructor(canvas, gl, width, height) {
     this.canvas = canvas;
     this.gl = gl;
+    this.contextLost = false;
+    this.webglSlotOwned = false;
+    this.boundContextLost = (event) => this.handleContextLost(event);
     this.program = this.createProgram();
     this.vao = this.createGeometry();
     this.texture = this.gl.createTexture();
@@ -80,6 +85,8 @@ class WebGLSurface {
     this.buffer32 = new Uint32Array(1);
     this.buffer8 = new Uint8Array(this.buffer32.buffer);
     this.resize(width, height);
+    this.claimWebGLSlot();
+    this.canvas.addEventListener("webglcontextlost", this.boundContextLost, false);
   }
 
   resize(width, height) {
@@ -125,6 +132,32 @@ class WebGLSurface {
     this.buffer8 = nextBuffer.buffer8;
   }
 
+  claimWebGLSlot() {
+    if (this.webglSlotOwned) {
+      return;
+    }
+    this.webglSlotOwned = true;
+    activeWebGLSurfaceCount += 1;
+  }
+
+  releaseWebGLSlot() {
+    if (!this.webglSlotOwned) {
+      return;
+    }
+    this.webglSlotOwned = false;
+    if (activeWebGLSurfaceCount > 0) {
+      activeWebGLSurfaceCount -= 1;
+    }
+  }
+
+  handleContextLost(event) {
+    if (event && typeof event.preventDefault === "function") {
+      event.preventDefault();
+    }
+    this.contextLost = true;
+    this.releaseWebGLSlot();
+  }
+
   clear(color) {
     this.buffer32.fill(packColor(color));
   }
@@ -137,7 +170,15 @@ class WebGLSurface {
   }
 
   present() {
+    if (!this.gl || this.contextLost) {
+      return;
+    }
     const gl = this.gl;
+    if (typeof gl.isContextLost === "function" && gl.isContextLost()) {
+      this.contextLost = true;
+      this.releaseWebGLSlot();
+      return;
+    }
     gl.disable(gl.BLEND);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -172,6 +213,40 @@ class WebGLSurface {
       return false;
     }
     return pixel[0] === 0 && pixel[1] === 0 && pixel[2] === 0 && pixel[3] === 255;
+  }
+
+  destroy() {
+    if (this.canvas && this.boundContextLost) {
+      this.canvas.removeEventListener("webglcontextlost", this.boundContextLost, false);
+    }
+    const gl = this.gl;
+    if (gl && !this.contextLost) {
+      try {
+        if (this.texture) {
+          gl.deleteTexture(this.texture);
+        }
+        if (this.vao) {
+          gl.deleteVertexArray(this.vao);
+        }
+        if (this.program) {
+          gl.deleteProgram(this.program);
+        }
+        const loseContext = typeof gl.getExtension === "function"
+          ? gl.getExtension("WEBGL_lose_context")
+          : null;
+        if (loseContext && typeof loseContext.loseContext === "function") {
+          loseContext.loseContext();
+        }
+      } catch (err) {
+        // Ignore WebGL teardown failures during process shutdown.
+      }
+    }
+    this.contextLost = true;
+    this.releaseWebGLSlot();
+    this.gl = null;
+    this.texture = null;
+    this.vao = null;
+    this.program = null;
   }
 
   createProgram() {
@@ -321,6 +396,10 @@ class Canvas2DSurface {
     const pixel = this.ctx.getImageData(0, 0, 1, 1).data;
     return pixel[0] === 0 && pixel[1] === 0 && pixel[2] === 0 && pixel[3] === 255;
   }
+
+  destroy() {
+    // no-op
+  }
 }
 
 class HeadlessSurface {
@@ -359,18 +438,35 @@ class HeadlessSurface {
   present() {
     // no-op
   }
+
+  destroy() {
+    // no-op
+  }
 }
 
-  function createSurface(canvas, width, height, log) {
-    const webgl = WebGLSurface.tryCreate(canvas, width, height);
-    if (webgl) {
-      if (typeof webgl.verifyPresent === "function" && webgl.verifyPresent()) {
-        log("WebGL2 surface enabled.");
-        return webgl;
+  function createSurface(canvas, width, height, log, options) {
+    const opts = options || null;
+    const preferCanvas2D = !!(opts && opts.preferCanvas2D);
+    if (!preferCanvas2D) {
+      if (activeWebGLSurfaceCount < MAX_WEBGL_SURFACES) {
+        const webgl = WebGLSurface.tryCreate(canvas, width, height);
+        if (webgl) {
+          if (typeof webgl.verifyPresent === "function" && webgl.verifyPresent()) {
+            log("WebGL2 surface enabled.");
+            return webgl;
+          }
+          if (typeof webgl.destroy === "function") {
+            webgl.destroy();
+          }
+          log("WebGL2 surface verification failed, using 2D canvas.");
+        } else {
+          log("WebGL2 unavailable, using 2D canvas.");
+        }
+      } else {
+        log(`WebGL2 surface budget exhausted (${activeWebGLSurfaceCount}/${MAX_WEBGL_SURFACES}), using 2D canvas.`);
       }
-      log("WebGL2 surface verification failed, using 2D canvas.");
     } else {
-      log("WebGL2 unavailable, using 2D canvas.");
+      log("WebGL2 disabled for this surface, using 2D canvas.");
     }
     const surface2d = new Canvas2DSurface(canvas, width, height);
     if (typeof surface2d.verifyPresent === "function" && !surface2d.verifyPresent()) {

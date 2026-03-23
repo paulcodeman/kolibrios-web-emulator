@@ -1994,6 +1994,12 @@
           this.emulator.stop("stopped");
         }
       }
+      if (this.surface && typeof this.surface.destroy === "function") {
+        this.surface.destroy();
+      }
+      if (this.chromeSurface && typeof this.chromeSurface.destroy === "function") {
+        this.chromeSurface.destroy();
+      }
       if (this.rootEl && this.rootEl.parentNode) {
         this.rootEl.parentNode.removeChild(this.rootEl);
       }
@@ -2022,7 +2028,13 @@
       this.processBySlot = new Map();
       this.processByPid = new Map();
       this.sharedNamedMemoryStore = new Map();
-      this.desktopSurface = createSurface(this.desktopCanvasEl, 1, 1, (msg) => this.app.log(`desktop: ${msg}`));
+      this.desktopSurface = createSurface(
+        this.desktopCanvasEl,
+        1,
+        1,
+        (msg) => this.app.log(`desktop: ${msg}`),
+        { preferCanvas2D: true }
+      );
       this.desktopBackgroundWidth = 0;
       this.desktopBackgroundHeight = 0;
       this.desktopBackgroundMode = 1;
