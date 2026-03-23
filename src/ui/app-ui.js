@@ -239,11 +239,18 @@
       this.fsRootBusy = false;
       this.savedFsRootLabel = "";
       this.savedFsRootPendingPermission = false;
+      this.boundFullscreenChange = () => this.updateFullscreenButton();
+      this.boundFullscreenError = () => this.handleFullscreenError();
       this.sessionManager = new KosEmu.ui.SessionManager(this, this.workspaceEl);
 
       this.fileInput.addEventListener("change", () => this.handleFile());
       this.runBtn.addEventListener("click", () => this.handleRun());
       this.stopBtn.addEventListener("click", () => this.handleStop());
+      if (this.fullscreenBtn) {
+        this.fullscreenBtn.addEventListener("click", () => {
+          void this.handleFullscreenToggle();
+        });
+      }
       if (this.pickRootBtn) {
         this.pickRootBtn.addEventListener("click", () => this.handlePickRootFolder());
       }
@@ -260,6 +267,10 @@
         this.traceOpcodesInput.addEventListener("change", () => this.applyTraceConfig());
       }
       this.installWorkspaceDropHandlers();
+      document.addEventListener("fullscreenchange", this.boundFullscreenChange);
+      document.addEventListener("fullscreenerror", this.boundFullscreenError);
+      document.addEventListener("webkitfullscreenchange", this.boundFullscreenChange);
+      document.addEventListener("webkitfullscreenerror", this.boundFullscreenError);
 
       window.addEventListener("beforeunload", () => {
         this.flushMountedRoot();
@@ -271,6 +282,7 @@
       this.infoEl.textContent = "No image loaded.";
       this.logEl.textContent = "Ready.";
       this.updateFsRootStatus();
+      this.updateFullscreenButton();
       this.updateSessionState();
       this.setStatus("Session ready");
       this.restorePersistedRootFolder();
@@ -282,6 +294,7 @@
       this.stopBtn = document.getElementById("stopBtn");
       this.pickRootBtn = document.getElementById("pickRootBtn");
       this.clearRootBtn = document.getElementById("clearRootBtn");
+      this.fullscreenBtn = document.getElementById("fullscreenBtn");
       this.traceSyscallsInput = document.getElementById("traceSyscalls");
       this.traceOpcodesInput = document.getElementById("traceOpcodes");
       this.traceImagesInput = document.getElementById("traceImages");
@@ -289,9 +302,96 @@
       this.logEl = document.getElementById("log");
       this.statusEl = document.getElementById("status");
       this.fsRootStatusEl = document.getElementById("fsRootStatus");
+      this.screenPanelEl = document.getElementById("screenPanel");
       this.workspaceEl = document.getElementById("workspace");
       this.workspaceEmptyEl = document.getElementById("workspaceEmpty");
       this.sessionInfoEl = document.getElementById("sessionInfo");
+    }
+
+    supportsFullscreen() {
+      const target = this.workspaceEl;
+      const doc = document;
+      return !!(
+        target &&
+        (
+          typeof target.requestFullscreen === "function" ||
+          typeof target.webkitRequestFullscreen === "function"
+        ) &&
+        (
+          typeof doc.exitFullscreen === "function" ||
+          typeof doc.webkitExitFullscreen === "function"
+        )
+      );
+    }
+
+    getFullscreenElement() {
+      return document.fullscreenElement || document.webkitFullscreenElement || null;
+    }
+
+    isWorkspaceFullscreen() {
+      return !!this.workspaceEl && this.getFullscreenElement() === this.workspaceEl;
+    }
+
+    async requestWorkspaceFullscreen() {
+      if (!this.workspaceEl) {
+        return;
+      }
+      if (typeof this.workspaceEl.requestFullscreen === "function") {
+        await this.workspaceEl.requestFullscreen();
+        return;
+      }
+      if (typeof this.workspaceEl.webkitRequestFullscreen === "function") {
+        this.workspaceEl.webkitRequestFullscreen();
+      }
+    }
+
+    async exitWorkspaceFullscreen() {
+      if (typeof document.exitFullscreen === "function") {
+        await document.exitFullscreen();
+        return;
+      }
+      if (typeof document.webkitExitFullscreen === "function") {
+        document.webkitExitFullscreen();
+      }
+    }
+
+    updateFullscreenButton() {
+      if (!this.fullscreenBtn) {
+        return;
+      }
+      const supported = this.supportsFullscreen();
+      const active = this.isWorkspaceFullscreen();
+      this.fullscreenBtn.disabled = !supported;
+      this.fullscreenBtn.textContent = active ? "Windowed" : "Fullscreen";
+      this.fullscreenBtn.setAttribute("aria-pressed", active ? "true" : "false");
+      this.fullscreenBtn.title = active
+        ? "Exit desktop fullscreen"
+        : "Open desktop fullscreen";
+    }
+
+    handleFullscreenError() {
+      this.updateFullscreenButton();
+      this.log("Fullscreen toggle failed.");
+    }
+
+    async handleFullscreenToggle() {
+      if (!this.supportsFullscreen()) {
+        this.log("Fullscreen API unavailable in this browser.");
+        this.updateFullscreenButton();
+        return;
+      }
+      try {
+        if (this.isWorkspaceFullscreen()) {
+          await this.exitWorkspaceFullscreen();
+        } else {
+          await this.requestWorkspaceFullscreen();
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.log(`Fullscreen failed: ${message}`);
+      } finally {
+        this.updateFullscreenButton();
+      }
     }
 
     installWorkspaceDropHandlers() {

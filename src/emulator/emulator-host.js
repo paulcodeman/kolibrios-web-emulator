@@ -326,6 +326,9 @@
         });
         this.cpuBusySampleTotalMs = (Number(this.cpuBusySampleTotalMs) || 0) + busyMs;
         this.trimCpuBusySamples(now);
+        if (this.hostSession && typeof this.hostSession.noteCpuBusyTime === "function") {
+          this.hostSession.noteCpuBusyTime(busyMs);
+        }
       },
 
       getReportedCpuUsage() {

@@ -393,6 +393,8 @@ class HeadlessUiHarness {
     this.lowLevelPciAccessEnabled = false;
     this.loadedDrivers = new Map();
     this.nextDriverHandle = 1;
+    this.cpuBusySamples = [];
+    this.cpuBusySampleTotalMs = 0;
     this.screenWorkArea = null;
     this.processes = [];
     this.processByPid = new Map();
@@ -676,18 +678,58 @@ class HeadlessUiHarness {
     return handle >>> 0;
   }
 
+  getWallClockMs() {
+    return (
+      typeof performance !== "undefined" &&
+      performance &&
+      typeof performance.now === "function"
+    ) ? performance.now() : Date.now();
+  }
+
+  trimCpuBusySamples(nowMs) {
+    if (!Array.isArray(this.cpuBusySamples)) {
+      this.cpuBusySamples = [];
+      this.cpuBusySampleTotalMs = 0;
+      return;
+    }
+    const cutoff = (Number(nowMs) || 0) - 1000;
+    while (this.cpuBusySamples.length && (this.cpuBusySamples[0].at || 0) < cutoff) {
+      const sample = this.cpuBusySamples.shift();
+      const busy = sample && Number.isFinite(sample.busyMs) ? Number(sample.busyMs) : 0;
+      this.cpuBusySampleTotalMs = Math.max(0, (Number(this.cpuBusySampleTotalMs) || 0) - busy);
+    }
+  }
+
+  noteCpuBusyTime(durationMs) {
+    const busyMs = Math.max(0, Number(durationMs) || 0);
+    if (!(busyMs > 0)) {
+      return;
+    }
+    if (!Array.isArray(this.cpuBusySamples)) {
+      this.cpuBusySamples = [];
+      this.cpuBusySampleTotalMs = 0;
+    }
+    const now = this.getWallClockMs();
+    this.cpuBusySamples.push({
+      at: now,
+      busyMs
+    });
+    this.cpuBusySampleTotalMs = (Number(this.cpuBusySampleTotalMs) || 0) + busyMs;
+    this.trimCpuBusySamples(now);
+  }
+
+  getSystemBusyCount() {
+    const now = this.getWallClockMs();
+    this.trimCpuBusySamples(now);
+    const busyMs = Math.max(0, Math.min(1000, Number(this.cpuBusySampleTotalMs) || 0));
+    return Math.round((busyMs / 1000) * (this.getReportedCpuFrequencyHz() >>> 0)) >>> 0;
+  }
+
   getIdleCount() {
     const cpuFreqHz = this.getReportedCpuFrequencyHz();
-    let busy = 0;
-    for (let i = 0; i < this.processes.length; i += 1) {
-      const process = this.processes[i];
-      if (!process || process.removed || !process.emulator || typeof process.emulator.getReportedCpuUsage !== "function") {
-        continue;
-      }
-      busy += process.emulator.getReportedCpuUsage() >>> 0;
-      if (busy >= cpuFreqHz) {
-        return 0;
-      }
+    const busy = this.getSystemBusyCount() >>> 0;
+    if (busy >= cpuFreqHz) {
+      return 0;
     }
     return Math.max(0, cpuFreqHz - busy) >>> 0;
   }
