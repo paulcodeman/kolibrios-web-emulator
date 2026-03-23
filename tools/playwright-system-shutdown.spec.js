@@ -88,8 +88,8 @@ test("system shutdown syscall stops processes and exits fullscreen", async ({ pa
   const button = page.locator("#fullscreenBtn");
   await button.click();
   await page.waitForFunction(() => {
-    const workspace = document.getElementById("workspace");
-    return !!workspace && document.fullscreenElement === workspace;
+    const screenPanel = document.getElementById("screenPanel");
+    return !!screenPanel && document.fullscreenElement === screenPanel;
   });
 
   await page.evaluate(() => {

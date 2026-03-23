@@ -239,13 +239,29 @@
       this.fsRootBusy = false;
       this.savedFsRootLabel = "";
       this.savedFsRootPendingPermission = false;
-      this.boundFullscreenChange = () => this.updateFullscreenButton();
+      this.launcherOverlayHoldMs = 550;
+      this.launcherOverlayVisibleMs = 4000;
+      this.launcherOverlayMoveTolerance = 12;
+      this.launcherOverlayEdgeRevealPx = 18;
+      this.launcherOverlayHideTimer = 0;
+      this.launcherOverlayPressTimer = 0;
+      this.launcherOverlayPointerActive = false;
+      this.launcherOverlayPointerId = -1;
+      this.launcherOverlayStartX = 0;
+      this.launcherOverlayStartY = 0;
+      this.boundFullscreenChange = () => this.handleFullscreenChange();
       this.boundFullscreenError = () => this.handleFullscreenError();
       this.sessionManager = new KosEmu.ui.SessionManager(this, this.workspaceEl);
 
-      this.fileInput.addEventListener("change", () => this.handleFile());
-      this.runBtn.addEventListener("click", () => this.handleRun());
-      this.stopBtn.addEventListener("click", () => this.handleStop());
+      if (this.fileInput) {
+        this.fileInput.addEventListener("change", () => this.handleFile());
+      }
+      if (this.runBtn) {
+        this.runBtn.addEventListener("click", () => this.handleRun());
+      }
+      if (this.stopBtn) {
+        this.stopBtn.addEventListener("click", () => this.handleStop());
+      }
       if (this.fullscreenBtn) {
         this.fullscreenBtn.addEventListener("click", () => {
           void this.handleFullscreenToggle();
@@ -267,6 +283,7 @@
         this.traceOpcodesInput.addEventListener("change", () => this.applyTraceConfig());
       }
       this.installWorkspaceDropHandlers();
+      this.installLauncherOverlayControls();
       document.addEventListener("fullscreenchange", this.boundFullscreenChange);
       document.addEventListener("fullscreenerror", this.boundFullscreenError);
       document.addEventListener("webkitfullscreenchange", this.boundFullscreenChange);
@@ -279,8 +296,12 @@
         }
       });
 
-      this.infoEl.textContent = "No image loaded.";
-      this.logEl.textContent = "Ready.";
+      if (this.infoEl) {
+        this.infoEl.textContent = "No image loaded.";
+      }
+      if (this.logEl) {
+        this.logEl.textContent = "Ready.";
+      }
       this.updateFsRootStatus();
       this.updateFullscreenButton();
       this.updateSessionState();
@@ -308,8 +329,23 @@
       this.sessionInfoEl = document.getElementById("sessionInfo");
     }
 
+    isLauncherPage() {
+      return !!(document.body && document.body.classList.contains("launcher-page"));
+    }
+
+    getFullscreenTarget() {
+      if (
+        this.screenPanelEl &&
+        this.workspaceEl &&
+        this.screenPanelEl.contains(this.workspaceEl)
+      ) {
+        return this.screenPanelEl;
+      }
+      return this.workspaceEl || null;
+    }
+
     supportsFullscreen() {
-      const target = this.workspaceEl;
+      const target = this.getFullscreenTarget();
       const doc = document;
       return !!(
         target &&
@@ -329,19 +365,21 @@
     }
 
     isWorkspaceFullscreen() {
-      return !!this.workspaceEl && this.getFullscreenElement() === this.workspaceEl;
+      const target = this.getFullscreenTarget();
+      return !!target && this.getFullscreenElement() === target;
     }
 
     async requestWorkspaceFullscreen() {
-      if (!this.workspaceEl) {
+      const target = this.getFullscreenTarget();
+      if (!target) {
         return;
       }
-      if (typeof this.workspaceEl.requestFullscreen === "function") {
-        await this.workspaceEl.requestFullscreen();
+      if (typeof target.requestFullscreen === "function") {
+        await target.requestFullscreen();
         return;
       }
-      if (typeof this.workspaceEl.webkitRequestFullscreen === "function") {
-        this.workspaceEl.webkitRequestFullscreen();
+      if (typeof target.webkitRequestFullscreen === "function") {
+        target.webkitRequestFullscreen();
       }
     }
 
@@ -372,6 +410,197 @@
     handleFullscreenError() {
       this.updateFullscreenButton();
       this.log("Fullscreen toggle failed.");
+    }
+
+    refreshSessionViewport() {
+      if (!this.sessionManager || typeof this.sessionManager.handleViewportResize !== "function") {
+        return;
+      }
+      const refresh = () => {
+        if (this.sessionManager && typeof this.sessionManager.handleViewportResize === "function") {
+          this.sessionManager.handleViewportResize();
+        }
+      };
+      refresh();
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => {
+          refresh();
+          requestAnimationFrame(() => {
+            refresh();
+          });
+        });
+      }
+    }
+
+    handleFullscreenChange() {
+      this.updateFullscreenButton();
+      this.refreshSessionViewport();
+    }
+
+    normalizeLauncherOverlayDelay(value, fallback, min, max) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        return fallback;
+      }
+      return Math.max(min, Math.min(max, Math.round(numeric))) | 0;
+    }
+
+    setLauncherOverlaysVisible(visible) {
+      if (!this.isLauncherPage() || !document.body) {
+        return;
+      }
+      document.body.classList.toggle("launcher-overlays-visible", !!visible);
+    }
+
+    clearLauncherOverlayHideTimer() {
+      if (this.launcherOverlayHideTimer) {
+        clearTimeout(this.launcherOverlayHideTimer);
+        this.launcherOverlayHideTimer = 0;
+      }
+    }
+
+    hideLauncherOverlays() {
+      this.clearLauncherOverlayHideTimer();
+      this.setLauncherOverlaysVisible(false);
+    }
+
+    showLauncherOverlays(durationMs) {
+      if (!this.isLauncherPage()) {
+        return;
+      }
+      const visibleMs = this.normalizeLauncherOverlayDelay(
+        durationMs,
+        this.launcherOverlayVisibleMs,
+        250,
+        10000
+      );
+      this.setLauncherOverlaysVisible(true);
+      this.clearLauncherOverlayHideTimer();
+      this.launcherOverlayHideTimer = setTimeout(() => {
+        this.launcherOverlayHideTimer = 0;
+        this.setLauncherOverlaysVisible(false);
+      }, visibleMs);
+    }
+
+    clearLauncherOverlayPressTimer() {
+      if (this.launcherOverlayPressTimer) {
+        clearTimeout(this.launcherOverlayPressTimer);
+        this.launcherOverlayPressTimer = 0;
+      }
+    }
+
+    cancelLauncherOverlayPress() {
+      this.clearLauncherOverlayPressTimer();
+      this.launcherOverlayPointerActive = false;
+      this.launcherOverlayPointerId = -1;
+    }
+
+    beginLauncherOverlayPress(pointerId, clientX, clientY) {
+      this.cancelLauncherOverlayPress();
+      this.launcherOverlayPointerActive = true;
+      this.launcherOverlayPointerId = pointerId | 0;
+      this.launcherOverlayStartX = clientX | 0;
+      this.launcherOverlayStartY = clientY | 0;
+      this.launcherOverlayPressTimer = setTimeout(() => {
+        this.launcherOverlayPressTimer = 0;
+        if (!this.launcherOverlayPointerActive) {
+          return;
+        }
+        this.showLauncherOverlays(this.launcherOverlayVisibleMs);
+      }, this.launcherOverlayHoldMs);
+    }
+
+    handleLauncherOverlayPointerDown(event) {
+      if (!this.isLauncherPage() || !this.workspaceEl || !event || event.isPrimary === false) {
+        return;
+      }
+      if ((event.pointerType || "") === "mouse" && ((event.button | 0) !== 0)) {
+        return;
+      }
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && (target.closest(".launcher-toolbar") || target.closest(".launcher-session-info"))) {
+        return;
+      }
+      this.beginLauncherOverlayPress(event.pointerId | 0, event.clientX | 0, event.clientY | 0);
+    }
+
+    handleLauncherOverlayPointerMove(event) {
+      if (
+        this.isLauncherPage() &&
+        event &&
+        event.isPrimary !== false &&
+        (event.pointerType || "") === "mouse" &&
+        ((event.buttons | 0) === 0)
+      ) {
+        const edge = this.launcherOverlayEdgeRevealPx | 0;
+        const clientY = event.clientY | 0;
+        const viewportHeight = Math.max(1, window.innerHeight | 0);
+        if (clientY <= edge || clientY >= (viewportHeight - edge)) {
+          this.showLauncherOverlays(this.launcherOverlayVisibleMs);
+        }
+      }
+      if (!this.launcherOverlayPointerActive || !event || event.isPrimary === false) {
+        return;
+      }
+      if ((event.pointerId | 0) !== (this.launcherOverlayPointerId | 0)) {
+        return;
+      }
+      const dx = Math.abs((event.clientX | 0) - (this.launcherOverlayStartX | 0));
+      const dy = Math.abs((event.clientY | 0) - (this.launcherOverlayStartY | 0));
+      if (dx > (this.launcherOverlayMoveTolerance | 0) || dy > (this.launcherOverlayMoveTolerance | 0)) {
+        this.cancelLauncherOverlayPress();
+      }
+    }
+
+    handleLauncherOverlayPointerUp(event) {
+      if (!this.launcherOverlayPointerActive || !event || event.isPrimary === false) {
+        return;
+      }
+      if ((event.pointerId | 0) !== (this.launcherOverlayPointerId | 0)) {
+        return;
+      }
+      this.cancelLauncherOverlayPress();
+    }
+
+    installLauncherOverlayControls() {
+      if (!this.isLauncherPage() || !this.workspaceEl || typeof window === "undefined") {
+        return;
+      }
+      const pageConfig = window.KosEmuPageConfig || {};
+      this.launcherOverlayHoldMs = this.normalizeLauncherOverlayDelay(
+        pageConfig.launcherOverlayHoldMs,
+        this.launcherOverlayHoldMs,
+        250,
+        3000
+      );
+      this.launcherOverlayVisibleMs = this.normalizeLauncherOverlayDelay(
+        pageConfig.launcherOverlayVisibleMs,
+        this.launcherOverlayVisibleMs,
+        1000,
+        10000
+      );
+      this.launcherOverlayMoveTolerance = this.normalizeLauncherOverlayDelay(
+        pageConfig.launcherOverlayMoveTolerance,
+        this.launcherOverlayMoveTolerance,
+        4,
+        64
+      );
+      this.launcherOverlayEdgeRevealPx = this.normalizeLauncherOverlayDelay(
+        pageConfig.launcherOverlayEdgeRevealPx,
+        this.launcherOverlayEdgeRevealPx,
+        8,
+        64
+      );
+      this.boundLauncherOverlayPointerDown = (event) => this.handleLauncherOverlayPointerDown(event);
+      this.boundLauncherOverlayPointerMove = (event) => this.handleLauncherOverlayPointerMove(event);
+      this.boundLauncherOverlayPointerUp = (event) => this.handleLauncherOverlayPointerUp(event);
+      this.boundLauncherOverlayWindowBlur = () => this.cancelLauncherOverlayPress();
+      this.workspaceEl.addEventListener("pointerdown", this.boundLauncherOverlayPointerDown, true);
+      window.addEventListener("pointermove", this.boundLauncherOverlayPointerMove, true);
+      window.addEventListener("pointerup", this.boundLauncherOverlayPointerUp, true);
+      window.addEventListener("pointercancel", this.boundLauncherOverlayPointerUp, true);
+      window.addEventListener("blur", this.boundLauncherOverlayWindowBlur);
+      this.setLauncherOverlaysVisible(false);
     }
 
     describeSystemAction(action) {
@@ -538,7 +767,9 @@
       if (!file) {
         return;
       }
-      this.runBtn.disabled = true;
+      if (this.runBtn) {
+        this.runBtn.disabled = true;
+      }
       this.setStatus(`Loading ${file.name}`);
       try {
         const buffer = await file.arrayBuffer();
@@ -549,7 +780,9 @@
         this.log(`Drop failed: ${message}`);
         this.setStatus("Drop failed");
       } finally {
-        this.runBtn.disabled = this.currentImage === null;
+        if (this.runBtn) {
+          this.runBtn.disabled = this.currentImage === null;
+        }
       }
     }
 
@@ -746,11 +979,13 @@
     }
 
     async handleFile() {
-      const file = this.fileInput.files && this.fileInput.files[0];
+      const file = this.fileInput && this.fileInput.files && this.fileInput.files[0];
       if (!file) {
         return;
       }
-      this.runBtn.disabled = true;
+      if (this.runBtn) {
+        this.runBtn.disabled = true;
+      }
       this.setStatus(`Loading ${file.name}`);
       try {
         const buffer = await file.arrayBuffer();
@@ -760,7 +995,9 @@
         this.currentImage = null;
         this.currentFileBuffer = null;
         this.currentFileName = "";
-        this.infoEl.textContent = `Error: ${message}`;
+        if (this.infoEl) {
+          this.infoEl.textContent = `Error: ${message}`;
+        }
         this.log(`Load failed: ${message}`);
         this.setStatus("Load failed");
       }
@@ -772,13 +1009,17 @@
       this.currentImage = image;
       this.currentFileBuffer = storedBuffer;
       this.currentFileName = fileName;
-      this.infoEl.textContent = formatKexInfo(image);
+      if (this.infoEl) {
+        this.infoEl.textContent = formatKexInfo(image);
+      }
       this.log(`${String(actionLabel || "Loaded")} ${fileName}`);
       if (image.packed) {
         this.log(`KPCK unpacked: ${image.fileSize} -> ${image.unpackedSize}`);
       }
       this.setStatus(`${String(actionLabel || "Loaded")} ${fileName}`);
-      this.runBtn.disabled = false;
+      if (this.runBtn) {
+        this.runBtn.disabled = false;
+      }
       return image;
     }
 
@@ -803,7 +1044,9 @@
         this.log("No image loaded.");
         return;
       }
-      this.runBtn.disabled = true;
+      if (this.runBtn) {
+        this.runBtn.disabled = true;
+      }
       try {
         this.launchCurrentImage();
       } catch (err) {
@@ -811,7 +1054,9 @@
         this.log(`Start failed: ${message}`);
         this.setStatus("Start failed");
       } finally {
-        this.runBtn.disabled = this.currentImage === null;
+        if (this.runBtn) {
+          this.runBtn.disabled = this.currentImage === null;
+        }
       }
     }
 
@@ -838,7 +1083,9 @@
       if (this.workspaceEmptyEl) {
         this.workspaceEmptyEl.hidden = this.sessionManager.hasProcesses();
       }
-      this.stopBtn.disabled = !this.sessionManager.hasProcesses();
+      if (this.stopBtn) {
+        this.stopBtn.disabled = !this.sessionManager.hasProcesses();
+      }
       const active = this.sessionManager.getActiveProcess();
       if (active) {
         this.setStatus(`Active: ${active.displayPath} | PID ${active.pid} | slot ${active.slot}`);

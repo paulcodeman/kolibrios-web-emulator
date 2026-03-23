@@ -31,8 +31,8 @@ test("workspace fullscreen toggle", async ({ page }) => {
 
   await button.click();
   await page.waitForFunction(() => {
-    const workspace = document.getElementById("workspace");
-    return !!workspace && document.fullscreenElement === workspace;
+    const screenPanel = document.getElementById("screenPanel");
+    return !!screenPanel && document.fullscreenElement === screenPanel;
   });
   await page.waitForFunction(() => {
     const buttonEl = document.getElementById("fullscreenBtn");
