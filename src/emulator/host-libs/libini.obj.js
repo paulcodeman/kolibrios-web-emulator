@@ -9,6 +9,18 @@
     return emu && emu.hostLibHelpers ? emu.hostLibHelpers : null;
   }
 
+  function decodeLatin1(bytes) {
+    const source = bytes instanceof Uint8Array ? bytes : null;
+    if (!source || !source.length) {
+      return "";
+    }
+    let out = "";
+    for (let i = 0; i < source.length; i += 1) {
+      out += String.fromCharCode(source[i] & 0xff);
+    }
+    return out;
+  }
+
   function buildLibiniOverrides() {
     return [
       {
@@ -105,6 +117,73 @@
             this.log(`host ini_get_bool '${filePath}' [${sectionName}] ${keyName} -> ${result} (${state})`);
           }
           return { eax: result >>> 0 };
+        }
+      },
+      {
+        name: "ini_set_int",
+        argBytes: 16,
+        handler(context) {
+          const helpers = getHostLibHelpers();
+          const setIniValueBytes = helpers && typeof helpers.setIniValueBytes === "function"
+            ? helpers.setIniValueBytes
+            : null;
+          const filePtr = this.readMem32(context.argPtr) >>> 0;
+          const sectionPtr = this.readMem32((context.argPtr + 4) >>> 0) >>> 0;
+          const keyPtr = this.readMem32((context.argPtr + 8) >>> 0) >>> 0;
+          const rawValue = this.readMem32((context.argPtr + 12) >>> 0) | 0;
+          const filePath = filePtr ? this.readCString(filePtr, 4096) : "";
+          const sectionName = sectionPtr ? this.readCString(sectionPtr, 256) : "";
+          const keyName = keyPtr ? this.readCString(keyPtr, 256) : "";
+          const resolvedPath = filePath ? this.resolveKosPath(filePath) : "";
+          const fileBytes = resolvedPath ? this.loadHostFile(resolvedPath) : null;
+          const nextBytes = setIniValueBytes
+            ? setIniValueBytes(fileBytes, sectionName, keyName, String(rawValue))
+            : null;
+          const writeResult = nextBytes && resolvedPath
+            ? this.createOrRewriteHostFile(resolvedPath, nextBytes)
+            : { errorCode: 5, written: 0 };
+          if (this.traceSyscalls) {
+            this.log(
+              `host ini_set_int '${filePath}' [${sectionName}] ${keyName} = ${rawValue} ` +
+              `result=${writeResult.errorCode >>> 0}`
+            );
+          }
+          return { eax: writeResult.errorCode ? (0xffffffff >>> 0) : 0 };
+        }
+      },
+      {
+        name: "ini_set_str",
+        argBytes: 20,
+        handler(context) {
+          const helpers = getHostLibHelpers();
+          const setIniValueBytes = helpers && typeof helpers.setIniValueBytes === "function"
+            ? helpers.setIniValueBytes
+            : null;
+          const filePtr = this.readMem32(context.argPtr) >>> 0;
+          const sectionPtr = this.readMem32((context.argPtr + 4) >>> 0) >>> 0;
+          const keyPtr = this.readMem32((context.argPtr + 8) >>> 0) >>> 0;
+          const valuePtr = this.readMem32((context.argPtr + 12) >>> 0) >>> 0;
+          const valueLen = this.readMem32((context.argPtr + 16) >>> 0) >>> 0;
+          const filePath = filePtr ? this.readCString(filePtr, 4096) : "";
+          const sectionName = sectionPtr ? this.readCString(sectionPtr, 256) : "";
+          const keyName = keyPtr ? this.readCString(keyPtr, 256) : "";
+          const resolvedPath = filePath ? this.resolveKosPath(filePath) : "";
+          const fileBytes = resolvedPath ? this.loadHostFile(resolvedPath) : null;
+          const valueBytes = valuePtr && valueLen ? this.readMemBlock(valuePtr, valueLen) : new Uint8Array(0);
+          const value = decodeLatin1(valueBytes);
+          const nextBytes = setIniValueBytes
+            ? setIniValueBytes(fileBytes, sectionName, keyName, value)
+            : null;
+          const writeResult = nextBytes && resolvedPath
+            ? this.createOrRewriteHostFile(resolvedPath, nextBytes)
+            : { errorCode: 5, written: 0 };
+          if (this.traceSyscalls) {
+            this.log(
+              `host ini_set_str '${filePath}' [${sectionName}] ${keyName} = '${value}' ` +
+              `result=${writeResult.errorCode >>> 0}`
+            );
+          }
+          return { eax: writeResult.errorCode ? (0xffffffff >>> 0) : 0 };
         }
       }
     ];

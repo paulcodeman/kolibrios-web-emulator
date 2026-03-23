@@ -4277,16 +4277,28 @@
         if (sub === 0) {
           this.syncMappedDesktopBackground();
           this.presentIfNeeded(true);
-          this.queueEvent(1);
+          if (this.hostSession && typeof this.hostSession.applySystemStyleSettings === "function") {
+            this.hostSession.applySystemStyleSettings();
+          } else {
+            this.queueEvent(1);
+          }
           return;
         }
         if (sub === 8 || sub === 13) {
           const ptr = this.readReg(REG.ECX) >>> 0;
           const path = ptr ? this.readCString(ptr, 260) : "";
-          const result = path ? this.loadSkinTheme(path) : 3;
+          const result = path
+            ? (
+              this.hostSession && typeof this.hostSession.setSystemSkinPath === "function"
+                ? this.hostSession.setSystemSkinPath(path, this)
+                : this.loadSkinTheme(path)
+            )
+            : 3;
           this.writeReg(REG.EAX, result >>> 0);
           if (result === 0) {
-            this.queueEvent(1);
+            if (!(this.hostSession && typeof this.hostSession.setSystemSkinPath === "function")) {
+              this.queueEvent(1);
+            }
           }
           if (this.traceSyscalls) {
             this.log(`syscall 48 -> set skin '${path || "<empty>"}' result=${result}`);
@@ -4294,7 +4306,12 @@
           return;
         }
         if (sub === 1) {
-          this.buttonStyle = (this.readReg(REG.ECX) & 0xff) === 0 ? 0 : 1;
+          const value = (this.readReg(REG.ECX) & 0xff) === 0 ? 0 : 1;
+          if (this.hostSession && typeof this.hostSession.setSystemButtonStyle === "function") {
+            this.hostSession.setSystemButtonStyle(value);
+          } else {
+            this.buttonStyle = value;
+          }
           return;
         }
         if (sub === 9) {
@@ -4370,7 +4387,11 @@
           if (ptr && size) {
             const table = this.readMemBlock(ptr, size);
             if (table) {
-              this.setSkinColorTable(table);
+              if (this.hostSession && typeof this.hostSession.setSystemSkinColorTable === "function") {
+                this.hostSession.setSystemSkinColorTable(table);
+              } else {
+                this.setSkinColorTable(table);
+              }
             }
           }
           return;

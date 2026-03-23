@@ -267,6 +267,11 @@
           void this.handleFullscreenToggle();
         });
       }
+      if (this.restoreDefaultsBtn) {
+        this.restoreDefaultsBtn.addEventListener("click", () => {
+          void this.handleRestoreBundledDefaults();
+        });
+      }
       if (this.pickRootBtn) {
         this.pickRootBtn.addEventListener("click", () => this.handlePickRootFolder());
       }
@@ -316,6 +321,7 @@
       this.pickRootBtn = document.getElementById("pickRootBtn");
       this.clearRootBtn = document.getElementById("clearRootBtn");
       this.fullscreenBtn = document.getElementById("fullscreenBtn");
+      this.restoreDefaultsBtn = document.getElementById("restoreDefaultsBtn");
       this.traceSyscallsInput = document.getElementById("traceSyscalls");
       this.traceOpcodesInput = document.getElementById("traceOpcodes");
       this.traceImagesInput = document.getElementById("traceImages");
@@ -616,6 +622,30 @@
       }
     }
 
+    async rebootCurrentSession() {
+      if (!this.sessionManager) {
+        return false;
+      }
+      const root = this.browserFsRoot || null;
+      if (root && typeof root.flushPending === "function") {
+        await root.flushPending();
+      }
+      this.sessionManager.resetSystemState({ reloadStyleFromFileSystem: true });
+      const pageConfig = window.KosEmuPageConfig || null;
+      if (pageConfig && pageConfig.autoBootBundledDesktop) {
+        const bundledRoot = KosEmu && KosEmu.ui ? KosEmu.ui.bundledRoot : null;
+        if (bundledRoot && typeof bundledRoot.bootBundledDesktopPage === "function") {
+          await bundledRoot.bootBundledDesktopPage(this, pageConfig);
+          return true;
+        }
+      }
+      if (this.currentImage) {
+        this.launchCurrentImage();
+        return true;
+      }
+      return false;
+    }
+
     async handleSystemAction(action) {
       const mode = action >>> 0;
       if (mode !== 2 && mode !== 3 && mode !== 4) {
@@ -639,9 +669,18 @@
           this.log(`Fullscreen exit failed during ${label.toLowerCase()}: ${fullscreenError}`);
         }
       }
+      let restartError = "";
+      if (mode !== 2) {
+        try {
+          await this.rebootCurrentSession();
+        } catch (err) {
+          restartError = err instanceof Error ? err.message : String(err);
+          this.log(`${label} failed: ${restartError}`);
+        }
+      }
       this.updateFullscreenButton();
       this.updateSessionState();
-      if (fullscreenError) {
+      if (fullscreenError || restartError) {
         this.setStatus(`${label} requested`);
       }
       return true;
@@ -828,6 +867,39 @@
       }
     }
 
+    async handleRestoreBundledDefaults() {
+      if (!this.isLauncherPage()) {
+        return;
+      }
+      const root = this.browserFsRoot || null;
+      if (!root || typeof root.clearPersistence !== "function") {
+        this.log("Bundled desktop reset is unavailable.");
+        return;
+      }
+      const confirmed = typeof window.confirm === "function"
+        ? window.confirm("Restore bundled desktop files and reload the page?")
+        : true;
+      if (!confirmed) {
+        return;
+      }
+      this.setStatus("Restoring bundled desktop...");
+      try {
+        await root.flushPending();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.log(`Bundled desktop flush before reset failed: ${message}`);
+      }
+      if (!root.clearPersistence()) {
+        this.log("Bundled desktop reset failed.");
+        this.setStatus("Reset failed");
+        return;
+      }
+      this.log("Bundled desktop restored to defaults.");
+      if (typeof window.location.reload === "function") {
+        window.location.reload();
+      }
+    }
+
     updateFsRootStatus() {
       const supported = !!(BrowserFsRoot && BrowserFsRoot.supportsDirectoryPicker && BrowserFsRoot.supportsDirectoryPicker());
       if (this.pickRootBtn) {
@@ -835,6 +907,9 @@
       }
       if (this.clearRootBtn) {
         this.clearRootBtn.disabled = this.fsRootBusy || (!this.browserFsRoot && !this.savedFsRootPendingPermission);
+      }
+      if (this.restoreDefaultsBtn) {
+        this.restoreDefaultsBtn.disabled = this.fsRootBusy || !this.isLauncherPage() || !this.browserFsRoot || typeof this.browserFsRoot.clearPersistence !== "function";
       }
       if (!this.fsRootStatusEl) {
         return;

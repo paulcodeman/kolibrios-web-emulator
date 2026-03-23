@@ -8,6 +8,9 @@ const { writeSurfacePng } = require("./surface-snapshot");
 const DEFAULT_CPU_FREQ_HZ = 2400000000;
 const DEFAULT_SYSTEM_RAM_BYTES = 512 * 1024 * 1024;
 const DEFAULT_SYSTEM_RESERVED_RAM_BYTES = 16 * 1024 * 1024;
+const DEFAULT_SYSTEM_SKIN_PATH = "/sys/default.skn";
+const DEFAULT_SYSTEM_BUTTON_STYLE = 1;
+const SYSTEM_STYLE_INI_PATH = "/sys/settings/system.ini";
 
 const REG = {
   EAX: 0,
@@ -50,6 +53,57 @@ const SCRIPT_LIST = [
 ];
 
 let runtimeLoaded = false;
+
+function cloneBytes(data) {
+  return data instanceof Uint8Array ? data.slice() : null;
+}
+
+function getIniHelpers() {
+  const runtime = loadKosRuntime();
+  const emu = runtime && runtime.emu ? runtime.emu : null;
+  return emu && emu.hostLibHelpers ? emu.hostLibHelpers : null;
+}
+
+function readSystemStyleState(fileProvider) {
+  const state = {
+    skinPath: DEFAULT_SYSTEM_SKIN_PATH,
+    buttonStyle: DEFAULT_SYSTEM_BUTTON_STYLE,
+    colorTableBytes: null
+  };
+  if (typeof fileProvider !== "function") {
+    return state;
+  }
+  const helpers = getIniHelpers();
+  const findIniValue = helpers && typeof helpers.findIniValue === "function"
+    ? helpers.findIniValue
+    : null;
+  const parseIniIntString = helpers && typeof helpers.parseIniIntString === "function"
+    ? helpers.parseIniIntString
+    : null;
+  if (!findIniValue) {
+    return state;
+  }
+  let bytes = null;
+  try {
+    bytes = fileProvider(SYSTEM_STYLE_INI_PATH);
+  } catch (err) {
+    bytes = null;
+  }
+  if (!(bytes instanceof Uint8Array) || !bytes.length) {
+    return state;
+  }
+  const skinPath = findIniValue(bytes, "style", "skin");
+  if (skinPath) {
+    state.skinPath = String(skinPath);
+  }
+  const buttonStyle = parseIniIntString
+    ? parseIniIntString(findIniValue(bytes, "style", "buttons_gradient"))
+    : null;
+  if (buttonStyle !== null) {
+    state.buttonStyle = buttonStyle === 0 ? 0 : 1;
+  }
+  return state;
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms | 0)));
@@ -388,6 +442,9 @@ class HeadlessUiHarness {
     this.keyboardLayouts = new Map();
     this.keyboardLanguageId = 1;
     this.systemLanguageId = 1;
+    this.systemSkinPath = DEFAULT_SYSTEM_SKIN_PATH;
+    this.systemButtonStyle = DEFAULT_SYSTEM_BUTTON_STYLE;
+    this.systemSkinColorTableBytes = null;
     this.fontSmoothingMode = 1;
     this.fontSizePx = 9;
     this.speakerDisabled = false;
@@ -581,6 +638,118 @@ class HeadlessUiHarness {
       process.emulator.wakeExecution();
     }
     return true;
+  }
+
+  getSystemStyleState() {
+    return {
+      skinPath: String(this.systemSkinPath || DEFAULT_SYSTEM_SKIN_PATH),
+      buttonStyle: (this.systemButtonStyle & 0xff) === 0 ? 0 : 1,
+      colorTableBytes: cloneBytes(this.systemSkinColorTableBytes)
+    };
+  }
+
+  reloadSystemStyleFromFileSystem() {
+    const fileProvider = createDefaultFileProvider(this.targetPath, this.rootDir);
+    const next = readSystemStyleState(fileProvider);
+    this.systemSkinPath = String(next.skinPath || DEFAULT_SYSTEM_SKIN_PATH);
+    this.systemButtonStyle = (next.buttonStyle & 0xff) === 0 ? 0 : 1;
+    this.systemSkinColorTableBytes = cloneBytes(next.colorTableBytes);
+    return this.getSystemStyleState();
+  }
+
+  applySystemStyleToEmulator(emulator, styleState, options) {
+    if (!emulator) {
+      return 1;
+    }
+    const next = styleState || this.getSystemStyleState();
+    const opts = options || {};
+    emulator.buttonStyle = (next.buttonStyle & 0xff) === 0 ? 0 : 1;
+    if (typeof emulator.resetSkinTheme === "function") {
+      emulator.resetSkinTheme();
+    }
+    emulator.skinPath = String(next.skinPath || DEFAULT_SYSTEM_SKIN_PATH);
+    emulator.skinReady = false;
+    let result = 0;
+    if (typeof emulator.loadSkinTheme === "function") {
+      result = emulator.loadSkinTheme(emulator.skinPath) >>> 0;
+    } else if (typeof emulator.ensureSkinThemeLoaded === "function") {
+      result = emulator.ensureSkinThemeLoaded() ? 0 : 1;
+    }
+    if (result !== 0) {
+      return result >>> 0;
+    }
+    if (next.colorTableBytes instanceof Uint8Array && typeof emulator.setSkinColorTable === "function") {
+      emulator.setSkinColorTable(next.colorTableBytes);
+    }
+    if (opts.queueRedraw !== false && emulator.running) {
+      emulator.removeQueuedEvent(1);
+      emulator.queueEvent(1);
+    }
+    if (opts.wake !== false && emulator.running) {
+      emulator.wakeExecution();
+    }
+    return 0;
+  }
+
+  applySystemStyleToProcesses(styleState, options) {
+    const next = styleState || this.getSystemStyleState();
+    let updated = false;
+    for (let i = 0; i < this.processes.length; i += 1) {
+      const process = this.processes[i];
+      if (!process || process.removed || !process.emulator) {
+        continue;
+      }
+      const result = this.applySystemStyleToEmulator(process.emulator, next, options);
+      if (result !== 0) {
+        continue;
+      }
+      updated = true;
+    }
+    return updated;
+  }
+
+  setSystemSkinPath(pathText, sourceEmulator) {
+    const nextPath = String(pathText || "").trim();
+    if (!nextPath) {
+      return 3;
+    }
+    const previous = this.getSystemStyleState();
+    const candidate = {
+      skinPath: nextPath,
+      buttonStyle: previous.buttonStyle,
+      colorTableBytes: null
+    };
+    const probe = sourceEmulator || (this.activeProcess && this.activeProcess.emulator ? this.activeProcess.emulator : null);
+    if (probe) {
+      const result = this.applySystemStyleToEmulator(probe, candidate, { queueRedraw: false, wake: false });
+      if (result !== 0) {
+        this.applySystemStyleToEmulator(probe, previous, { queueRedraw: false, wake: false });
+        return result >>> 0;
+      }
+      candidate.colorTableBytes = cloneBytes(
+        typeof probe.getSkinColorTableBytes === "function" ? probe.getSkinColorTableBytes() : null
+      );
+    }
+    this.systemSkinPath = nextPath;
+    this.systemSkinColorTableBytes = cloneBytes(candidate.colorTableBytes);
+    this.applySystemStyleToProcesses(this.getSystemStyleState(), { queueRedraw: true, wake: true });
+    return 0;
+  }
+
+  setSystemButtonStyle(value) {
+    this.systemButtonStyle = (value & 0xff) === 0 ? 0 : 1;
+    this.applySystemStyleToProcesses(this.getSystemStyleState(), { queueRedraw: false, wake: false });
+    return true;
+  }
+
+  setSystemSkinColorTable(bytes) {
+    this.systemSkinColorTableBytes = bytes instanceof Uint8Array ? bytes.slice() : null;
+    this.applySystemStyleToProcesses(this.getSystemStyleState(), { queueRedraw: false, wake: false });
+    return true;
+  }
+
+  applySystemStyleSettings() {
+    return this.applySystemStyleToProcesses(this.getSystemStyleState(), { queueRedraw: true, wake: true });
   }
 
   getKeyboardLayout(kind) {
@@ -1251,6 +1420,7 @@ class HeadlessUiHarness {
     this.clearCapture();
 
     this.targetPath = resolved;
+    this.reloadSystemStyleFromFileSystem();
     const image = readTargetImage(resolved);
     this.createProcess({
       image,
@@ -1320,6 +1490,7 @@ class HeadlessUiHarness {
     };
     this.installHooks(process);
     process.emulator.load(process.image);
+    this.applySystemStyleToEmulator(process.emulator, null, { queueRedraw: false, wake: false });
     process.emulator.run();
     this.registerProcess(process);
     this.setActiveProcess(process);
@@ -2662,12 +2833,46 @@ class HeadlessUiHarness {
     return true;
   }
 
+  rebootSession(mode) {
+    const targetPath = this.targetPath ? path.resolve(this.targetPath) : "";
+    this.stopAllProcesses("stopped");
+    this.clearCapture();
+    this.nextPid = 1;
+    this.nextSlot = 1;
+    this.zCounter = 1;
+    this.lastSystemAction = mode >>> 0;
+    if (!targetPath || !fs.existsSync(targetPath)) {
+      return true;
+    }
+    this.targetPath = targetPath;
+    this.reloadSystemStyleFromFileSystem();
+    const image = readTargetImage(targetPath);
+    this.createProcess({
+      image,
+      fileName: path.basename(targetPath),
+      targetPath,
+      processPath: buildExternalAppProcessPath(targetPath),
+      displayPath: targetPath,
+      processArgs: "",
+      pid: this.nextPid++,
+      slot: this.nextSlot++,
+      groupLeaderPid: 0,
+      threadGroupId: 0,
+      initialX: 0,
+      initialY: 0
+    });
+    return true;
+  }
+
   requestSystemAction(action) {
     const mode = action >>> 0;
     if (mode !== 2 && mode !== 3 && mode !== 4) {
       return false;
     }
     this.lastSystemAction = mode >>> 0;
+    if (mode === 3 || mode === 4) {
+      return this.rebootSession(mode);
+    }
     this.stopAllProcesses("stopped");
     return true;
   }

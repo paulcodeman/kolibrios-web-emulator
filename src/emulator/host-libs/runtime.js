@@ -51,6 +51,16 @@
     }
     return out;
   }
+
+  function encodeLatin1(value) {
+    const text = String(value || "");
+    const out = new Uint8Array(text.length);
+    for (let i = 0; i < text.length; i += 1) {
+      out[i] = text.charCodeAt(i) & 0xff;
+    }
+    return out;
+  }
+
   function encodeUtf8(value) {
     const text = String(value || "");
     if (UTF8_ENCODER) {
@@ -196,6 +206,44 @@
       return 0;
     }
     return null;
+  }
+
+  function serializeIniText(sections) {
+    if (!(sections instanceof Map) || !sections.size) {
+      return "";
+    }
+    const chunks = [];
+    let firstSection = true;
+    for (const [sectionName, entries] of sections.entries()) {
+      if (!firstSection) {
+        chunks.push("\r\n");
+      }
+      firstSection = false;
+      chunks.push(`[${sectionName}]`, "\r\n");
+      if (entries instanceof Map) {
+        for (const [keyName, value] of entries.entries()) {
+          chunks.push(`${keyName}=${String(value || "")}`, "\r\n");
+        }
+      }
+    }
+    return chunks.join("");
+  }
+
+  function setIniValueBytes(bytes, sectionName, keyName, value) {
+    const nextSectionName = trimIniAscii(sectionName);
+    const nextKeyName = trimIniAscii(keyName);
+    if (!nextSectionName || !nextKeyName) {
+      return null;
+    }
+    const source = bytes instanceof Uint8Array ? bytes : new Uint8Array(0);
+    const sections = parseIniText(decodeLatin1(source));
+    let section = sections.get(nextSectionName);
+    if (!(section instanceof Map)) {
+      section = new Map();
+      sections.set(nextSectionName, section);
+    }
+    section.set(nextKeyName, String(value || ""));
+    return encodeLatin1(serializeIniText(sections));
   }
 
   function getPngInflateFn() {
@@ -562,6 +610,7 @@
   hostLibHelpers.findIniValue = findIniValue;
   hostLibHelpers.parseIniIntString = parseIniIntString;
   hostLibHelpers.parseIniBoolString = parseIniBoolString;
+  hostLibHelpers.setIniValueBytes = setIniValueBytes;
 
   function installEmulatorHostLibRuntime(Emulator, shared) {
     if (!Emulator || !Emulator.prototype) {

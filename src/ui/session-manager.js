@@ -24,6 +24,9 @@
   const DEFAULT_CPU_FREQ_HZ = 2400000000;
   const DEFAULT_SYSTEM_RAM_BYTES = 512 * 1024 * 1024;
   const DEFAULT_SYSTEM_RESERVED_RAM_BYTES = 16 * 1024 * 1024;
+  const DEFAULT_SYSTEM_SKIN_PATH = "/sys/default.skn";
+  const DEFAULT_SYSTEM_BUTTON_STYLE = 1;
+  const SYSTEM_STYLE_INI_PATH = "/sys/settings/system.ini";
   const WINDOW_STATE_MAXIMIZED = 0x01;
   const WINDOW_STATE_USED = 0x80;
   const WINDOW_STATE_MINIMIZED = 0x02;
@@ -86,6 +89,59 @@
 
   function getWindowZBase(position) {
     return (getWindowZRank(position) * 100000) | 0;
+  }
+
+  function cloneBytes(data) {
+    if (!(data instanceof Uint8Array)) {
+      return null;
+    }
+    return data.slice();
+  }
+
+  function getIniHelpers() {
+    const emu = KosEmu && KosEmu.emu ? KosEmu.emu : null;
+    return emu && emu.hostLibHelpers ? emu.hostLibHelpers : null;
+  }
+
+  function readSystemStyleState(fileProvider) {
+    const state = {
+      skinPath: DEFAULT_SYSTEM_SKIN_PATH,
+      buttonStyle: DEFAULT_SYSTEM_BUTTON_STYLE,
+      colorTableBytes: null
+    };
+    if (typeof fileProvider !== "function") {
+      return state;
+    }
+    const helpers = getIniHelpers();
+    const findIniValue = helpers && typeof helpers.findIniValue === "function"
+      ? helpers.findIniValue
+      : null;
+    const parseIniIntString = helpers && typeof helpers.parseIniIntString === "function"
+      ? helpers.parseIniIntString
+      : null;
+    if (!findIniValue) {
+      return state;
+    }
+    let bytes = null;
+    try {
+      bytes = fileProvider(SYSTEM_STYLE_INI_PATH);
+    } catch (err) {
+      bytes = null;
+    }
+    if (!(bytes instanceof Uint8Array) || !bytes.length) {
+      return state;
+    }
+    const skinPath = findIniValue(bytes, "style", "skin");
+    if (skinPath) {
+      state.skinPath = String(skinPath);
+    }
+    const buttonStyle = parseIniIntString
+      ? parseIniIntString(findIniValue(bytes, "style", "buttons_gradient"))
+      : null;
+    if (buttonStyle !== null) {
+      state.buttonStyle = buttonStyle === 0 ? 0 : 1;
+    }
+    return state;
   }
 
   function createOverlaySurface(canvas, width, height) {
@@ -791,17 +847,18 @@
       this.emulator.traceOpcodes = !!next.traceOpcodes;
     }
 
-    refreshSkinTheme() {
+    refreshSkinTheme(styleState) {
       if (!this.emulator || this.removed) {
         return false;
       }
-      const currentPath = String(this.emulator.skinPath || "/sys/default.skn");
-      if (typeof this.emulator.resetSkinTheme === "function") {
-        this.emulator.resetSkinTheme();
-      }
-      this.emulator.skinPath = currentPath;
-      if (typeof this.emulator.ensureSkinThemeLoaded === "function") {
-        this.emulator.ensureSkinThemeLoaded();
+      const nextStyle = styleState || (this.manager && typeof this.manager.getSystemStyleState === "function"
+        ? this.manager.getSystemStyleState()
+        : null);
+      const applied = this.manager && typeof this.manager.applySystemStyleToEmulator === "function"
+        ? this.manager.applySystemStyleToEmulator(this.emulator, nextStyle, { queueRedraw: false, wake: false }) === 0
+        : false;
+      if (!applied) {
+        return false;
       }
       this.lastChromeSkin = null;
       this.lastChromeKey = "";
@@ -816,6 +873,9 @@
 
     start() {
       this.emulator.load(this.image);
+      if (this.manager && typeof this.manager.applySystemStyleToEmulator === "function") {
+        this.manager.applySystemStyleToEmulator(this.emulator, null, { queueRedraw: false, wake: false });
+      }
       this.emulator.run();
       this.scheduleChromeRender(true);
     }
@@ -1302,6 +1362,12 @@
         } catch (err) {
           this.shellEl.focus();
         }
+      }
+    }
+
+    blurShell() {
+      if (this.shellEl && document.activeElement === this.shellEl) {
+        this.shellEl.blur();
       }
     }
 
@@ -2078,6 +2144,9 @@
       this.keyboardLayouts = new Map();
       this.keyboardLanguageId = 1;
       this.systemLanguageId = 1;
+      this.systemSkinPath = DEFAULT_SYSTEM_SKIN_PATH;
+      this.systemButtonStyle = DEFAULT_SYSTEM_BUTTON_STYLE;
+      this.systemSkinColorTableBytes = null;
       this.fontSmoothingMode = 1;
       this.fontSizePx = 9;
       this.speakerDisabled = false;
@@ -2131,6 +2200,69 @@
       this.ensureDesktopSurfaceSize();
       this.renderDesktopBackground();
       this.presentDesktopSurface();
+    }
+
+    resetSystemState(options) {
+      const opts = options || {};
+      if (typeof this.cancelDesktopTouchCapture === "function") {
+        this.cancelDesktopTouchCapture();
+      }
+      this.desktopTouchId = null;
+      this.desktopTouchClientX = 0;
+      this.desktopTouchClientY = 0;
+      this.desktopSwipeStartX = 0;
+      this.desktopSwipeStartY = 0;
+      this.desktopSwipeLastX = 0;
+      this.desktopSwipeLastY = 0;
+      this.desktopSwipeStartMs = 0;
+      this.desktopSwipeEligible = false;
+      this.desktopSwipeHeldKey = "";
+      this.desktopSwipeMouseSuppressed = false;
+      this.desktopSwipeTarget = null;
+      this.sharedNamedMemoryStore = new Map();
+      this.namedMemoryBootstrapActive = false;
+      this.desktopBackgroundWidth = 0;
+      this.desktopBackgroundHeight = 0;
+      this.desktopBackgroundMode = 1;
+      this.desktopBackgroundData = new Uint8Array(0);
+      this.keyboardLayouts = new Map();
+      this.keyboardLanguageId = 1;
+      this.systemLanguageId = 1;
+      this.systemSkinPath = DEFAULT_SYSTEM_SKIN_PATH;
+      this.systemButtonStyle = DEFAULT_SYSTEM_BUTTON_STYLE;
+      this.systemSkinColorTableBytes = null;
+      this.fontSmoothingMode = 1;
+      this.fontSizePx = 9;
+      this.speakerDisabled = false;
+      this.lowLevelHdAccessEnabled = false;
+      this.lowLevelPciAccessEnabled = false;
+      this.loadedDrivers = new Map();
+      this.nextDriverHandle = 1;
+      this.cpuBusySamples = [];
+      this.cpuBusySampleTotalMs = 0;
+      this.activeProcess = null;
+      this.nextPid = 1;
+      this.nextSlot = 1;
+      this.nextCascadeIndex = 0;
+      this.zCounter = 1;
+      this.resetScreenWorkArea();
+      if (opts.reloadStyleFromFileSystem !== false) {
+        this.reloadSystemStyleFromFileSystem();
+      }
+      this.ensureDesktopSurfaceSize();
+      const width = Math.max(1, this.desktopSurface ? (this.desktopSurface.width | 0) : 1);
+      const height = Math.max(1, this.desktopSurface ? (this.desktopSurface.height | 0) : 1);
+      this.desktopLastDraw = {
+        left: 0,
+        top: 0,
+        right: width - 1,
+        bottom: height - 1
+      };
+      this.renderDesktopBackground();
+      this.presentDesktopSurface();
+      this.syncDesktopSize();
+      this.onProcessVisualStateChanged();
+      return true;
     }
 
     getWorkspacePointerPosition(event) {
@@ -2238,6 +2370,123 @@
       }
       this.syncDesktopSize();
       return true;
+    }
+
+    getSystemStyleState() {
+      return {
+        skinPath: String(this.systemSkinPath || DEFAULT_SYSTEM_SKIN_PATH),
+        buttonStyle: (this.systemButtonStyle & 0xff) === 0 ? 0 : 1,
+        colorTableBytes: cloneBytes(this.systemSkinColorTableBytes)
+      };
+    }
+
+    reloadSystemStyleFromFileSystem() {
+      const next = readSystemStyleState(typeof this.app.getFileProvider === "function" ? this.app.getFileProvider() : null);
+      this.systemSkinPath = String(next.skinPath || DEFAULT_SYSTEM_SKIN_PATH);
+      this.systemButtonStyle = (next.buttonStyle & 0xff) === 0 ? 0 : 1;
+      this.systemSkinColorTableBytes = cloneBytes(next.colorTableBytes);
+      return this.getSystemStyleState();
+    }
+
+    applySystemStyleToEmulator(emulator, styleState, options) {
+      if (!emulator) {
+        return 1;
+      }
+      const next = styleState || this.getSystemStyleState();
+      const opts = options || {};
+      emulator.buttonStyle = (next.buttonStyle & 0xff) === 0 ? 0 : 1;
+      if (typeof emulator.resetSkinTheme === "function") {
+        emulator.resetSkinTheme();
+      }
+      emulator.skinPath = String(next.skinPath || DEFAULT_SYSTEM_SKIN_PATH);
+      emulator.skinReady = false;
+      let result = 0;
+      if (typeof emulator.loadSkinTheme === "function") {
+        result = emulator.loadSkinTheme(emulator.skinPath) >>> 0;
+      } else if (typeof emulator.ensureSkinThemeLoaded === "function") {
+        result = emulator.ensureSkinThemeLoaded() ? 0 : 1;
+      }
+      if (result !== 0) {
+        return result >>> 0;
+      }
+      if (next.colorTableBytes instanceof Uint8Array && typeof emulator.setSkinColorTable === "function") {
+        emulator.setSkinColorTable(next.colorTableBytes);
+      }
+      if (opts.queueRedraw !== false && emulator.running) {
+        emulator.removeQueuedEvent(1);
+        emulator.queueEvent(1);
+      }
+      if (opts.wake !== false && emulator.running) {
+        emulator.wakeExecution();
+      }
+      return 0;
+    }
+
+    applySystemStyleToProcesses(styleState, options) {
+      const next = styleState || this.getSystemStyleState();
+      let updated = false;
+      for (let i = 0; i < this.processes.length; i += 1) {
+        const process = this.processes[i];
+        if (!process || process.removed || !process.emulator) {
+          continue;
+        }
+        const result = this.applySystemStyleToEmulator(process.emulator, next, options);
+        if (result !== 0) {
+          continue;
+        }
+        process.lastChromeSkin = null;
+        process.lastChromeKey = "";
+        process.scheduleChromeRender(true);
+        updated = true;
+      }
+      if (updated) {
+        this.onProcessVisualStateChanged();
+      }
+      return updated;
+    }
+
+    setSystemSkinPath(path, sourceEmulator) {
+      const nextPath = String(path || "").trim();
+      if (!nextPath) {
+        return 3;
+      }
+      const previous = this.getSystemStyleState();
+      const candidate = {
+        skinPath: nextPath,
+        buttonStyle: previous.buttonStyle,
+        colorTableBytes: null
+      };
+      const probe = sourceEmulator || (this.activeProcess && this.activeProcess.emulator ? this.activeProcess.emulator : null);
+      if (probe) {
+        const result = this.applySystemStyleToEmulator(probe, candidate, { queueRedraw: false, wake: false });
+        if (result !== 0) {
+          this.applySystemStyleToEmulator(probe, previous, { queueRedraw: false, wake: false });
+          return result >>> 0;
+        }
+        candidate.colorTableBytes = cloneBytes(
+          typeof probe.getSkinColorTableBytes === "function" ? probe.getSkinColorTableBytes() : null
+        );
+      }
+      this.systemSkinPath = nextPath;
+      this.systemSkinColorTableBytes = cloneBytes(candidate.colorTableBytes);
+      this.applySystemStyleToProcesses(this.getSystemStyleState(), { queueRedraw: true, wake: true });
+      return 0;
+    }
+
+    setSystemButtonStyle(value) {
+      this.systemButtonStyle = (value & 0xff) === 0 ? 0 : 1;
+      this.applySystemStyleToProcesses(this.getSystemStyleState(), { queueRedraw: false, wake: false });
+      return true;
+    }
+
+    setSystemSkinColorTable(bytes) {
+      this.systemSkinColorTableBytes = bytes instanceof Uint8Array ? bytes.slice() : null;
+      this.applySystemStyleToProcesses(this.getSystemStyleState(), { queueRedraw: false, wake: false });
+      return true;
+    }
+
+    applySystemStyleSettings() {
+      return this.applySystemStyleToProcesses(this.getSystemStyleState(), { queueRedraw: true, wake: true });
     }
 
     getKeyboardLayout(kind) {
@@ -2822,6 +3071,7 @@
 
     handleDesktopMouseDown(event) {
       event.preventDefault();
+      this.setActiveProcess(null, { focusShell: false });
       this.forwardDesktopMouseEvent(event, getDomButtonMask(event.button), 0, false, 0, 0);
     }
 
@@ -3457,9 +3707,10 @@
     }
 
     refreshSkinThemes() {
+      const styleState = this.reloadSystemStyleFromFileSystem();
       let updated = false;
       for (let i = 0; i < this.processes.length; i += 1) {
-        updated = this.processes[i].refreshSkinTheme() || updated;
+        updated = this.processes[i].refreshSkinTheme(styleState) || updated;
       }
       if (updated) {
         this.onProcessVisualStateChanged();
@@ -3490,6 +3741,7 @@
         return process;
       }
       if (this.activeProcess) {
+        this.activeProcess.blurShell();
         this.activeProcess.active = false;
         this.activeProcess.rootEl.classList.remove("active");
         this.activeProcess.scheduleChromeRender(true);

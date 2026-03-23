@@ -88,11 +88,31 @@
     return entries;
   }
 
-  function createReadOnlyRoot(manifest) {
+  function encodeBase64(bytes) {
+    const source = bytes instanceof Uint8Array ? bytes : new Uint8Array(0);
+    let raw = "";
+    for (let i = 0; i < source.length; i += 1) {
+      raw += String.fromCharCode(source[i] & 0xff);
+    }
+    return btoa(raw);
+  }
+
+  function cloneBytes(data) {
+    if (data instanceof Uint8Array) {
+      return data.slice();
+    }
+    if (ArrayBuffer.isView(data)) {
+      return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
+    }
+    if (data instanceof ArrayBuffer) {
+      return new Uint8Array(data.slice(0));
+    }
+    return new Uint8Array(0);
+  }
+
+  function buildEntryTreeFromManifest(manifest) {
     const source = manifest && Array.isArray(manifest.files) ? manifest.files : [];
     const rootEntry = makeDirEntry("");
-    let fileCount = 0;
-    let totalBytes = 0;
 
     for (let i = 0; i < source.length; i += 1) {
       const record = source[i] || {};
@@ -115,23 +135,123 @@
       const fileName = segments[segments.length - 1];
       const fileEntry = makeFileEntry(fileName, record);
       parent.children.set(fileName.toLowerCase(), fileEntry);
-      fileCount += 1;
-      totalBytes += fileEntry.size >>> 0;
     }
+    return rootEntry;
+  }
 
+  function snapshotEntryTree(entry) {
+    if (!entry) {
+      return null;
+    }
+    if (entry.kind === "file") {
+      const bytes = entry.bytes instanceof Uint8Array ? entry.bytes : decodeBase64(entry.base64);
+      return {
+        name: entry.name,
+        kind: "file",
+        size: bytes.length >>> 0,
+        mtimeMs: entry.mtimeMs >>> 0,
+        base64: encodeBase64(bytes)
+      };
+    }
+    const children = [];
+    for (const child of entry.children.values()) {
+      children.push(snapshotEntryTree(child));
+    }
+    children.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return {
+      name: entry.name,
+      kind: "directory",
+      mtimeMs: entry.mtimeMs >>> 0,
+      children
+    };
+  }
+
+  function restoreEntryTree(snapshot) {
+    if (!snapshot || snapshot.kind === "file") {
+      return makeFileEntry(snapshot && snapshot.name ? snapshot.name : "", snapshot || {});
+    }
+    const entry = makeDirEntry(snapshot.name || "");
+    entry.mtimeMs = Math.max(0, Number(snapshot.mtimeMs) || 0);
+    const children = Array.isArray(snapshot.children) ? snapshot.children : [];
+    for (let i = 0; i < children.length; i += 1) {
+      const child = restoreEntryTree(children[i] || null);
+      if (!child || !child.name) {
+        continue;
+      }
+      entry.children.set(child.name.toLowerCase(), child);
+    }
+    return entry;
+  }
+
+  function measureEntryTree(entry) {
+    let fileCount = 0;
+    let totalBytes = 0;
+    const stack = [entry];
+    while (stack.length) {
+      const current = stack.pop();
+      if (!current) {
+        continue;
+      }
+      if (current.kind === "file") {
+        fileCount += 1;
+        totalBytes += current.size >>> 0;
+        continue;
+      }
+      for (const child of current.children.values()) {
+        stack.push(child);
+      }
+    }
+    return {
+      fileCount: fileCount >>> 0,
+      totalBytes: totalBytes >>> 0
+    };
+  }
+
+  function createRootAccessors(rootEntry) {
     function resolveEntryRecord(kpath) {
-      const requestedSegments = mapKosPathSegments(kpath);
+      const normalized = normalizeKosInput(kpath) || "/";
+      const requestedSegments = mapKosPathSegments(normalized);
       let entry = rootEntry;
+      let parent = null;
       for (let i = 0; i < requestedSegments.length; i += 1) {
         if (!entry || entry.kind !== "directory") {
           return null;
         }
+        parent = entry;
         entry = entry.children.get(requestedSegments[i].toLowerCase()) || null;
         if (!entry) {
           return null;
         }
       }
-      return entry;
+      return {
+        normalized,
+        segments: requestedSegments,
+        parent,
+        parentSegments: requestedSegments.slice(0, Math.max(0, requestedSegments.length - 1)),
+        entry
+      };
+    }
+
+    function resolveParentRecord(kpath) {
+      const normalized = normalizeKosInput(kpath);
+      const segments = mapKosPathSegments(normalized);
+      if (!segments.length) {
+        return null;
+      }
+      let parentEntry = rootEntry;
+      const parentSegments = segments.slice(0, -1);
+      for (let i = 0; i < parentSegments.length; i += 1) {
+        if (!parentEntry || parentEntry.kind !== "directory") {
+          return null;
+        }
+        parentEntry = parentEntry.children.get(parentSegments[i].toLowerCase()) || null;
+      }
+      return {
+        normalized,
+        parentSegments,
+        parentEntry,
+        requestedName: segments[segments.length - 1] || ""
+      };
     }
 
     function getBytes(entry) {
@@ -144,25 +264,38 @@
       return entry.bytes;
     }
 
+    return {
+      resolveEntryRecord,
+      resolveParentRecord,
+      getBytes
+    };
+  }
+
+  function createReadOnlyRoot(manifest) {
+    const rootEntry = buildEntryTreeFromManifest(manifest);
+    const stats = measureEntryTree(rootEntry);
+    const accessors = createRootAccessors(rootEntry);
+
     const rootLabel = manifest && manifest.label ? String(manifest.label) : "builtin-kolibri-root";
 
     return {
       label: rootLabel,
       permission: "granted",
       summaryText() {
-        return `${rootLabel} | ${fileCount} files | bundled`;
+        return `${rootLabel} | ${stats.fileCount} files | bundled`;
       },
       flushPending() {
         return Promise.resolve();
       },
       fileProvider(kpath) {
-        const entry = resolveEntryRecord(kpath);
-        const bytes = getBytes(entry);
+        const record = accessors.resolveEntryRecord(kpath);
+        const bytes = accessors.getBytes(record ? record.entry : null);
         return bytes ? bytes.slice() : null;
       },
       fileInfoProvider(kpath, kind) {
         const normalized = normalizeKosInput(kpath) || "/";
-        const entry = resolveEntryRecord(normalized);
+        const record = accessors.resolveEntryRecord(normalized);
+        const entry = record ? record.entry : null;
         if (!entry) {
           return null;
         }
@@ -182,8 +315,284 @@
       mutationProvider() {
         return { errorCode: 2, written: 0 };
       },
-      fileCount: fileCount >>> 0,
-      totalBytes: totalBytes >>> 0
+      fileCount: stats.fileCount >>> 0,
+      totalBytes: stats.totalBytes >>> 0
+    };
+  }
+
+  function supportsLocalStorage() {
+    try {
+      return typeof localStorage !== "undefined";
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function getPersistStorageKey(manifest) {
+    const sourcePath = manifest && manifest.sourcePath ? String(manifest.sourcePath) : "builtin";
+    const launchPath = manifest && manifest.launchPath ? String(manifest.launchPath) : "/sys/LAUNCHER";
+    return `kos-emu:builtin-root:${sourcePath}:${launchPath}`;
+  }
+
+  function clearPersistedSnapshot(manifest) {
+    if (!supportsLocalStorage()) {
+      return false;
+    }
+    const storageKey = getPersistStorageKey(manifest);
+    try {
+      localStorage.removeItem(storageKey);
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function loadPersistedSnapshot(manifest) {
+    if (!supportsLocalStorage()) {
+      return null;
+    }
+    const storageKey = getPersistStorageKey(manifest);
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) {
+        return null;
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.kind !== "directory") {
+        return null;
+      }
+      return restoreEntryTree(parsed);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function createBundledRoot(manifest) {
+    const rootLabel = manifest && manifest.label ? String(manifest.label) : "builtin-kolibri-root";
+    const storageKey = getPersistStorageKey(manifest);
+    const rootEntry = loadPersistedSnapshot(manifest) || buildEntryTreeFromManifest(manifest);
+    const accessors = createRootAccessors(rootEntry);
+    let stats = measureEntryTree(rootEntry);
+    let pendingFlush = Promise.resolve();
+
+    function updateStats() {
+      stats = measureEntryTree(rootEntry);
+    }
+
+    function queuePersist() {
+      if (!supportsLocalStorage()) {
+        return pendingFlush;
+      }
+      pendingFlush = pendingFlush
+        .catch(() => {})
+        .then(() => {
+          localStorage.setItem(storageKey, JSON.stringify(snapshotEntryTree(rootEntry)));
+        });
+      return pendingFlush;
+    }
+
+    function createOrRewriteFile(kpath, options) {
+      const parent = accessors.resolveParentRecord(kpath);
+      if (!parent || !parent.parentEntry || parent.parentEntry.kind !== "directory") {
+        return { errorCode: 5, written: 0 };
+      }
+      const name = parent.requestedName;
+      if (!name) {
+        return { errorCode: 33, written: 0 };
+      }
+      const existing = parent.parentEntry.children.get(name.toLowerCase()) || null;
+      if (existing && existing.kind !== "file") {
+        return { errorCode: 10, written: 0 };
+      }
+      const bytes = cloneBytes(options && options.data);
+      const entry = existing || makeFileEntry(name, { size: bytes.length, base64: "", mtimeMs: Date.now() });
+      entry.name = name;
+      entry.kind = "file";
+      entry.size = bytes.length >>> 0;
+      entry.mtimeMs = Date.now();
+      entry.bytes = bytes;
+      entry.base64 = encodeBase64(bytes);
+      parent.parentEntry.children.set(name.toLowerCase(), entry);
+      updateStats();
+      queuePersist();
+      return { errorCode: 0, written: entry.size >>> 0 };
+    }
+
+    function writeExistingFile(kpath, options) {
+      const record = accessors.resolveEntryRecord(kpath);
+      if (!record || !record.entry) {
+        return { errorCode: 5, written: 0 };
+      }
+      if (record.entry.kind !== "file") {
+        return { errorCode: 10, written: 0 };
+      }
+      const offset = options && options.offset !== undefined ? (options.offset >>> 0) : 0;
+      const patch = cloneBytes(options && options.data);
+      const base = accessors.getBytes(record.entry) || new Uint8Array(0);
+      const nextSize = Math.max(base.length >>> 0, (offset + patch.length) >>> 0) >>> 0;
+      const next = new Uint8Array(nextSize);
+      next.set(base.subarray(0, Math.min(base.length, next.length)), 0);
+      if (patch.length) {
+        next.set(patch, offset);
+      }
+      record.entry.bytes = next;
+      record.entry.base64 = encodeBase64(next);
+      record.entry.size = next.length >>> 0;
+      record.entry.mtimeMs = Date.now();
+      updateStats();
+      queuePersist();
+      return { errorCode: 0, written: patch.length >>> 0 };
+    }
+
+    function setEndOfFile(kpath, options) {
+      const record = accessors.resolveEntryRecord(kpath);
+      if (!record || !record.entry) {
+        return { errorCode: 5, written: 0 };
+      }
+      if (record.entry.kind !== "file") {
+        return { errorCode: 10, written: 0 };
+      }
+      const size = options && options.size !== undefined ? (options.size >>> 0) : 0;
+      const base = accessors.getBytes(record.entry) || new Uint8Array(0);
+      const next = new Uint8Array(size);
+      next.set(base.subarray(0, Math.min(base.length, size)), 0);
+      record.entry.bytes = next;
+      record.entry.base64 = encodeBase64(next);
+      record.entry.size = next.length >>> 0;
+      record.entry.mtimeMs = Date.now();
+      updateStats();
+      queuePersist();
+      return { errorCode: 0, written: 0 };
+    }
+
+    function deletePath(kpath) {
+      const record = accessors.resolveEntryRecord(kpath);
+      if (!record || !record.entry || !record.parent) {
+        return { errorCode: 5, written: 0 };
+      }
+      if (record.entry.kind === "directory" && record.entry.children.size) {
+        return { errorCode: 10, written: 0 };
+      }
+      record.parent.children.delete(record.entry.name.toLowerCase());
+      updateStats();
+      queuePersist();
+      return { errorCode: 0, written: 0 };
+    }
+
+    function createFolder(kpath) {
+      const parent = accessors.resolveParentRecord(kpath);
+      if (!parent || !parent.parentEntry || parent.parentEntry.kind !== "directory") {
+        return { errorCode: 5, written: 0 };
+      }
+      const name = parent.requestedName;
+      if (!name) {
+        return { errorCode: 33, written: 0 };
+      }
+      const existing = parent.parentEntry.children.get(name.toLowerCase()) || null;
+      if (existing) {
+        return existing.kind === "directory" ? { errorCode: 0, written: 0 } : { errorCode: 10, written: 0 };
+      }
+      const entry = makeDirEntry(name);
+      entry.mtimeMs = Date.now();
+      parent.parentEntry.children.set(name.toLowerCase(), entry);
+      queuePersist();
+      return { errorCode: 0, written: 0 };
+    }
+
+    function renameOrMovePath(kpath, options) {
+      const source = accessors.resolveEntryRecord(kpath);
+      const nextPath = options && options.nextPath ? String(options.nextPath) : "";
+      const target = accessors.resolveParentRecord(nextPath);
+      if (!source || !source.entry || !source.parent) {
+        return { errorCode: 5, written: 0 };
+      }
+      if (!target || !target.parentEntry || target.parentEntry.kind !== "directory") {
+        return { errorCode: 5, written: 0 };
+      }
+      const nextName = target.requestedName;
+      if (!nextName) {
+        return { errorCode: 33, written: 0 };
+      }
+      if (target.parentEntry.children.has(nextName.toLowerCase())) {
+        return { errorCode: 10, written: 0 };
+      }
+      if (source.entry.kind === "directory") {
+        const sourcePath = source.segments.join("/").toLowerCase();
+        const targetPath = target.parentSegments.concat([nextName]).join("/").toLowerCase();
+        if (targetPath === sourcePath || targetPath.startsWith(`${sourcePath}/`)) {
+          return { errorCode: 10, written: 0 };
+        }
+      }
+      source.parent.children.delete(source.entry.name.toLowerCase());
+      source.entry.name = nextName;
+      source.entry.mtimeMs = Date.now();
+      target.parentEntry.children.set(nextName.toLowerCase(), source.entry);
+      updateStats();
+      queuePersist();
+      return { errorCode: 0, written: 0 };
+    }
+
+    return {
+      label: rootLabel,
+      permission: "granted",
+      summaryText() {
+        return `${rootLabel} | ${stats.fileCount} files | bundled | ${supportsLocalStorage() ? "persisted" : "volatile"}`;
+      },
+      flushPending() {
+        return pendingFlush;
+      },
+      fileProvider(kpath) {
+        const record = accessors.resolveEntryRecord(kpath);
+        const bytes = accessors.getBytes(record ? record.entry : null);
+        return bytes ? bytes.slice() : null;
+      },
+      fileInfoProvider(kpath, kind) {
+        const normalized = normalizeKosInput(kpath) || "/";
+        const record = accessors.resolveEntryRecord(normalized);
+        const entry = record ? record.entry : null;
+        if (!entry) {
+          return null;
+        }
+        const info = {
+          path: normalized,
+          hostPath: normalized,
+          exists: true,
+          isDirectory: entry.kind === "directory",
+          size: entry.kind === "file" ? (entry.size >>> 0) : 0,
+          mtimeMs: entry.mtimeMs >>> 0
+        };
+        if ((kind || "stat") === "list") {
+          info.entries = listDirEntries(entry);
+        }
+        return info;
+      },
+      mutationProvider(op, kpath, options) {
+        switch (op) {
+          case "create-file":
+            return createOrRewriteFile(kpath, options);
+          case "write-file":
+            return writeExistingFile(kpath, options);
+          case "set-end":
+            return setEndOfFile(kpath, options);
+          case "delete":
+            return deletePath(kpath);
+          case "create-folder":
+            return createFolder(kpath);
+          case "move":
+            return renameOrMovePath(kpath, options);
+          default:
+            return { errorCode: 2, written: 0 };
+        }
+      },
+      clearPersistence() {
+        return clearPersistedSnapshot(manifest);
+      },
+      get fileCount() {
+        return stats.fileCount >>> 0;
+      },
+      get totalBytes() {
+        return stats.totalBytes >>> 0;
+      }
     };
   }
 
@@ -198,7 +607,7 @@
     if (!manifest) {
       throw new Error(`Bundled root asset not found: ${assetKey}`);
     }
-    const root = createReadOnlyRoot(manifest);
+    const root = createBundledRoot(manifest);
     app.browserFsRoot = root;
     app.savedFsRootLabel = "";
     app.savedFsRootPendingPermission = false;
@@ -232,6 +641,8 @@
   KosEmu.ui.bundledRoot = {
     normalizeKosInput,
     createReadOnlyRoot,
+    createBundledRoot,
+    clearPersistedSnapshot,
     bootBundledDesktopPage
   };
 })();
