@@ -7,6 +7,7 @@ const { writeSurfacePng } = require("./surface-snapshot");
 
 const DEFAULT_CPU_FREQ_HZ = 2400000000;
 const DEFAULT_SYSTEM_RAM_BYTES = 512 * 1024 * 1024;
+const DEFAULT_SYSTEM_RESERVED_RAM_BYTES = 16 * 1024 * 1024;
 
 const REG = {
   EAX: 0,
@@ -363,6 +364,7 @@ function rectOverlapArea(a, b) {
 class HeadlessUiHarness {
   constructor(options) {
     const opts = options || {};
+    this.options = opts;
     this.rootDir = opts.rootDir || process.env.KOS_ROOT || "C:\\Users\\Paul\\Desktop\\Kem\\kolibri_root";
     this.baseWidth = Math.max(1, opts.width | 0 || 800);
     this.baseHeight = Math.max(1, opts.height | 0 || 600);
@@ -751,6 +753,39 @@ class HeadlessUiHarness {
     return Math.max(1, Math.min(0xffffffff, Math.round(hz))) >>> 0;
   }
 
+  getConfiguredSystemRamBytes() {
+    let total = 0;
+    if (Number.isFinite(Number(this.options && this.options.systemRamBytes))) {
+      total = Number(this.options.systemRamBytes);
+    }
+    if (!(total > 0)) {
+      total = DEFAULT_SYSTEM_RAM_BYTES;
+    }
+    return Math.max(1, Math.min(0xffffffff, Math.round(total))) >>> 0;
+  }
+
+  getConfiguredSystemReservedRamBytes() {
+    let reserved = null;
+    if (Number.isFinite(Number(this.options && this.options.systemReservedRamBytes))) {
+      reserved = Number(this.options.systemReservedRamBytes);
+    }
+    if (!Number.isFinite(reserved) || reserved < 0) {
+      reserved = DEFAULT_SYSTEM_RESERVED_RAM_BYTES;
+    }
+    return Math.max(0, Math.min(0xffffffff, Math.round(reserved))) >>> 0;
+  }
+
+  getReportedUsedRamBytes() {
+    const processUsed = this.processes.reduce((sum, process) => {
+      if (!process || process.removed) {
+        return sum;
+      }
+      return sum + this.getApproxProcessMemoryBytes(process);
+    }, 0);
+    const reserved = this.getConfiguredSystemReservedRamBytes();
+    return Math.max(0, Math.min(0xffffffff, Math.round(processUsed + reserved))) >>> 0;
+  }
+
   getApproxProcessMemoryBytes(process) {
     const emulator = process && process.emulator ? process.emulator : null;
     if (!emulator) {
@@ -775,47 +810,16 @@ class HeadlessUiHarness {
   }
 
   getReportedTotalRamBytes() {
-    let total = 0;
-    try {
-      total = Number(os.totalmem()) || 0;
-    } catch (err) {
-      total = 0;
-    }
-    const used = this.processes.reduce((sum, process) => {
-      if (!process || process.removed) {
-        return sum;
-      }
-      return sum + this.getApproxProcessMemoryBytes(process);
-    }, 0);
-    if (!(total > 0)) {
-      total = Math.max(DEFAULT_SYSTEM_RAM_BYTES, used + (64 * 1024 * 1024));
-    }
+    const used = this.getReportedUsedRamBytes();
+    let total = this.getConfiguredSystemRamBytes();
     total = Math.max(total, used + (64 * 1024 * 1024));
     return Math.max(1, Math.min(0xffffffff, Math.round(total))) >>> 0;
   }
 
   getReportedFreeRamBytes() {
-    let free = 0;
-    try {
-      free = Number(os.freemem()) || 0;
-    } catch (err) {
-      free = 0;
-    }
-    if (!(free > 0)) {
-      const total = this.getReportedTotalRamBytes();
-      const used = Math.min(
-        total >>> 0,
-        this.processes.reduce((sum, process) => {
-          if (!process || process.removed) {
-            return sum;
-          }
-          return sum + this.getApproxProcessMemoryBytes(process);
-        }, 0)
-      ) >>> 0;
-      return Math.max(0, total - used) >>> 0;
-    }
     const total = this.getReportedTotalRamBytes();
-    return Math.max(0, Math.min(total >>> 0, Math.round(free))) >>> 0;
+    const used = Math.min(total >>> 0, this.getReportedUsedRamBytes()) >>> 0;
+    return Math.max(0, total - used) >>> 0;
   }
 
   getDesktopBackgroundInfo() {
@@ -2425,7 +2429,9 @@ class HeadlessUiHarness {
       windowStackPosition: this.getWindowStackPosition(slot >>> 0),
       name: path.basename(String(process.displayPath || process.processPath || process.fileName || "thread")).slice(0, 12),
       memoryAddress: 0,
-      usedMemory: emulator ? (emulator.memLimit >>> 0) : 0,
+      usedMemory: emulator && typeof emulator.getCommittedProcessMemoryBytes === "function"
+        ? (emulator.getCommittedProcessMemoryBytes() >>> 0)
+        : (this.getApproxProcessMemoryBytes(process) >>> 0),
       pid: process.pid >>> 0,
       windowX: process.actualX >>> 0,
       windowY: process.actualY >>> 0,

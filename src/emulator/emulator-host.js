@@ -882,7 +882,9 @@
           windowStackPosition: requestedSlot === activeSlot ? 1 : 0,
           name: this.image && this.image.fileName ? String(this.image.fileName) : "APP",
           memoryAddress: 0,
-          usedMemory: this.memLimit ? (this.memLimit >>> 0) : 0,
+          usedMemory: typeof this.getCommittedProcessMemoryBytes === "function"
+            ? (this.getCommittedProcessMemoryBytes() >>> 0)
+            : (this.memLimit ? (this.memLimit >>> 0) : 0),
           pid: this.processId >>> 0,
           windowX: windowX >>> 0,
           windowY: windowY >>> 0,

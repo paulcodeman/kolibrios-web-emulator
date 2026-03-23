@@ -23,6 +23,7 @@
   const MAX_WINDOW_HEIGHT = 4096;
   const DEFAULT_CPU_FREQ_HZ = 2400000000;
   const DEFAULT_SYSTEM_RAM_BYTES = 512 * 1024 * 1024;
+  const DEFAULT_SYSTEM_RESERVED_RAM_BYTES = 16 * 1024 * 1024;
   const WINDOW_STATE_MAXIMIZED = 0x01;
   const WINDOW_STATE_USED = 0x80;
   const WINDOW_STATE_MINIMIZED = 0x02;
@@ -1994,7 +1995,9 @@
         windowStackPosition: windowStackPosition >>> 0,
         name: this.name,
         memoryAddress: 0,
-        usedMemory: this.emulator ? (this.emulator.memLimit >>> 0) : 0,
+        usedMemory: this.emulator && typeof this.emulator.getCommittedProcessMemoryBytes === "function"
+          ? (this.emulator.getCommittedProcessMemoryBytes() >>> 0)
+          : (this.manager ? (this.manager.getApproxProcessMemoryBytes(this) >>> 0) : 0),
         pid: this.pid >>> 0,
         windowX: this.actualX >>> 0,
         windowY: this.actualY >>> 0,
@@ -2405,6 +2408,41 @@
       return Math.max(1, Math.min(0xffffffff, Math.round(hz))) >>> 0;
     }
 
+    getConfiguredSystemRamBytes() {
+      let total = 0;
+      const config = KosEmu && KosEmu.config ? KosEmu.config : null;
+      if (config && Number.isFinite(Number(config.systemRamBytes))) {
+        total = Number(config.systemRamBytes);
+      }
+      if (!(total > 0)) {
+        total = DEFAULT_SYSTEM_RAM_BYTES;
+      }
+      return Math.max(1, Math.min(0xffffffff, Math.round(total))) >>> 0;
+    }
+
+    getConfiguredSystemReservedRamBytes() {
+      let reserved = null;
+      const config = KosEmu && KosEmu.config ? KosEmu.config : null;
+      if (config && Number.isFinite(Number(config.systemReservedRamBytes))) {
+        reserved = Number(config.systemReservedRamBytes);
+      }
+      if (!Number.isFinite(reserved) || reserved < 0) {
+        reserved = DEFAULT_SYSTEM_RESERVED_RAM_BYTES;
+      }
+      return Math.max(0, Math.min(0xffffffff, Math.round(reserved))) >>> 0;
+    }
+
+    getReportedUsedRamBytes() {
+      const processUsed = this.processes.reduce((sum, process) => {
+        if (!process || process.removed) {
+          return sum;
+        }
+        return sum + this.getApproxProcessMemoryBytes(process);
+      }, 0);
+      const reserved = this.getConfiguredSystemReservedRamBytes();
+      return Math.max(0, Math.min(0xffffffff, Math.round(processUsed + reserved))) >>> 0;
+    }
+
     getApproxProcessMemoryBytes(process) {
       const emulator = process && process.emulator ? process.emulator : null;
       if (!emulator) {
@@ -2429,34 +2467,15 @@
     }
 
     getReportedTotalRamBytes() {
-      let total = 0;
-      if (typeof navigator !== "undefined" && navigator && Number.isFinite(Number(navigator.deviceMemory))) {
-        total = Math.round(Number(navigator.deviceMemory) * 1024 * 1024 * 1024);
-      }
-      const used = this.processes.reduce((sum, process) => {
-        if (!process || process.removed) {
-          return sum;
-        }
-        return sum + this.getApproxProcessMemoryBytes(process);
-      }, 0);
-      if (!(total > 0)) {
-        total = Math.max(DEFAULT_SYSTEM_RAM_BYTES, used + (64 * 1024 * 1024));
-      }
+      const used = this.getReportedUsedRamBytes();
+      let total = this.getConfiguredSystemRamBytes();
       total = Math.max(total, used + (64 * 1024 * 1024));
       return Math.max(1, Math.min(0xffffffff, Math.round(total))) >>> 0;
     }
 
     getReportedFreeRamBytes() {
       const total = this.getReportedTotalRamBytes();
-      const used = Math.min(
-        total >>> 0,
-        this.processes.reduce((sum, process) => {
-          if (!process || process.removed) {
-            return sum;
-          }
-          return sum + this.getApproxProcessMemoryBytes(process);
-        }, 0)
-      ) >>> 0;
+      const used = Math.min(total >>> 0, this.getReportedUsedRamBytes()) >>> 0;
       return Math.max(0, total - used) >>> 0;
     }
 

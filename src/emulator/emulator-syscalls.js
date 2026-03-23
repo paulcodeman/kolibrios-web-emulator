@@ -1988,22 +1988,14 @@
           let outerHeight = Math.max(1, this.windowHeight | 0 || (this.surface ? (this.surface.height | 0) : 1));
           if (!this.windowDefined) {
             const screen = this.getHostScreenInfo();
+            const screenWidth = Math.max(1, screen.width | 0);
+            const screenHeight = Math.max(1, screen.height | 0);
             hostX = winX | 0;
             hostY = winY | 0;
-            outerWidth = (width + 1) | 0;
-            outerHeight = (height + 1) | 0;
-            if (hostX < 0 || (hostX + outerWidth) > (screen.width | 0)) {
-              hostX = 0;
-            }
-            if (hostY < 0 || (hostY + outerHeight) > (screen.height | 0)) {
-              hostY = 0;
-            }
-            if ((hostX + outerWidth) > (screen.width | 0)) {
-              outerWidth = screen.width | 0;
-            }
-            if ((hostY + outerHeight) > (screen.height | 0)) {
-              outerHeight = screen.height | 0;
-            }
+            outerWidth = Math.max(1, Math.min((width + 1) | 0, screenWidth)) | 0;
+            outerHeight = Math.max(1, Math.min((height + 1) | 0, screenHeight)) | 0;
+            hostX = Math.max(0, Math.min(hostX, Math.max(0, screenWidth - outerWidth))) | 0;
+            hostY = Math.max(0, Math.min(hostY, Math.max(0, screenHeight - outerHeight))) | 0;
             this.windowHostX = hostX;
             this.windowHostY = hostY;
             this.windowOriginX = this.autoFitWindow ? 0 : hostX;
@@ -2914,6 +2906,25 @@
           return 0;
         }
         return ((value + 15) & ~15) >>> 0;
+      },
+
+      getCommittedProcessMemoryBytes() {
+        let committed = Math.max(
+          this.processReservedSize >>> 0,
+          this.stackBase >>> 0,
+          this.image && this.image.header ? (this.image.header.memorySize >>> 0) : 0
+        ) >>> 0;
+        if (this.heapEnabled) {
+          committed = Math.max(
+            committed >>> 0,
+            this.heapTop >>> 0,
+            this.heapLowTop >>> 0
+          ) >>> 0;
+        }
+        if (!committed) {
+          committed = 0x10000;
+        }
+        return align4k(committed >>> 0) >>> 0;
       },
 
       getReportedFreeRamBytes() {
