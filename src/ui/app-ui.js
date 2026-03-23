@@ -374,6 +374,50 @@
       this.log("Fullscreen toggle failed.");
     }
 
+    describeSystemAction(action) {
+      switch (action >>> 0) {
+        case 2:
+          return "Shutdown";
+        case 3:
+          return "Reboot";
+        case 4:
+          return "Restart kernel";
+        default:
+          return "System action";
+      }
+    }
+
+    async handleSystemAction(action) {
+      const mode = action >>> 0;
+      if (mode !== 2 && mode !== 3 && mode !== 4) {
+        return false;
+      }
+      const label = this.describeSystemAction(mode);
+      this.log(`${label} requested by guest.`);
+      let fullscreenPromise = null;
+      if (this.isWorkspaceFullscreen()) {
+        fullscreenPromise = this.exitWorkspaceFullscreen();
+      }
+      if (this.sessionManager) {
+        this.sessionManager.stopAllProcesses("stopped");
+      }
+      let fullscreenError = "";
+      if (fullscreenPromise) {
+        try {
+          await fullscreenPromise;
+        } catch (err) {
+          fullscreenError = err instanceof Error ? err.message : String(err);
+          this.log(`Fullscreen exit failed during ${label.toLowerCase()}: ${fullscreenError}`);
+        }
+      }
+      this.updateFullscreenButton();
+      this.updateSessionState();
+      if (fullscreenError) {
+        this.setStatus(`${label} requested`);
+      }
+      return true;
+    }
+
     async handleFullscreenToggle() {
       if (!this.supportsFullscreen()) {
         this.log("Fullscreen API unavailable in this browser.");

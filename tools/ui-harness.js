@@ -408,6 +408,7 @@ class HeadlessUiHarness {
     this.targetPath = "";
     this.logs = [];
     this.controlKeyMask = 0;
+    this.lastSystemAction = 0;
     this.resetDesktopState();
   }
 
@@ -1220,6 +1221,7 @@ class HeadlessUiHarness {
   clearCapture() {
     this.logs.length = 0;
     this.controlKeyMask = 0;
+    this.lastSystemAction = 0;
     this.processes.length = 0;
     this.processByPid.clear();
     this.processBySlot.clear();
@@ -2631,6 +2633,37 @@ class HeadlessUiHarness {
       count += this.minimizeProcess(list[i]) ? 1 : 0;
     }
     return count >>> 0;
+  }
+
+  stopAllProcesses(reason) {
+    if (!this.processes.length) {
+      return false;
+    }
+    const list = this.processes.slice();
+    for (let i = 0; i < list.length; i += 1) {
+      const process = list[i];
+      if (!process || process.removed) {
+        continue;
+      }
+      if (process.emulator && process.emulator.running) {
+        process.emulator.stop(reason || "stopped");
+        continue;
+      }
+      process.stopped = true;
+      process.removed = true;
+      this.unregisterProcess(process);
+    }
+    return true;
+  }
+
+  requestSystemAction(action) {
+    const mode = action >>> 0;
+    if (mode !== 2 && mode !== 3 && mode !== 4) {
+      return false;
+    }
+    this.lastSystemAction = mode >>> 0;
+    this.stopAllProcesses("stopped");
+    return true;
   }
 
   terminateThreadSlot(slot) {

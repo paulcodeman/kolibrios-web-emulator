@@ -3866,6 +3866,19 @@
       return count >>> 0;
     }
 
+    requestSystemAction(action) {
+      const mode = action >>> 0;
+      if (mode !== 2 && mode !== 3 && mode !== 4) {
+        return false;
+      }
+      if (this.app && typeof this.app.handleSystemAction === "function") {
+        void this.app.handleSystemAction(mode >>> 0);
+        return true;
+      }
+      this.stopAllProcesses("stopped");
+      return true;
+    }
+
     terminateThreadSlot(slot) {
       const process = this.processBySlot.get(slot >>> 0) || null;
       if (!process || process.removed) {
