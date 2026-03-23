@@ -599,6 +599,7 @@
       this.removeOnStopReason = "";
       this.removed = false;
       this.rolledUp = false;
+      this.minimized = false;
       this.maximized = false;
       this.maximizeRestoreGeometry = null;
       this.windowWidth = DEFAULT_SURFACE_WIDTH;
@@ -827,11 +828,19 @@
         return;
       }
       this.displayReady = true;
-      this.rootEl.classList.remove("workspace-window-pending");
+      this.applyWindowVisibility();
       this.manager.syncDesktopSize();
-      if (this.active) {
+      if (this.active && !this.minimized) {
         this.focusShell();
       }
+    }
+
+    applyWindowVisibility() {
+      if (!this.rootEl) {
+        return;
+      }
+      this.rootEl.classList.toggle("workspace-window-pending", !this.displayReady);
+      this.rootEl.classList.toggle("workspace-window-minimized", !!this.minimized);
     }
 
     getBaseSkin() {
@@ -1250,6 +1259,26 @@
       this.chromeEl.style.height = `${this.windowHeight}px`;
       this.rootEl.classList.toggle("workspace-window-rolled-up", !!this.rolledUp);
       this.manager.syncDesktopSize();
+    }
+
+    setMinimized(forceState, options) {
+      const next = forceState === undefined ? !this.minimized : !!forceState;
+      if (next === this.minimized) {
+        return false;
+      }
+      this.cancelCapture();
+      this.minimized = next;
+      this.pressedSystemButton = "";
+      this.pressedSystemHot = false;
+      this.applyWindowVisibility();
+      this.scheduleChromeRender(true);
+      if (!next && this.active) {
+        this.focusShell();
+      }
+      if (!options || options.notify !== false) {
+        this.manager.onProcessVisualStateChanged();
+      }
+      return true;
     }
 
     toggleRollup(forceState) {
@@ -1828,7 +1857,7 @@
         return;
       }
       if (button === "minimize") {
-        this.toggleRollup();
+        this.manager.minimizeProcess(this);
       }
     }
 
@@ -1947,8 +1976,11 @@
       if (this.maximized) {
         state |= WINDOW_STATE_MAXIMIZED;
       }
+      if (this.minimized) {
+        state |= WINDOW_STATE_MINIMIZED;
+      }
       if (this.rolledUp) {
-        state |= WINDOW_STATE_ROLLEDUP | WINDOW_STATE_MINIMIZED;
+        state |= WINDOW_STATE_ROLLEDUP;
       }
       return state >>> 0;
     }
@@ -2632,7 +2664,7 @@
 
     getDesktopInputProcesses() {
       return this.processes.filter((process) => {
-        if (!process || process.removed || !process.emulator || !process.emulator.running) {
+        if (!process || process.removed || process.minimized || !process.emulator || !process.emulator.running) {
           return false;
         }
         if ((process.windowPositionMode | 0) === WINDOW_Z_DESKTOP) {
@@ -2648,6 +2680,9 @@
       }
       const x = screenX | 0;
       const y = screenY | 0;
+      if (process.minimized && (process.windowPositionMode | 0) !== WINDOW_Z_DESKTOP) {
+        return null;
+      }
       if ((process.windowPositionMode | 0) === WINDOW_Z_DESKTOP || !process.emulator.windowDefined) {
         const viewport = this.getViewportSize();
         return {
@@ -3376,6 +3411,9 @@
       if (process && process.removed) {
         return null;
       }
+      if (process && process.minimized) {
+        process.setMinimized(false, { notify: false });
+      }
       if (this.activeProcess === process) {
         if (process) {
           process.active = true;
@@ -3421,6 +3459,13 @@
         .sort((a, b) => compareProcessZOrder(b, a));
     }
 
+    getVisibleWindowStack() {
+      return this.processes
+        .filter((process) => !process.removed && !process.minimized)
+        .slice()
+        .sort((a, b) => compareProcessZOrder(b, a));
+    }
+
     getWindowStackPosition(slot) {
       const target = slot >>> 0;
       const stack = this.getWindowStack();
@@ -3436,6 +3481,7 @@
       if (
         !process ||
         process.removed ||
+        process.minimized ||
         !process.displayReady ||
         !process.emulator ||
         !process.emulator.windowDefined
@@ -3462,7 +3508,7 @@
       if (screenX < 0 || screenY < 0 || screenX >= (viewport.width | 0) || screenY >= (viewport.height | 0)) {
         return 0;
       }
-      const stack = this.getWindowStack();
+      const stack = this.getVisibleWindowStack();
       for (let i = 0; i < stack.length; i += 1) {
         const process = stack[i];
         if (this.processOwnsScreenPoint(process, screenX, screenY)) {
@@ -3479,7 +3525,7 @@
       if (screenX < 0 || screenY < 0 || screenX >= (viewport.width | 0) || screenY >= (viewport.height | 0)) {
         return 0;
       }
-      const stack = this.getWindowStack();
+      const stack = this.getVisibleWindowStack();
       for (let i = 0; i < stack.length; i += 1) {
         const process = stack[i];
         if (!this.processOwnsScreenPoint(process, screenX, screenY)) {
@@ -3668,10 +3714,114 @@
       if (!active || ((slot >>> 0) !== (active.slot >>> 0) && slot !== 0xffffffff)) {
         return this.getActiveThreadSlot();
       }
-      const stack = this.getWindowStack();
+      const stack = this.getVisibleWindowStack();
       const next = stack.find((process) => (process.slot >>> 0) !== (active.slot >>> 0)) || null;
       this.setActiveProcess(next || null);
       return this.getActiveThreadSlot();
+    }
+
+    isSpecialWindowProcess(process) {
+      if (!process) {
+        return false;
+      }
+      const name = basenameKosPath(process.displayPath || process.processPath || process.fileName || "");
+      return name.startsWith("@");
+    }
+
+    hasTaskbarWindow() {
+      return this.processes.some((process) => (
+        process &&
+        !process.removed &&
+        !process.stopped &&
+        process.emulator &&
+        process.emulator.windowDefined &&
+        basenameKosPath(process.displayPath || process.processPath || process.fileName || "").toUpperCase() === "@TASKBAR"
+      ));
+    }
+
+    minimizeProcess(process) {
+      if (
+        !process ||
+        process.removed ||
+        process.minimized ||
+        !process.emulator ||
+        !process.emulator.windowDefined ||
+        !this.hasTaskbarWindow()
+      ) {
+        return false;
+      }
+      const next = this.activeProcess === process
+        ? (this.getVisibleWindowStack().find((item) => item !== process) || null)
+        : null;
+      if (!process.setMinimized(true, { notify: false })) {
+        return false;
+      }
+      if (this.activeProcess === process) {
+        this.setActiveProcess(next, { focusShell: false });
+      } else {
+        this.onProcessVisualStateChanged();
+      }
+      return true;
+    }
+
+    restoreProcess(process, options) {
+      if (!process || process.removed) {
+        return false;
+      }
+      const activate = !options || options.activate !== false;
+      const changed = process.setMinimized(false, { notify: false });
+      if (activate) {
+        this.setActiveProcess(process, { focusShell: !options || options.focusShell !== false });
+        return changed || this.activeProcess === process;
+      }
+      if (changed) {
+        this.onProcessVisualStateChanged();
+      }
+      return changed;
+    }
+
+    minimizeTopWindow() {
+      const active = this.getActiveProcess();
+      const target = active && !active.minimized
+        ? active
+        : (this.getVisibleWindowStack()[0] || null);
+      return this.minimizeProcess(target);
+    }
+
+    controlForeignWindow(action, value) {
+      const sub = action >>> 0;
+      const key = value >>> 0;
+      let process = null;
+      if (sub === 0 || sub === 2) {
+        process = this.processBySlot.get(key) || null;
+      } else if (sub === 1 || sub === 3) {
+        process = this.processByPid.get(key) || null;
+      } else {
+        return 0xffffffff >>> 0;
+      }
+      if (!process || process.removed) {
+        return 0xffffffff >>> 0;
+      }
+      if (sub === 0 || sub === 1) {
+        return this.minimizeProcess(process) ? 0 : (0xffffffff >>> 0);
+      }
+      return this.restoreProcess(process, { activate: false, focusShell: false }) ? 0 : (0xffffffff >>> 0);
+    }
+
+    minimizeAllWindows() {
+      const list = this.processes.filter((process) => (
+        process &&
+        !process.removed &&
+        !process.minimized &&
+        process.emulator &&
+        process.emulator.windowDefined &&
+        !this.isSpecialWindowProcess(process)
+      ));
+      let count = 0;
+      for (let i = 0; i < list.length; i += 1) {
+        count += this.minimizeProcess(list[i]) ? 1 : 0;
+      }
+      return count >>> 0;
     }
 
     terminateThreadSlot(slot) {
@@ -3755,12 +3905,12 @@
         this.activeProcess = null;
       }
       process.destroy();
-      const next = this.getWindowStack()[0] || null;
+      const next = this.getVisibleWindowStack()[0] || null;
       if (next && !next.active) {
         this.setActiveProcess(next, { focusShell: false });
       } else {
-      this.onProcessVisualStateChanged();
-    }
+        this.onProcessVisualStateChanged();
+      }
     }
 
     syncDesktopSize() {
@@ -3769,7 +3919,7 @@
       let maxBottom = viewport.height | 0;
       for (let i = 0; i < this.processes.length; i += 1) {
         const process = this.processes[i];
-        if (process.removed || !process.displayReady) {
+        if (process.removed || process.minimized || !process.displayReady) {
           continue;
         }
         maxRight = Math.max(maxRight, (process.actualX + process.windowWidth) | 0);

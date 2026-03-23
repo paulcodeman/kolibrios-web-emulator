@@ -288,6 +288,10 @@ const WINDOW_Z_DESKTOP = -2;
 const WINDOW_Z_ALWAYS_BACK = -1;
 const WINDOW_Z_NORMAL = 0;
 const WINDOW_Z_ALWAYS_TOP = 1;
+const WINDOW_STATE_MAXIMIZED = 0x01;
+const WINDOW_STATE_MINIMIZED = 0x02;
+const WINDOW_STATE_ROLLEDUP = 0x04;
+const WINDOW_STATE_USED = 0x80;
 
 function packSurfaceColor(color) {
   const r = (color >>> 16) & 0xff;
@@ -438,6 +442,7 @@ class HeadlessUiHarness {
       zOrder: 0,
       stopped: false,
       removed: false,
+      minimized: false,
       windowTitle: "",
       textDraws: [],
       numberDraws: [],
@@ -995,7 +1000,10 @@ class HeadlessUiHarness {
   }
 
   getActiveProcess() {
-    return this.activeProcess && !this.activeProcess.removed ? this.activeProcess : (this.processes[0] || null);
+    if (this.activeProcess && !this.activeProcess.removed && !this.activeProcess.minimized) {
+      return this.activeProcess;
+    }
+    return this.getVisibleWindowStack()[0] || null;
   }
 
   isBootstrapNamedMemoryName(name) {
@@ -1103,6 +1111,9 @@ class HeadlessUiHarness {
     if (process && process.removed) {
       return null;
     }
+    if (process && process.minimized) {
+      process.minimized = false;
+    }
     if (process) {
       process.zOrder = this.zCounter++;
     }
@@ -1128,7 +1139,7 @@ class HeadlessUiHarness {
     this.processByPid.delete(process.pid >>> 0);
     this.processBySlot.delete(process.slot >>> 0);
     if (this.activeProcess === process) {
-      const next = this.processes.length ? this.processes[this.processes.length - 1] : null;
+      const next = this.getVisibleWindowStack()[0] || null;
       this.activeProcess = next || null;
     }
     this.syncActiveAliases();
@@ -1724,7 +1735,7 @@ class HeadlessUiHarness {
       surface.buffer32.set(base.buffer32);
     }
     const stack = this.processes
-      .filter((process) => !process.removed && process.emulator && process.emulator.windowDefined && process.surface)
+      .filter((process) => !process.removed && !process.minimized && process.emulator && process.emulator.windowDefined && process.surface)
       .slice()
       .sort(compareProcessZOrder);
     for (let i = 0; i < stack.length; i += 1) {
@@ -1779,6 +1790,7 @@ class HeadlessUiHarness {
           displayPath: process.displayPath || "",
           title: process.windowTitle || "",
           windowDefined: !!(process.emulator && process.emulator.windowDefined),
+          minimized: !!process.minimized,
           x: process.actualX | 0,
           y: process.actualY | 0,
           width: process.surface ? (process.surface.width | 0) : 0,
@@ -2004,7 +2016,7 @@ class HeadlessUiHarness {
 
   getDesktopInputProcesses() {
     return this.processes.filter((process) => {
-      if (!process || process.removed || !process.emulator || !process.emulator.running) {
+      if (!process || process.removed || process.minimized || !process.emulator || !process.emulator.running) {
         return false;
       }
       if ((process.windowPositionMode | 0) === WINDOW_Z_DESKTOP) {
@@ -2020,6 +2032,9 @@ class HeadlessUiHarness {
     }
     const x = screenX | 0;
     const y = screenY | 0;
+    if (process.minimized && (process.windowPositionMode | 0) !== WINDOW_Z_DESKTOP) {
+      return null;
+    }
     if ((process.windowPositionMode | 0) === WINDOW_Z_DESKTOP || !process.emulator.windowDefined) {
       const viewport = this.getViewportSize();
       return {
@@ -2232,6 +2247,13 @@ class HeadlessUiHarness {
       .sort((a, b) => compareProcessZOrder(b, a));
   }
 
+  getVisibleWindowStack() {
+    return this.processes
+      .filter((process) => !process.removed && !process.minimized)
+      .slice()
+      .sort((a, b) => compareProcessZOrder(b, a));
+  }
+
   getWindowStackPosition(slot) {
     const target = slot >>> 0;
     const stack = this.getWindowStack();
@@ -2244,7 +2266,7 @@ class HeadlessUiHarness {
   }
 
   processOwnsScreenPoint(process, screenX, screenY) {
-    if (!process || process.removed || !process.emulator || !process.emulator.windowDefined || !process.surface) {
+    if (!process || process.removed || process.minimized || !process.emulator || !process.emulator.windowDefined || !process.surface) {
       return false;
     }
     const localX = (screenX - (process.actualX | 0)) | 0;
@@ -2271,7 +2293,7 @@ class HeadlessUiHarness {
     if (screenX < 0 || screenY < 0 || screenX >= (viewport.width | 0) || screenY >= (viewport.height | 0)) {
       return 0;
     }
-    const stack = this.getWindowStack();
+    const stack = this.getVisibleWindowStack();
     for (let i = 0; i < stack.length; i += 1) {
       const process = stack[i];
       if (this.processOwnsScreenPoint(process, screenX, screenY)) {
@@ -2288,7 +2310,7 @@ class HeadlessUiHarness {
     if (screenX < 0 || screenY < 0 || screenX >= (viewport.width | 0) || screenY >= (viewport.height | 0)) {
       return 0;
     }
-    const stack = this.getWindowStack();
+    const stack = this.getVisibleWindowStack();
     for (let i = 0; i < stack.length; i += 1) {
       const process = stack[i];
       if (!this.processOwnsScreenPoint(process, screenX, screenY)) {
@@ -2370,7 +2392,12 @@ class HeadlessUiHarness {
       clientY: client.y >>> 0,
       clientWidth: client.width >>> 0,
       clientHeight: client.height >>> 0,
-      windowState: 0,
+      windowState: (
+        WINDOW_STATE_USED |
+        (process.minimized ? WINDOW_STATE_MINIMIZED : 0) |
+        (process.rolledUp ? WINDOW_STATE_ROLLEDUP : 0) |
+        (process.maximized ? WINDOW_STATE_MAXIMIZED : 0)
+      ) >>> 0,
       eventMask: emulator ? (emulator.eventMask >>> 0) : 0,
       keyboardMode: emulator ? (emulator.keyboardMode & 0xff) : 0
     };
@@ -2462,10 +2489,106 @@ class HeadlessUiHarness {
     if (!active || ((slot >>> 0) !== (active.slot >>> 0) && slot !== 0xffffffff)) {
       return this.getActiveThreadSlot();
     }
-    const stack = this.getWindowStack();
+    const stack = this.getVisibleWindowStack();
     const next = stack.find((process) => (process.slot >>> 0) !== (active.slot >>> 0)) || null;
     this.setActiveProcess(next || null);
     return this.getActiveThreadSlot();
+  }
+
+  isSpecialWindowProcess(process) {
+    const name = path.basename(String(process && (process.displayPath || process.processPath || process.fileName || "")));
+    return name.startsWith("@");
+  }
+
+  hasTaskbarWindow() {
+    return this.processes.some((process) => (
+      process &&
+      !process.removed &&
+      process.emulator &&
+      process.emulator.windowDefined &&
+      String(path.basename(String(process.displayPath || process.processPath || process.fileName || ""))).toUpperCase() === "@TASKBAR"
+    ));
+  }
+
+  minimizeProcess(process) {
+    if (
+      !process ||
+      process.removed ||
+      process.minimized ||
+      !process.emulator ||
+      !process.emulator.windowDefined ||
+      !this.hasTaskbarWindow()
+    ) {
+      return false;
+    }
+    const next = this.activeProcess === process
+      ? (this.getVisibleWindowStack().find((item) => item !== process) || null)
+      : null;
+    process.minimized = true;
+    if (this.activeProcess === process) {
+      this.setActiveProcess(next || null);
+    } else {
+      this.syncActiveAliases();
+    }
+    return true;
+  }
+
+  restoreProcess(process, options) {
+    if (!process || process.removed) {
+      return false;
+    }
+    const changed = !!process.minimized;
+    process.minimized = false;
+    if (!options || options.activate !== false) {
+      this.setActiveProcess(process);
+    } else {
+      this.syncActiveAliases();
+    }
+    return changed;
+  }
+
+  minimizeTopWindow() {
+    const active = this.getActiveProcess();
+    const target = active && !active.minimized
+      ? active
+      : (this.getVisibleWindowStack()[0] || null);
+    return this.minimizeProcess(target);
+  }
+
+  controlForeignWindow(action, value) {
+    const sub = action >>> 0;
+    const key = value >>> 0;
+    let process = null;
+    if (sub === 0 || sub === 2) {
+      process = this.processBySlot.get(key) || null;
+    } else if (sub === 1 || sub === 3) {
+      process = this.processByPid.get(key) || null;
+    } else {
+      return 0xffffffff >>> 0;
+    }
+    if (!process || process.removed) {
+      return 0xffffffff >>> 0;
+    }
+    if (sub === 0 || sub === 1) {
+      return this.minimizeProcess(process) ? 0 : (0xffffffff >>> 0);
+    }
+    return this.restoreProcess(process, { activate: false }) ? 0 : (0xffffffff >>> 0);
+  }
+
+  minimizeAllWindows() {
+    const list = this.processes.filter((process) => (
+      process &&
+      !process.removed &&
+      !process.minimized &&
+      process.emulator &&
+      process.emulator.windowDefined &&
+      !this.isSpecialWindowProcess(process)
+    ));
+    let count = 0;
+    for (let i = 0; i < list.length; i += 1) {
+      count += this.minimizeProcess(list[i]) ? 1 : 0;
+    }
+    return count >>> 0;
   }
 
   terminateThreadSlot(slot) {

@@ -3813,10 +3813,11 @@
           case 22: {
             const action = this.readReg(REG.ECX) >>> 0;
             const value = this.readReg(REG.EDX) >>> 0;
+            let result = 0xffffffff >>> 0;
             if (this.hostSession && typeof this.hostSession.controlForeignWindow === "function") {
-              this.hostSession.controlForeignWindow(action >>> 0, value >>> 0);
+              result = this.hostSession.controlForeignWindow(action >>> 0, value >>> 0) >>> 0;
             }
-            this.writeReg(REG.EAX, 0);
+            this.writeReg(REG.EAX, result >>> 0);
             return;
           }
           case 23:

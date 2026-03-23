@@ -189,6 +189,26 @@ button:disabled {
   pointer-events: none;
 }
 
+.workspace.workspace-drop-target {
+  box-shadow:
+    inset 0 0 0 2px rgba(201, 125, 36, 0.68),
+    inset 0 0 0 10px rgba(255, 246, 231, 0.18);
+}
+
+.workspace.workspace-drop-target::before {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.08)) 0 0 / 100% 1px no-repeat,
+    linear-gradient(rgba(201, 125, 36, 0.12), rgba(201, 125, 36, 0.12)),
+    linear-gradient(90deg, rgba(42, 38, 32, 0.06) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(rgba(42, 38, 32, 0.06) 1px, transparent 1px) 0 0 / 28px 28px;
+}
+
+.workspace.workspace-drop-target .workspace-empty {
+  border-color: rgba(201, 125, 36, 0.62);
+  background: rgba(255, 246, 231, 0.4);
+  color: rgba(78, 52, 28, 0.9);
+}
+
 .workspace-empty {
   position: absolute;
   inset: 18px;
@@ -238,6 +258,10 @@ button:disabled {
 }
 
 .workspace-window-pending {
+  display: none;
+}
+
+.workspace-window-minimized {
   display: none;
 }
 

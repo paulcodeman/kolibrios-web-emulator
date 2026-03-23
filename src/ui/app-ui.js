@@ -234,6 +234,7 @@
       this.currentImage = null;
       this.currentFileBuffer = null;
       this.currentFileName = "";
+      this.workspaceDragDepth = 0;
       this.browserFsRoot = null;
       this.fsRootBusy = false;
       this.savedFsRootLabel = "";
@@ -258,6 +259,7 @@
       if (this.traceOpcodesInput) {
         this.traceOpcodesInput.addEventListener("change", () => this.applyTraceConfig());
       }
+      this.installWorkspaceDropHandlers();
 
       window.addEventListener("beforeunload", () => {
         this.flushMountedRoot();
@@ -290,6 +292,121 @@
       this.workspaceEl = document.getElementById("workspace");
       this.workspaceEmptyEl = document.getElementById("workspaceEmpty");
       this.sessionInfoEl = document.getElementById("sessionInfo");
+    }
+
+    installWorkspaceDropHandlers() {
+      if (!this.workspaceEl) {
+        return;
+      }
+      this.workspaceEl.addEventListener("dragenter", (event) => this.handleWorkspaceDragEnter(event));
+      this.workspaceEl.addEventListener("dragover", (event) => this.handleWorkspaceDragOver(event));
+      this.workspaceEl.addEventListener("dragleave", (event) => this.handleWorkspaceDragLeave(event));
+      this.workspaceEl.addEventListener("drop", (event) => {
+        void this.handleWorkspaceDrop(event);
+      });
+    }
+
+    hasDroppedFiles(event) {
+      const transfer = event && event.dataTransfer ? event.dataTransfer : null;
+      if (!transfer) {
+        return false;
+      }
+      if (transfer.items && transfer.items.length) {
+        for (let i = 0; i < transfer.items.length; i += 1) {
+          if (transfer.items[i] && transfer.items[i].kind === "file") {
+            return true;
+          }
+        }
+        return false;
+      }
+      return !!(transfer.files && transfer.files.length);
+    }
+
+    getFirstDroppedFile(event) {
+      const transfer = event && event.dataTransfer ? event.dataTransfer : null;
+      if (!transfer) {
+        return null;
+      }
+      if (transfer.items && transfer.items.length) {
+        for (let i = 0; i < transfer.items.length; i += 1) {
+          const item = transfer.items[i];
+          if (!item || item.kind !== "file" || typeof item.getAsFile !== "function") {
+            continue;
+          }
+          const file = item.getAsFile();
+          if (file) {
+            return file;
+          }
+        }
+      }
+      return transfer.files && transfer.files.length ? transfer.files[0] : null;
+    }
+
+    updateWorkspaceDropState(active) {
+      if (this.workspaceEl) {
+        this.workspaceEl.classList.toggle("workspace-drop-target", !!active);
+      }
+    }
+
+    resetWorkspaceDropState() {
+      this.workspaceDragDepth = 0;
+      this.updateWorkspaceDropState(false);
+    }
+
+    handleWorkspaceDragEnter(event) {
+      if (!this.hasDroppedFiles(event)) {
+        return;
+      }
+      event.preventDefault();
+      this.workspaceDragDepth = (this.workspaceDragDepth + 1) | 0;
+      this.updateWorkspaceDropState(true);
+    }
+
+    handleWorkspaceDragOver(event) {
+      if (!this.hasDroppedFiles(event)) {
+        return;
+      }
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "copy";
+      }
+      this.updateWorkspaceDropState(true);
+    }
+
+    handleWorkspaceDragLeave(event) {
+      if (!this.hasDroppedFiles(event)) {
+        return;
+      }
+      event.preventDefault();
+      this.workspaceDragDepth = Math.max(0, (this.workspaceDragDepth - 1) | 0);
+      if (!this.workspaceDragDepth) {
+        this.updateWorkspaceDropState(false);
+      }
+    }
+
+    async handleWorkspaceDrop(event) {
+      if (!this.hasDroppedFiles(event)) {
+        return;
+      }
+      event.preventDefault();
+      this.resetWorkspaceDropState();
+      const file = this.getFirstDroppedFile(event);
+      if (!file) {
+        return;
+      }
+      this.runBtn.disabled = true;
+      this.setStatus(`Loading ${file.name}`);
+      try {
+        const buffer = await file.arrayBuffer();
+        this.loadImageFromBuffer(file.name || "image.kex", buffer, "Dropped");
+        this.launchCurrentImage();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.log(`Drop failed: ${message}`);
+        this.setStatus("Drop failed");
+      } finally {
+        this.runBtn.disabled = this.currentImage === null;
+      }
     }
 
     setStatus(message) {
@@ -493,17 +610,7 @@
       this.setStatus(`Loading ${file.name}`);
       try {
         const buffer = await file.arrayBuffer();
-        const image = parseKex(buffer, file.name);
-        this.currentImage = image;
-        this.currentFileBuffer = buffer.slice(0);
-        this.currentFileName = file.name;
-        this.infoEl.textContent = formatKexInfo(image);
-        this.log(`Loaded ${file.name}`);
-        if (image.packed) {
-          this.log(`KPCK unpacked: ${image.fileSize} -> ${image.unpackedSize}`);
-        }
-        this.setStatus(`Loaded ${file.name}`);
-        this.runBtn.disabled = false;
+        this.loadImageFromBuffer(file.name, buffer, "Loaded");
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.currentImage = null;
@@ -515,6 +622,38 @@
       }
     }
 
+    loadImageFromBuffer(fileName, buffer, actionLabel) {
+      const image = parseKex(buffer, fileName);
+      const storedBuffer = buffer.slice(0);
+      this.currentImage = image;
+      this.currentFileBuffer = storedBuffer;
+      this.currentFileName = fileName;
+      this.infoEl.textContent = formatKexInfo(image);
+      this.log(`${String(actionLabel || "Loaded")} ${fileName}`);
+      if (image.packed) {
+        this.log(`KPCK unpacked: ${image.fileSize} -> ${image.unpackedSize}`);
+      }
+      this.setStatus(`${String(actionLabel || "Loaded")} ${fileName}`);
+      this.runBtn.disabled = false;
+      return image;
+    }
+
+    launchCurrentImage() {
+      if (!this.currentImage) {
+        this.log("No image loaded.");
+        return null;
+      }
+      const process = this.sessionManager.launchImage(this.currentImage, {
+        buffer: this.currentFileBuffer,
+        fileName: this.currentFileName || this.currentImage.fileName || "image.kex",
+        processPath: this.currentImage.fileName || this.currentFileName || "image.kex",
+        activate: true
+      });
+      this.log(`Started ${process.displayPath} as PID ${process.pid} (slot ${process.slot})`);
+      this.updateSessionState();
+      return process;
+    }
+
     handleRun() {
       if (!this.currentImage) {
         this.log("No image loaded.");
@@ -522,14 +661,7 @@
       }
       this.runBtn.disabled = true;
       try {
-        const process = this.sessionManager.launchImage(this.currentImage, {
-          buffer: this.currentFileBuffer,
-          fileName: this.currentFileName || this.currentImage.fileName || "image.kex",
-          processPath: this.currentImage.fileName || this.currentFileName || "image.kex",
-          activate: true
-        });
-        this.log(`Started ${process.displayPath} as PID ${process.pid} (slot ${process.slot})`);
-        this.updateSessionState();
+        this.launchCurrentImage();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.log(`Start failed: ${message}`);
