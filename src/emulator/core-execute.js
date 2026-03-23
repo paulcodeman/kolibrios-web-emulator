@@ -291,6 +291,8 @@
             this.fpuSet(0, -st0);
           } else if (stIndex === 1) {
             this.fpuSet(0, Math.abs(st0));
+          } else if (stIndex === 4) {
+            this.fpuCompareValues(st0, 0.0);
           }
         } else if (reg === 5) { // constants
           switch (stIndex) {
@@ -318,6 +320,12 @@
             const st1 = this.fpuGet(1);
             this.fpuSet(1, Math.atan2(st1, st0));
             this.fpuPop();
+          } else if (stIndex === 6) {
+            if ((this.cpu && (this.cpu.fpuSize | 0) < 8)) {
+              this.fpuPush(0);
+            }
+          } else if (stIndex === 7) {
+            this.fpuPop();
           }
         } else if (reg === 7) {
           const st0 = this.fpuPeek();
@@ -328,9 +336,9 @@
             const cos = Math.cos(st0);
             this.fpuSet(0, sin);
             this.fpuPush(cos);
-          } else if (stIndex === 5) {
-            this.fpuSet(0, roundTiesToEven(st0));
           } else if (stIndex === 4) {
+            this.fpuSet(0, roundTiesToEven(st0));
+          } else if (stIndex === 5) {
             const st1 = this.fpuGet(1);
             this.fpuSet(0, st0 * Math.pow(2, Math.trunc(st1)));
           } else if (stIndex === 6) {
