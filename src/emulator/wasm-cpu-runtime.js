@@ -193,6 +193,12 @@
       typeof exports.psubusb32 !== "function" ||
       typeof exports.packed_op32x2_exec !== "function" ||
       typeof exports.packed_op32x4_exec !== "function" ||
+      typeof exports.punpckldq32x4_exec !== "function" ||
+      typeof exports.pshufw64_exec !== "function" ||
+      typeof exports.movmsk_bytes64 !== "function" ||
+      typeof exports.movmsk_bytes128 !== "function" ||
+      typeof exports.movmsk_float32x4 !== "function" ||
+      typeof exports.shufps32x4_exec !== "function" ||
       typeof exports.get_packed128_last_lane !== "function" ||
       typeof exports.packsswb64_exec !== "function"
     ) {
@@ -376,6 +382,37 @@
           src2 >>> 0,
           src3 >>> 0,
           op >>> 0
+        );
+        return readPacked128Result(exports);
+      },
+      punpckldq32x4(dst0, dst1, src0, src1) {
+        exports.punpckldq32x4_exec(dst0 >>> 0, dst1 >>> 0, src0 >>> 0, src1 >>> 0);
+        return readPacked128Result(exports);
+      },
+      pshufw64(lo, hi, imm) {
+        exports.pshufw64_exec(lo >>> 0, hi >>> 0, imm >>> 0);
+        return readPacked64Result(exports);
+      },
+      movmskBytes64(lo, hi) {
+        return exports.movmsk_bytes64(lo >>> 0, hi >>> 0) >>> 0;
+      },
+      movmskBytes128(v0, v1, v2, v3) {
+        return exports.movmsk_bytes128(v0 >>> 0, v1 >>> 0, v2 >>> 0, v3 >>> 0) >>> 0;
+      },
+      movmskFloat32x4(v0, v1, v2, v3) {
+        return exports.movmsk_float32x4(v0 >>> 0, v1 >>> 0, v2 >>> 0, v3 >>> 0) >>> 0;
+      },
+      shufps32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
+        exports.shufps32x4_exec(
+          dst0 >>> 0,
+          dst1 >>> 0,
+          dst2 >>> 0,
+          dst3 >>> 0,
+          src0 >>> 0,
+          src1 >>> 0,
+          src2 >>> 0,
+          src3 >>> 0,
+          imm >>> 0
         );
         return readPacked128Result(exports);
       },

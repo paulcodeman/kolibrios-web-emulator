@@ -91,6 +91,12 @@ try {
   assert(typeof wasmBackend.sseCompareCode === "function", "wasm helper backend should expose SSE compare helpers");
   assert(typeof wasmBackend.packedOp32x2 === "function", "wasm helper backend should expose packed 64-bit logical helpers");
   assert(typeof wasmBackend.packedOp32x4 === "function", "wasm helper backend should expose packed 128-bit logical helpers");
+  assert(typeof wasmBackend.punpckldq32x4 === "function", "wasm helper backend should expose punpckldq helpers");
+  assert(typeof wasmBackend.pshufw64 === "function", "wasm helper backend should expose pshufw helpers");
+  assert(typeof wasmBackend.movmskBytes64 === "function", "wasm helper backend should expose 64-bit movemask helpers");
+  assert(typeof wasmBackend.movmskBytes128 === "function", "wasm helper backend should expose 128-bit movemask helpers");
+  assert(typeof wasmBackend.movmskFloat32x4 === "function", "wasm helper backend should expose float movemask helpers");
+  assert(typeof wasmBackend.shufps32x4 === "function", "wasm helper backend should expose shufps helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -419,6 +425,78 @@ try {
       wasmBackend.packedOp32x4(0, 0xffffffff, 0x12345678, 0x80000000, 0xffffffff, 0x12345678, 0x12345678, 0x7fffffff, op),
       jsBackend.packedOp32x4(0, 0xffffffff, 0x12345678, 0x80000000, 0xffffffff, 0x12345678, 0x12345678, 0x7fffffff, op),
       `packedOp32x4 should match for op ${op}`
+    );
+  }
+
+  for (const imm of [0x00, 0x1b, 0x4e, 0x93, 0xff]) {
+    assertDeepEq(
+      wasmBackend.pshufw64(0x11223344, 0x55667788, imm),
+      jsBackend.pshufw64(0x11223344, 0x55667788, imm),
+      `pshufw64 should match for imm ${imm}`
+    );
+    assertDeepEq(
+      wasmBackend.shufps32x4(0x3f800000, 0x40000000, 0x40400000, 0x40800000, 0xbf800000, 0xc0000000, 0xc0400000, 0xc0800000, imm),
+      jsBackend.shufps32x4(0x3f800000, 0x40000000, 0x40400000, 0x40800000, 0xbf800000, 0xc0000000, 0xc0400000, 0xc0800000, imm),
+      `shufps32x4 should match for imm ${imm}`
+    );
+  }
+
+  for (const [lo, hi] of [
+    [0, 0],
+    [0xffffffff, 0],
+    [0x80808080, 0x7f7f7f7f],
+    [0x11223344, 0x55667788]
+  ]) {
+    assertEq(wasmBackend.movmskBytes64(lo, hi), jsBackend.movmskBytes64(lo, hi), "movmskBytes64 should match");
+  }
+  for (const [v0, v1, v2, v3] of [
+    [0, 0, 0, 0],
+    [0x80000000, 0, 0xffffffff, 0x7fffffff],
+    [0x80808080, 0x7f7f7f7f, 0xff00ff00, 0x00ff00ff],
+    [0x11223344, 0x55667788, 0x99aabbcc, 0xddeeff00]
+  ]) {
+    assertEq(wasmBackend.movmskBytes128(v0, v1, v2, v3), jsBackend.movmskBytes128(v0, v1, v2, v3), "movmskBytes128 should match");
+    assertEq(wasmBackend.movmskFloat32x4(v0, v1, v2, v3), jsBackend.movmskFloat32x4(v0, v1, v2, v3), "movmskFloat32x4 should match");
+  }
+  for (let i = 0; i < 120; i += 1) {
+    const dst0 = nextRand();
+    const dst1 = nextRand();
+    const dst2 = nextRand();
+    const dst3 = nextRand();
+    const src0 = nextRand();
+    const src1 = nextRand();
+    const src2 = nextRand();
+    const src3 = nextRand();
+    const imm = nextRand() & 0xff;
+    assertDeepEq(
+      wasmBackend.punpckldq32x4(dst0, dst1, src0, src1),
+      jsBackend.punpckldq32x4(dst0, dst1, src0, src1),
+      "punpckldq32x4 should match"
+    );
+    assertDeepEq(
+      wasmBackend.pshufw64(dst0, dst1, imm),
+      jsBackend.pshufw64(dst0, dst1, imm),
+      "pshufw64 random should match"
+    );
+    assertEq(
+      wasmBackend.movmskBytes64(dst0, dst1),
+      jsBackend.movmskBytes64(dst0, dst1),
+      "movmskBytes64 random should match"
+    );
+    assertEq(
+      wasmBackend.movmskBytes128(dst0, dst1, dst2, dst3),
+      jsBackend.movmskBytes128(dst0, dst1, dst2, dst3),
+      "movmskBytes128 random should match"
+    );
+    assertEq(
+      wasmBackend.movmskFloat32x4(dst0, dst1, dst2, dst3),
+      jsBackend.movmskFloat32x4(dst0, dst1, dst2, dst3),
+      "movmskFloat32x4 random should match"
+    );
+    assertDeepEq(
+      wasmBackend.shufps32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm),
+      jsBackend.shufps32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm),
+      "shufps32x4 random should match"
     );
   }
 

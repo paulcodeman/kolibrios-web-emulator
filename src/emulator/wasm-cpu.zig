@@ -1328,6 +1328,72 @@ pub export fn packed_op32x4_exec(dst0: u32, dst1: u32, dst2: u32, dst3: u32, src
     );
 }
 
+pub export fn punpckldq32x4_exec(dst0: u32, dst1: u32, src0: u32, src1: u32) void {
+    setPacked128(dst0, src0, dst1, src1);
+}
+
+pub export fn pshufw64_exec(lo: u32, hi: u32, imm: u32) void {
+    const src_words = [_]u32{
+        lo & 0xffff,
+        shr32(lo, 16) & 0xffff,
+        hi & 0xffff,
+        shr32(hi, 16) & 0xffff,
+    };
+    const d0 = src_words[@as(usize, @intCast(imm & 3))];
+    const d1 = src_words[@as(usize, @intCast(shr32(imm, 2) & 3))];
+    const d2 = src_words[@as(usize, @intCast(shr32(imm, 4) & 3))];
+    const d3 = src_words[@as(usize, @intCast(shr32(imm, 6) & 3))];
+    setPacked64(
+        (d0 & 0xffff) | shl32(d1 & 0xffff, 16),
+        (d2 & 0xffff) | shl32(d3 & 0xffff, 16),
+    );
+}
+
+pub export fn movmsk_bytes64(lo: u32, hi: u32) u32 {
+    var mask: u32 = 0;
+    mask |= shl32(shr32(lo, 7) & 1, 0);
+    mask |= shl32(shr32(lo, 15) & 1, 1);
+    mask |= shl32(shr32(lo, 23) & 1, 2);
+    mask |= shl32(shr32(lo, 31) & 1, 3);
+    mask |= shl32(shr32(hi, 7) & 1, 4);
+    mask |= shl32(shr32(hi, 15) & 1, 5);
+    mask |= shl32(shr32(hi, 23) & 1, 6);
+    mask |= shl32(shr32(hi, 31) & 1, 7);
+    return mask;
+}
+
+pub export fn movmsk_bytes128(v0: u32, v1: u32, v2: u32, v3: u32) u32 {
+    const lanes = [_]u32{ v0, v1, v2, v3 };
+    var mask: u32 = 0;
+    var i: u32 = 0;
+    while (i < 16) : (i += 1) {
+        const lane = lanes[@as(usize, @intCast(shr32(i, 2) & 3))];
+        const byte = shr32(lane, (i & 3) * 8) & 0xff;
+        mask |= shl32(shr32(byte, 7) & 1, i);
+    }
+    return mask;
+}
+
+pub export fn movmsk_float32x4(v0: u32, v1: u32, v2: u32, v3: u32) u32 {
+    var mask: u32 = 0;
+    if ((v0 & 0x80000000) != 0) mask |= 1;
+    if ((v1 & 0x80000000) != 0) mask |= 2;
+    if ((v2 & 0x80000000) != 0) mask |= 4;
+    if ((v3 & 0x80000000) != 0) mask |= 8;
+    return mask;
+}
+
+pub export fn shufps32x4_exec(dst0: u32, dst1: u32, dst2: u32, dst3: u32, src0: u32, src1: u32, src2: u32, src3: u32, imm: u32) void {
+    const dst = [_]u32{ dst0, dst1, dst2, dst3 };
+    const src = [_]u32{ src0, src1, src2, src3 };
+    setPacked128(
+        dst[@as(usize, @intCast(imm & 3))],
+        dst[@as(usize, @intCast(shr32(imm, 2) & 3))],
+        src[@as(usize, @intCast(shr32(imm, 4) & 3))],
+        src[@as(usize, @intCast(shr32(imm, 6) & 3))],
+    );
+}
+
 pub export fn get_packed128_last_lane(index: u32) u32 {
     return if (index < 4) packed128_last[index] else 0;
 }

@@ -1247,6 +1247,24 @@ function getJsCpuHelperBackend() {
       packedOp32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) {
         return packedOp32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op);
       },
+      punpckldq32x4(dst0, dst1, src0, src1) {
+        return punpckldq32x4Js(dst0, dst1, src0, src1);
+      },
+      pshufw64(lo, hi, imm) {
+        return pshufw64Js(lo, hi, imm);
+      },
+      movmskBytes64(lo, hi) {
+        return movmskBytes64Js(lo, hi);
+      },
+      movmskBytes128(v0, v1, v2, v3) {
+        return movmskBytes128Js(v0, v1, v2, v3);
+      },
+      movmskFloat32x4(v0, v1, v2, v3) {
+        return movmskFloat32x4Js(v0, v1, v2, v3);
+      },
+      shufps32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
+        return shufps32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm);
+      },
       evalJccCondition(cc, flags) {
         return evalJccConditionJs(cc, flags);
       }
@@ -1642,6 +1660,137 @@ function packedOp32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) {
     );
   }
   return packedOp32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op);
+}
+
+function punpckldq32x4Js(dst0, dst1, src0, src1) {
+  return [dst0 >>> 0, src0 >>> 0, dst1 >>> 0, src1 >>> 0];
+}
+
+function punpckldq32x4(dst0, dst1, src0, src1) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.punpckldq32x4 === "function") {
+    return backend.punpckldq32x4(dst0 >>> 0, dst1 >>> 0, src0 >>> 0, src1 >>> 0);
+  }
+  return punpckldq32x4Js(dst0, dst1, src0, src1);
+}
+
+function pshufw64Js(lo, hi, imm) {
+  const srcWords = [
+    lo & 0xffff,
+    (lo >>> 16) & 0xffff,
+    hi & 0xffff,
+    (hi >>> 16) & 0xffff
+  ];
+  const d0 = srcWords[(imm >>> 0) & 3];
+  const d1 = srcWords[(imm >>> 2) & 3];
+  const d2 = srcWords[(imm >>> 4) & 3];
+  const d3 = srcWords[(imm >>> 6) & 3];
+  return {
+    lo: ((d0 & 0xffff) | ((d1 & 0xffff) << 16)) >>> 0,
+    hi: ((d2 & 0xffff) | ((d3 & 0xffff) << 16)) >>> 0
+  };
+}
+
+function pshufw64(lo, hi, imm) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.pshufw64 === "function") {
+    return backend.pshufw64(lo >>> 0, hi >>> 0, imm >>> 0);
+  }
+  return pshufw64Js(lo, hi, imm);
+}
+
+function movmskBytes64Js(lo, hi) {
+  let mask = 0;
+  mask |= ((lo >>> 7) & 1) << 0;
+  mask |= ((lo >>> 15) & 1) << 1;
+  mask |= ((lo >>> 23) & 1) << 2;
+  mask |= ((lo >>> 31) & 1) << 3;
+  mask |= ((hi >>> 7) & 1) << 4;
+  mask |= ((hi >>> 15) & 1) << 5;
+  mask |= ((hi >>> 23) & 1) << 6;
+  mask |= ((hi >>> 31) & 1) << 7;
+  return mask >>> 0;
+}
+
+function movmskBytes64(lo, hi) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.movmskBytes64 === "function") {
+    return backend.movmskBytes64(lo >>> 0, hi >>> 0) >>> 0;
+  }
+  return movmskBytes64Js(lo, hi);
+}
+
+function movmskBytes128Js(v0, v1, v2, v3) {
+  let mask = 0;
+  const lanes = [v0 >>> 0, v1 >>> 0, v2 >>> 0, v3 >>> 0];
+  for (let i = 0; i < 16; i += 1) {
+    const lane = lanes[(i >>> 2) & 3];
+    const byte = (lane >>> ((i & 3) * 8)) & 0xff;
+    mask |= ((byte >>> 7) & 1) << i;
+  }
+  return mask >>> 0;
+}
+
+function movmskBytes128(v0, v1, v2, v3) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.movmskBytes128 === "function") {
+    return backend.movmskBytes128(v0 >>> 0, v1 >>> 0, v2 >>> 0, v3 >>> 0) >>> 0;
+  }
+  return movmskBytes128Js(v0, v1, v2, v3);
+}
+
+function movmskFloat32x4Js(v0, v1, v2, v3) {
+  let mask = 0;
+  if ((v0 >>> 0) & 0x80000000) {
+    mask |= 1 << 0;
+  }
+  if ((v1 >>> 0) & 0x80000000) {
+    mask |= 1 << 1;
+  }
+  if ((v2 >>> 0) & 0x80000000) {
+    mask |= 1 << 2;
+  }
+  if ((v3 >>> 0) & 0x80000000) {
+    mask |= 1 << 3;
+  }
+  return mask >>> 0;
+}
+
+function movmskFloat32x4(v0, v1, v2, v3) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.movmskFloat32x4 === "function") {
+    return backend.movmskFloat32x4(v0 >>> 0, v1 >>> 0, v2 >>> 0, v3 >>> 0) >>> 0;
+  }
+  return movmskFloat32x4Js(v0, v1, v2, v3);
+}
+
+function shufps32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
+  const dst = [dst0 >>> 0, dst1 >>> 0, dst2 >>> 0, dst3 >>> 0];
+  const src = [src0 >>> 0, src1 >>> 0, src2 >>> 0, src3 >>> 0];
+  return [
+    dst[imm & 3] >>> 0,
+    dst[(imm >>> 2) & 3] >>> 0,
+    src[(imm >>> 4) & 3] >>> 0,
+    src[(imm >>> 6) & 3] >>> 0
+  ];
+}
+
+function shufps32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.shufps32x4 === "function") {
+    return backend.shufps32x4(
+      dst0 >>> 0,
+      dst1 >>> 0,
+      dst2 >>> 0,
+      dst3 >>> 0,
+      src0 >>> 0,
+      src1 >>> 0,
+      src2 >>> 0,
+      src3 >>> 0,
+      imm >>> 0
+    );
+  }
+  return shufps32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm);
 }
 
 function matchBytes(mem, start, pattern) {
@@ -2631,6 +2780,12 @@ class Emulator {
     punpckhwd64,
     packedOp32x2,
     packedOp32x4,
+    punpckldq32x4,
+    pshufw64,
+    movmskBytes64,
+    movmskBytes128,
+    movmskFloat32x4,
+    shufps32x4,
     matchBytes,
     FAST_LOOP_SHADE,
     FAST_LOOP_MAX,
