@@ -59,7 +59,7 @@ function parityEven8(value) {
   return parityEven8Js(value);
 }
 
-function roundTiesToEven(value) {
+function roundTiesToEvenJs(value) {
   if (!Number.isFinite(value)) {
     return 0;
   }
@@ -75,12 +75,28 @@ function roundTiesToEven(value) {
   return (floor % 2) === 0 ? floor : (floor + 1);
 }
 
-function x87StoreIntegerValue(value, truncate) {
+function roundTiesToEven(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.roundTiesToEven === "function") {
+    return Number(backend.roundTiesToEven(Number(value)));
+  }
+  return roundTiesToEvenJs(value);
+}
+
+function x87StoreIntegerValueJs(value, truncate) {
   const num = Number(value);
   if (!Number.isFinite(num)) {
     return 0;
   }
-  return truncate ? Math.trunc(num) : roundTiesToEven(num);
+  return truncate ? Math.trunc(num) : roundTiesToEvenJs(num);
+}
+
+function x87StoreIntegerValue(value, truncate) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87StoreIntegerValue === "function") {
+    return Number(backend.x87StoreIntegerValue(Number(value), !!truncate));
+  }
+  return x87StoreIntegerValueJs(value, truncate);
 }
 
 function widthMask(widthBits) {
@@ -586,6 +602,12 @@ function getJsCpuHelperBackend() {
       parityEven8(value) {
         return parityEven8Js(value);
       },
+      roundTiesToEven(value) {
+        return roundTiesToEvenJs(value);
+      },
+      x87StoreIntegerValue(value, truncate) {
+        return x87StoreIntegerValueJs(value, truncate);
+      },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
       },
@@ -606,6 +628,63 @@ function getJsCpuHelperBackend() {
       },
       doubleShift(value, source, count, widthBits, leftShift, flags) {
         return doubleShiftJs(value, source, count, widthBits, leftShift, flags);
+      },
+      psubusb32(a, b) {
+        return psubusb32(a, b);
+      },
+      psubusw32(a, b) {
+        return psubusw32(a, b);
+      },
+      pavgb32(a, b) {
+        return pavgb32(a, b);
+      },
+      paddw32(a, b) {
+        return paddw32(a, b);
+      },
+      psubsw32(a, b) {
+        return psubsw32(a, b);
+      },
+      pmullw32(a, b) {
+        return pmullw32(a, b);
+      },
+      psrlw32(a, count) {
+        return psrlw32(a, count);
+      },
+      psraw32(a, count) {
+        return psraw32(a, count);
+      },
+      psllw32(a, count) {
+        return psllw32(a, count);
+      },
+      psrld32(a, count) {
+        return psrld32(a, count);
+      },
+      psrad32(a, count) {
+        return psrad32(a, count);
+      },
+      pslld32(a, count) {
+        return pslld32(a, count);
+      },
+      packsswb64(dstLo, dstHi, srcLo, srcHi) {
+        return packsswb64(dstLo, dstHi, srcLo, srcHi);
+      },
+      packuswb64(dstLo, dstHi, srcLo, srcHi) {
+        return packuswb64(dstLo, dstHi, srcLo, srcHi);
+      },
+      packssdw64(dstLo, dstHi, srcLo, srcHi) {
+        return packssdw64(dstLo, dstHi, srcLo, srcHi);
+      },
+      punpcklbw64(dstLo, srcLo) {
+        return punpcklbw64(dstLo, srcLo);
+      },
+      punpckhbw64(dstHi, srcHi) {
+        return punpckhbw64(dstHi, srcHi);
+      },
+      punpcklwd64(dstLo, srcLo) {
+        return punpcklwd64(dstLo, srcLo);
+      },
+      punpckhwd64(dstHi, srcHi) {
+        return punpckhwd64(dstHi, srcHi);
       }
     };
   }
@@ -613,6 +692,10 @@ function getJsCpuHelperBackend() {
 }
 
 function psubusb32(a, b) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.psubusb32 === "function") {
+    return backend.psubusb32(a >>> 0, b >>> 0) >>> 0;
+  }
   let out = 0;
   for (let i = 0; i < 4; i += 1) {
     const shift = i * 8;
@@ -625,6 +708,10 @@ function psubusb32(a, b) {
 }
 
 function psubusw32(a, b) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.psubusw32 === "function") {
+    return backend.psubusw32(a >>> 0, b >>> 0) >>> 0;
+  }
   let out = 0;
   for (let i = 0; i < 2; i += 1) {
     const shift = i * 16;
@@ -637,6 +724,10 @@ function psubusw32(a, b) {
 }
 
 function pavgb32(a, b) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.pavgb32 === "function") {
+    return backend.pavgb32(a >>> 0, b >>> 0) >>> 0;
+  }
   let out = 0;
   for (let i = 0; i < 4; i += 1) {
     const shift = i * 8;
@@ -649,6 +740,10 @@ function pavgb32(a, b) {
 }
 
 function paddw32(a, b) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.paddw32 === "function") {
+    return backend.paddw32(a >>> 0, b >>> 0) >>> 0;
+  }
   let out = 0;
   for (let i = 0; i < 2; i += 1) {
     const shift = i * 16;
@@ -660,6 +755,10 @@ function paddw32(a, b) {
 }
 
 function psubsw32(a, b) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.psubsw32 === "function") {
+    return backend.psubsw32(a >>> 0, b >>> 0) >>> 0;
+  }
   let out = 0;
   for (let i = 0; i < 2; i += 1) {
     const shift = i * 16;
@@ -677,6 +776,10 @@ function psubsw32(a, b) {
 }
 
 function pmullw32(a, b) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.pmullw32 === "function") {
+    return backend.pmullw32(a >>> 0, b >>> 0) >>> 0;
+  }
   let out = 0;
   for (let i = 0; i < 2; i += 1) {
     const shift = i * 16;
@@ -688,6 +791,10 @@ function pmullw32(a, b) {
 }
 
 function psrlw32(a, count) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.psrlw32 === "function") {
+    return backend.psrlw32(a >>> 0, count >>> 0) >>> 0;
+  }
   const shift = count >= 16 ? 16 : (count & 0xff);
   let out = 0;
   for (let i = 0; i < 2; i += 1) {
@@ -700,6 +807,10 @@ function psrlw32(a, count) {
 }
 
 function psraw32(a, count) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.psraw32 === "function") {
+    return backend.psraw32(a >>> 0, count >>> 0) >>> 0;
+  }
   const shift = count >= 16 ? 16 : (count & 0xff);
   let out = 0;
   for (let i = 0; i < 2; i += 1) {
@@ -712,6 +823,10 @@ function psraw32(a, count) {
 }
 
 function psllw32(a, count) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.psllw32 === "function") {
+    return backend.psllw32(a >>> 0, count >>> 0) >>> 0;
+  }
   const shift = count >= 16 ? 16 : (count & 0xff);
   let out = 0;
   for (let i = 0; i < 2; i += 1) {
@@ -724,17 +839,29 @@ function psllw32(a, count) {
 }
 
 function psrld32(a, count) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.psrld32 === "function") {
+    return backend.psrld32(a >>> 0, count >>> 0) >>> 0;
+  }
   const shift = count >= 32 ? 32 : (count & 0xff);
   return shift >= 32 ? 0 : (a >>> shift);
 }
 
 function psrad32(a, count) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.psrad32 === "function") {
+    return backend.psrad32(a >>> 0, count >>> 0) >>> 0;
+  }
   const shift = count >= 32 ? 32 : (count & 0xff);
   const value = a | 0;
   return shift >= 32 ? (value < 0 ? 0xffffffff : 0) : (value >> shift) >>> 0;
 }
 
 function pslld32(a, count) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.pslld32 === "function") {
+    return backend.pslld32(a >>> 0, count >>> 0) >>> 0;
+  }
   const shift = count >= 32 ? 32 : (count & 0xff);
   return shift >= 32 ? 0 : ((a << shift) >>> 0);
 }
@@ -770,6 +897,10 @@ function clampSigned16From32(value) {
 }
 
 function packsswb64(dstLo, dstHi, srcLo, srcHi) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.packsswb64 === "function") {
+    return backend.packsswb64(dstLo >>> 0, dstHi >>> 0, srcLo >>> 0, srcHi >>> 0);
+  }
   const out = new Uint8Array(8);
   out[0] = clampSigned8From16(dstLo & 0xffff);
   out[1] = clampSigned8From16((dstLo >>> 16) & 0xffff);
@@ -786,6 +917,10 @@ function packsswb64(dstLo, dstHi, srcLo, srcHi) {
 }
 
 function packuswb64(dstLo, dstHi, srcLo, srcHi) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.packuswb64 === "function") {
+    return backend.packuswb64(dstLo >>> 0, dstHi >>> 0, srcLo >>> 0, srcHi >>> 0);
+  }
   const out = new Uint8Array(8);
   out[0] = clampUnsigned8From16(dstLo & 0xffff);
   out[1] = clampUnsigned8From16((dstLo >>> 16) & 0xffff);
@@ -802,6 +937,10 @@ function packuswb64(dstLo, dstHi, srcLo, srcHi) {
 }
 
 function packssdw64(dstLo, dstHi, srcLo, srcHi) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.packssdw64 === "function") {
+    return backend.packssdw64(dstLo >>> 0, dstHi >>> 0, srcLo >>> 0, srcHi >>> 0);
+  }
   return {
     lo: (clampSigned16From32(dstLo) | (clampSigned16From32(dstHi) << 16)) >>> 0,
     hi: (clampSigned16From32(srcLo) | (clampSigned16From32(srcHi) << 16)) >>> 0
@@ -809,6 +948,10 @@ function packssdw64(dstLo, dstHi, srcLo, srcHi) {
 }
 
 function punpcklbw64(dstLo, srcLo) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.punpcklbw64 === "function") {
+    return backend.punpcklbw64(dstLo >>> 0, srcLo >>> 0);
+  }
   let outLo = 0;
   let outHi = 0;
   for (let i = 0; i < 4; i += 1) {
@@ -827,6 +970,10 @@ function punpcklbw64(dstLo, srcLo) {
 }
 
 function punpckhbw64(dstHi, srcHi) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.punpckhbw64 === "function") {
+    return backend.punpckhbw64(dstHi >>> 0, srcHi >>> 0);
+  }
   let outLo = 0;
   let outHi = 0;
   for (let i = 0; i < 4; i += 1) {
@@ -845,6 +992,10 @@ function punpckhbw64(dstHi, srcHi) {
 }
 
 function punpcklwd64(dstLo, srcLo) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.punpcklwd64 === "function") {
+    return backend.punpcklwd64(dstLo >>> 0, srcLo >>> 0);
+  }
   const d0 = dstLo & 0xffff;
   const d1 = (dstLo >>> 16) & 0xffff;
   const s0 = srcLo & 0xffff;
@@ -856,6 +1007,10 @@ function punpcklwd64(dstLo, srcLo) {
 }
 
 function punpckhwd64(dstHi, srcHi) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.punpckhwd64 === "function") {
+    return backend.punpckhwd64(dstHi >>> 0, srcHi >>> 0);
+  }
   const d0 = dstHi & 0xffff;
   const d1 = (dstHi >>> 16) & 0xffff;
   const s0 = srcHi & 0xffff;

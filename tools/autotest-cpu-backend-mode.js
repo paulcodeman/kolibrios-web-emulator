@@ -48,17 +48,38 @@ try {
   assert(jsBackend && jsBackend.kind === "js", "js helper backend should identify itself");
   assert(wasmBackend && wasmBackend.kind === "wasm", "wasm helper backend should identify itself");
   assertEq(wasmBackend.apiVersion, 1, "wasm helper backend api should match build");
+  assert(typeof wasmBackend.psubusb32 === "function", "wasm helper backend should expose MMX helpers");
+  assert(typeof wasmBackend.roundTiesToEven === "function", "wasm helper backend should expose x87 helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
   const flagSeeds = [0, 1, 0x40, 0x80, 0x801, 0xffffffff];
   const rotateModes = [0, 1, 2, 3, 4, 5, 6, 7];
+  const mmxUnaryCountLimits = [0, 1, 7, 8, 15, 16, 17, 31, 32, 255];
 
   for (const value of [0, 1, 2, 3, 0x7f, 0x80, 0xff, 0x12345678, 0xffffffff]) {
     assertEq(
       wasmBackend.parityEven8(value),
       jsBackend.parityEven8(value),
       `parityEven8 should match for 0x${(value >>> 0).toString(16)}`
+    );
+  }
+
+  for (const value of [-3.5, -2.5, -1.6, -1.5, -0.5, 0, 0.5, 1.5, 2.5, 3.5, 123456.5, -123456.5, Number.POSITIVE_INFINITY, Number.NaN]) {
+    assertEq(
+      wasmBackend.roundTiesToEven(value),
+      jsBackend.roundTiesToEven(value),
+      `roundTiesToEven should match for ${String(value)}`
+    );
+    assertEq(
+      wasmBackend.x87StoreIntegerValue(value, false),
+      jsBackend.x87StoreIntegerValue(value, false),
+      `x87StoreIntegerValue(false) should match for ${String(value)}`
+    );
+    assertEq(
+      wasmBackend.x87StoreIntegerValue(value, true),
+      jsBackend.x87StoreIntegerValue(value, true),
+      `x87StoreIntegerValue(true) should match for ${String(value)}`
     );
   }
 
@@ -97,6 +118,70 @@ try {
         );
       }
     }
+  }
+
+  for (let i = 0; i < 120; i += 1) {
+    const a = nextRand();
+    const b = nextRand();
+    assertEq(wasmBackend.psubusb32(a, b), jsBackend.psubusb32(a, b), "psubusb32 should match");
+    assertEq(wasmBackend.psubusw32(a, b), jsBackend.psubusw32(a, b), "psubusw32 should match");
+    assertEq(wasmBackend.pavgb32(a, b), jsBackend.pavgb32(a, b), "pavgb32 should match");
+    assertEq(wasmBackend.paddw32(a, b), jsBackend.paddw32(a, b), "paddw32 should match");
+    assertEq(wasmBackend.psubsw32(a, b), jsBackend.psubsw32(a, b), "psubsw32 should match");
+    assertEq(wasmBackend.pmullw32(a, b), jsBackend.pmullw32(a, b), "pmullw32 should match");
+  }
+
+  for (let i = 0; i < 120; i += 1) {
+    const a = nextRand();
+    const count = mmxUnaryCountLimits[i % mmxUnaryCountLimits.length] ^ (nextRand() & 7);
+    assertEq(wasmBackend.psrlw32(a, count), jsBackend.psrlw32(a, count), "psrlw32 should match");
+    assertEq(wasmBackend.psraw32(a, count), jsBackend.psraw32(a, count), "psraw32 should match");
+    assertEq(wasmBackend.psllw32(a, count), jsBackend.psllw32(a, count), "psllw32 should match");
+    assertEq(wasmBackend.psrld32(a, count), jsBackend.psrld32(a, count), "psrld32 should match");
+    assertEq(wasmBackend.psrad32(a, count), jsBackend.psrad32(a, count), "psrad32 should match");
+    assertEq(wasmBackend.pslld32(a, count), jsBackend.pslld32(a, count), "pslld32 should match");
+  }
+
+  for (let i = 0; i < 120; i += 1) {
+    const dstLo = nextRand();
+    const dstHi = nextRand();
+    const srcLo = nextRand();
+    const srcHi = nextRand();
+    assertDeepEq(
+      wasmBackend.packsswb64(dstLo, dstHi, srcLo, srcHi),
+      jsBackend.packsswb64(dstLo, dstHi, srcLo, srcHi),
+      "packsswb64 should match"
+    );
+    assertDeepEq(
+      wasmBackend.packuswb64(dstLo, dstHi, srcLo, srcHi),
+      jsBackend.packuswb64(dstLo, dstHi, srcLo, srcHi),
+      "packuswb64 should match"
+    );
+    assertDeepEq(
+      wasmBackend.packssdw64(dstLo, dstHi, srcLo, srcHi),
+      jsBackend.packssdw64(dstLo, dstHi, srcLo, srcHi),
+      "packssdw64 should match"
+    );
+    assertDeepEq(
+      wasmBackend.punpcklbw64(dstLo, srcLo),
+      jsBackend.punpcklbw64(dstLo, srcLo),
+      "punpcklbw64 should match"
+    );
+    assertDeepEq(
+      wasmBackend.punpckhbw64(dstHi, srcHi),
+      jsBackend.punpckhbw64(dstHi, srcHi),
+      "punpckhbw64 should match"
+    );
+    assertDeepEq(
+      wasmBackend.punpcklwd64(dstLo, srcLo),
+      jsBackend.punpcklwd64(dstLo, srcLo),
+      "punpcklwd64 should match"
+    );
+    assertDeepEq(
+      wasmBackend.punpckhwd64(dstHi, srcHi),
+      jsBackend.punpckhwd64(dstHi, srcHi),
+      "punpckhwd64 should match"
+    );
   }
 
   for (const width of widths) {

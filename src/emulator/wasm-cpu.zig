@@ -1,3 +1,5 @@
+const std = @import("std");
+
 const FLAG_CF: u32 = 0x00000001;
 const FLAG_AF: u32 = 0x00000010;
 const FLAG_PF: u32 = 0x00000004;
@@ -13,6 +15,9 @@ var shift_rotate_last_ok: u32 = 0;
 var double_shift_last_result: u32 = 0;
 var double_shift_last_flags: u32 = 0;
 var double_shift_last_ok: u32 = 0;
+
+var packed64_last_lo: u32 = 0;
+var packed64_last_hi: u32 = 0;
 
 fn shiftCount32(value: u32) u5 {
     return @intCast(value & 31);
@@ -56,6 +61,55 @@ fn jsSignedShiftRight(value: u32, count: u32) u32 {
     return @bitCast(result);
 }
 
+fn laneSigned16(value: u32) i32 {
+    const narrowed: u16 = @truncate(value & 0xffff);
+    const signed: i16 = @bitCast(narrowed);
+    return @as(i32, signed);
+}
+
+fn laneSigned32(value: u32) i32 {
+    return @bitCast(value);
+}
+
+fn clampSigned8From16(value: u32) u32 {
+    var v = laneSigned16(value);
+    if (v > 0x7f) {
+        v = 0x7f;
+    } else if (v < -0x80) {
+        v = -0x80;
+    }
+    return @as(u32, @bitCast(@as(i32, v))) & 0xff;
+}
+
+fn clampUnsigned8From16(value: u32) u32 {
+    var v = laneSigned16(value);
+    if (v < 0) {
+        v = 0;
+    } else if (v > 0xff) {
+        v = 0xff;
+    }
+    return @intCast(v & 0xff);
+}
+
+fn clampSigned16From32(value: u32) u32 {
+    var v = laneSigned32(value);
+    if (v > 0x7fff) {
+        v = 0x7fff;
+    } else if (v < -0x8000) {
+        v = -0x8000;
+    }
+    return @as(u32, @bitCast(@as(i32, v))) & 0xffff;
+}
+
+fn setPacked64(lo: u32, hi: u32) void {
+    packed64_last_lo = lo;
+    packed64_last_hi = hi;
+}
+
+fn maxF64(a: f64, b: f64) f64 {
+    return if (a > b) a else b;
+}
+
 fn shl32(value: u32, count: u32) u32 {
     return value << shiftCount32(count);
 }
@@ -70,6 +124,30 @@ pub export fn api_version() u32 {
 
 pub export fn parity_even8(value: u32) u32 {
     return if (parityEven8Impl(value)) @as(u32, 1) else @as(u32, 0);
+}
+
+pub export fn round_ties_to_even(value: f64) f64 {
+    if (!std.math.isFinite(value)) {
+        return 0;
+    }
+    const floor_value = @floor(value);
+    const frac = value - floor_value;
+    const epsilon = 1e-9 * maxF64(1.0, @abs(value));
+    if (frac < (0.5 - epsilon)) {
+        return floor_value;
+    }
+    if (frac > (0.5 + epsilon)) {
+        return floor_value + 1.0;
+    }
+    const floor_int: i64 = @intFromFloat(floor_value);
+    return if ((floor_int & 1) == 0) floor_value else (floor_value + 1.0);
+}
+
+pub export fn x87_store_integer_value(value: f64, truncate: u32) f64 {
+    if (!std.math.isFinite(value)) {
+        return 0;
+    }
+    return if ((truncate & 1) != 0) @trunc(value) else round_ties_to_even(value);
 }
 
 pub export fn update_logic_flags_width(flags: u32, result: u32, width_bits: u32) u32 {
@@ -501,4 +579,249 @@ pub export fn get_double_shift_last_flags() u32 {
 
 pub export fn get_double_shift_last_ok() u32 {
     return double_shift_last_ok;
+}
+
+pub export fn psubusb32(a: u32, b: u32) u32 {
+    var out: u32 = 0;
+    var i: u32 = 0;
+    while (i < 4) : (i += 1) {
+        const shift = i * 8;
+        const av = shr32(a, shift) & 0xff;
+        const bv = shr32(b, shift) & 0xff;
+        const dv: i32 = @as(i32, @intCast(av)) - @as(i32, @intCast(bv));
+        out |= (if (dv < 0) @as(u32, 0) else @as(u32, @intCast(dv))) << shiftCount32(shift);
+    }
+    return out;
+}
+
+pub export fn psubusw32(a: u32, b: u32) u32 {
+    var out: u32 = 0;
+    var i: u32 = 0;
+    while (i < 2) : (i += 1) {
+        const shift = i * 16;
+        const av = shr32(a, shift) & 0xffff;
+        const bv = shr32(b, shift) & 0xffff;
+        const dv: i32 = @as(i32, @intCast(av)) - @as(i32, @intCast(bv));
+        out |= (if (dv < 0) @as(u32, 0) else @as(u32, @intCast(dv))) << shiftCount32(shift);
+    }
+    return out;
+}
+
+pub export fn pavgb32(a: u32, b: u32) u32 {
+    var out: u32 = 0;
+    var i: u32 = 0;
+    while (i < 4) : (i += 1) {
+        const shift = i * 8;
+        const av = shr32(a, shift) & 0xff;
+        const bv = shr32(b, shift) & 0xff;
+        const avg = (av + bv + 1) >> 1;
+        out |= avg << shiftCount32(shift);
+    }
+    return out;
+}
+
+pub export fn paddw32(a: u32, b: u32) u32 {
+    var out: u32 = 0;
+    var i: u32 = 0;
+    while (i < 2) : (i += 1) {
+        const shift = i * 16;
+        const av = shr32(a, shift) & 0xffff;
+        const bv = shr32(b, shift) & 0xffff;
+        out |= ((av +% bv) & 0xffff) << shiftCount32(shift);
+    }
+    return out;
+}
+
+pub export fn psubsw32(a: u32, b: u32) u32 {
+    var out: u32 = 0;
+    var i: u32 = 0;
+    while (i < 2) : (i += 1) {
+        const shift = i * 16;
+        const av = laneSigned16(shr32(a, shift));
+        const bv = laneSigned16(shr32(b, shift));
+        var result = av - bv;
+        if (result > 0x7fff) {
+            result = 0x7fff;
+        } else if (result < -0x8000) {
+            result = -0x8000;
+        }
+        out |= (@as(u32, @bitCast(result)) & 0xffff) << shiftCount32(shift);
+    }
+    return out;
+}
+
+pub export fn pmullw32(a: u32, b: u32) u32 {
+    var out: u32 = 0;
+    var i: u32 = 0;
+    while (i < 2) : (i += 1) {
+        const shift = i * 16;
+        const av = laneSigned16(shr32(a, shift));
+        const bv = laneSigned16(shr32(b, shift));
+        const product = av * bv;
+        out |= (@as(u32, @bitCast(product)) & 0xffff) << shiftCount32(shift);
+    }
+    return out;
+}
+
+pub export fn psrlw32(a: u32, count: u32) u32 {
+    const shift = if (count >= 16) @as(u32, 16) else (count & 0xff);
+    var out: u32 = 0;
+    var i: u32 = 0;
+    while (i < 2) : (i += 1) {
+        const lane_shift = i * 16;
+        const value = shr32(a, lane_shift) & 0xffff;
+        const result = if (shift >= 16) @as(u32, 0) else shr32(value, shift);
+        out |= (result & 0xffff) << shiftCount32(lane_shift);
+    }
+    return out;
+}
+
+pub export fn psraw32(a: u32, count: u32) u32 {
+    const shift = if (count >= 16) @as(u32, 16) else (count & 0xff);
+    var out: u32 = 0;
+    var i: u32 = 0;
+    while (i < 2) : (i += 1) {
+        const lane_shift = i * 16;
+        const value = laneSigned16(shr32(a, lane_shift));
+        const result: i32 = if (shift >= 16) (if (value < 0) -1 else 0) else (value >> shiftCount32(shift));
+        out |= (@as(u32, @bitCast(result)) & 0xffff) << shiftCount32(lane_shift);
+    }
+    return out;
+}
+
+pub export fn psllw32(a: u32, count: u32) u32 {
+    const shift = if (count >= 16) @as(u32, 16) else (count & 0xff);
+    var out: u32 = 0;
+    var i: u32 = 0;
+    while (i < 2) : (i += 1) {
+        const lane_shift = i * 16;
+        const value = shr32(a, lane_shift) & 0xffff;
+        const result = if (shift >= 16) @as(u32, 0) else (shl32(value, shift) & 0xffff);
+        out |= result << shiftCount32(lane_shift);
+    }
+    return out;
+}
+
+pub export fn psrld32(a: u32, count: u32) u32 {
+    const shift = if (count >= 32) @as(u32, 32) else (count & 0xff);
+    return if (shift >= 32) @as(u32, 0) else shr32(a, shift);
+}
+
+pub export fn psrad32(a: u32, count: u32) u32 {
+    const shift = if (count >= 32) @as(u32, 32) else (count & 0xff);
+    const value = laneSigned32(a);
+    return if (shift >= 32)
+        (if (value < 0) 0xffffffff else @as(u32, 0))
+    else
+        @bitCast(value >> shiftCount32(shift));
+}
+
+pub export fn pslld32(a: u32, count: u32) u32 {
+    const shift = if (count >= 32) @as(u32, 32) else (count & 0xff);
+    return if (shift >= 32) @as(u32, 0) else shl32(a, shift);
+}
+
+pub export fn packsswb64_exec(dst_lo: u32, dst_hi: u32, src_lo: u32, src_hi: u32) void {
+    const out0 = clampSigned8From16(dst_lo & 0xffff);
+    const out1 = clampSigned8From16(shr32(dst_lo, 16));
+    const out2 = clampSigned8From16(dst_hi & 0xffff);
+    const out3 = clampSigned8From16(shr32(dst_hi, 16));
+    const out4 = clampSigned8From16(src_lo & 0xffff);
+    const out5 = clampSigned8From16(shr32(src_lo, 16));
+    const out6 = clampSigned8From16(src_hi & 0xffff);
+    const out7 = clampSigned8From16(shr32(src_hi, 16));
+    setPacked64(
+        out0 | shl32(out1, 8) | shl32(out2, 16) | shl32(out3, 24),
+        out4 | shl32(out5, 8) | shl32(out6, 16) | shl32(out7, 24),
+    );
+}
+
+pub export fn packuswb64_exec(dst_lo: u32, dst_hi: u32, src_lo: u32, src_hi: u32) void {
+    const out0 = clampUnsigned8From16(dst_lo & 0xffff);
+    const out1 = clampUnsigned8From16(shr32(dst_lo, 16));
+    const out2 = clampUnsigned8From16(dst_hi & 0xffff);
+    const out3 = clampUnsigned8From16(shr32(dst_hi, 16));
+    const out4 = clampUnsigned8From16(src_lo & 0xffff);
+    const out5 = clampUnsigned8From16(shr32(src_lo, 16));
+    const out6 = clampUnsigned8From16(src_hi & 0xffff);
+    const out7 = clampUnsigned8From16(shr32(src_hi, 16));
+    setPacked64(
+        out0 | shl32(out1, 8) | shl32(out2, 16) | shl32(out3, 24),
+        out4 | shl32(out5, 8) | shl32(out6, 16) | shl32(out7, 24),
+    );
+}
+
+pub export fn packssdw64_exec(dst_lo: u32, dst_hi: u32, src_lo: u32, src_hi: u32) void {
+    setPacked64(
+        clampSigned16From32(dst_lo) | shl32(clampSigned16From32(dst_hi), 16),
+        clampSigned16From32(src_lo) | shl32(clampSigned16From32(src_hi), 16),
+    );
+}
+
+pub export fn punpcklbw64_exec(dst_lo: u32, src_lo: u32) void {
+    var out_lo: u32 = 0;
+    var out_hi: u32 = 0;
+    var i: u32 = 0;
+    while (i < 4) : (i += 1) {
+        const dst_byte = shr32(dst_lo, i * 8) & 0xff;
+        const src_byte = shr32(src_lo, i * 8) & 0xff;
+        const shift = (i & 1) * 16;
+        if (i < 2) {
+            out_lo |= shl32(dst_byte, shift);
+            out_lo |= shl32(src_byte, shift + 8);
+        } else {
+            out_hi |= shl32(dst_byte, shift);
+            out_hi |= shl32(src_byte, shift + 8);
+        }
+    }
+    setPacked64(out_lo, out_hi);
+}
+
+pub export fn punpckhbw64_exec(dst_hi: u32, src_hi: u32) void {
+    var out_lo: u32 = 0;
+    var out_hi_out: u32 = 0;
+    var i: u32 = 0;
+    while (i < 4) : (i += 1) {
+        const dst_byte = shr32(dst_hi, i * 8) & 0xff;
+        const src_byte = shr32(src_hi, i * 8) & 0xff;
+        const shift = (i & 1) * 16;
+        if (i < 2) {
+            out_lo |= shl32(dst_byte, shift);
+            out_lo |= shl32(src_byte, shift + 8);
+        } else {
+            out_hi_out |= shl32(dst_byte, shift);
+            out_hi_out |= shl32(src_byte, shift + 8);
+        }
+    }
+    setPacked64(out_lo, out_hi_out);
+}
+
+pub export fn punpcklwd64_exec(dst_lo: u32, src_lo: u32) void {
+    const d0 = dst_lo & 0xffff;
+    const d1 = shr32(dst_lo, 16) & 0xffff;
+    const s0 = src_lo & 0xffff;
+    const s1 = shr32(src_lo, 16) & 0xffff;
+    setPacked64(
+        d0 | shl32(s0, 16),
+        d1 | shl32(s1, 16),
+    );
+}
+
+pub export fn punpckhwd64_exec(dst_hi: u32, src_hi: u32) void {
+    const d0 = dst_hi & 0xffff;
+    const d1 = shr32(dst_hi, 16) & 0xffff;
+    const s0 = src_hi & 0xffff;
+    const s1 = shr32(src_hi, 16) & 0xffff;
+    setPacked64(
+        d0 | shl32(s0, 16),
+        d1 | shl32(s1, 16),
+    );
+}
+
+pub export fn get_packed64_last_lo() u32 {
+    return packed64_last_lo;
+}
+
+pub export fn get_packed64_last_hi() u32 {
+    return packed64_last_hi;
 }

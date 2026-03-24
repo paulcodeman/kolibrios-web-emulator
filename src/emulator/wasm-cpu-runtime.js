@@ -59,6 +59,13 @@
     };
   }
 
+  function readPacked64Result(exports) {
+    return {
+      lo: (exports.get_packed64_last_lo?.() || 0) >>> 0,
+      hi: (exports.get_packed64_last_hi?.() || 0) >>> 0
+    };
+  }
+
   function createWasmCpuBackend() {
     if (cache.backend) {
       return cache.backend;
@@ -66,12 +73,16 @@
     const exports = getInstance().exports;
     if (
       typeof exports.update_logic_flags_width !== "function" ||
+      typeof exports.round_ties_to_even !== "function" ||
+      typeof exports.x87_store_integer_value !== "function" ||
       typeof exports.update_add_flags !== "function" ||
       typeof exports.update_adc_flags !== "function" ||
       typeof exports.update_sub_flags !== "function" ||
       typeof exports.update_sbb_flags !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
-      typeof exports.double_shift_exec !== "function"
+      typeof exports.double_shift_exec !== "function" ||
+      typeof exports.psubusb32 !== "function" ||
+      typeof exports.packsswb64_exec !== "function"
     ) {
       throw new Error("WASM CPU backend exports are incomplete.");
     }
@@ -80,6 +91,12 @@
       apiVersion: typeof exports.api_version === "function" ? (exports.api_version() >>> 0) : 0,
       parityEven8(value) {
         return !!exports.parity_even8(value >>> 0);
+      },
+      roundTiesToEven(value) {
+        return Number(exports.round_ties_to_even(Number(value)));
+      },
+      x87StoreIntegerValue(value, truncate) {
+        return Number(exports.x87_store_integer_value(Number(value), truncate ? 1 : 0));
       },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return exports.update_logic_flags_width(flags >>> 0, result >>> 0, widthBits >>> 0) >>> 0;
@@ -103,6 +120,70 @@
       doubleShift(value, source, count, widthBits, leftShift, flags) {
         exports.double_shift_exec(value >>> 0, source >>> 0, count >>> 0, widthBits >>> 0, leftShift ? 1 : 0, flags >>> 0);
         return readPackedShiftResult(exports, "double_shift");
+      },
+      psubusb32(a, b) {
+        return exports.psubusb32(a >>> 0, b >>> 0) >>> 0;
+      },
+      psubusw32(a, b) {
+        return exports.psubusw32(a >>> 0, b >>> 0) >>> 0;
+      },
+      pavgb32(a, b) {
+        return exports.pavgb32(a >>> 0, b >>> 0) >>> 0;
+      },
+      paddw32(a, b) {
+        return exports.paddw32(a >>> 0, b >>> 0) >>> 0;
+      },
+      psubsw32(a, b) {
+        return exports.psubsw32(a >>> 0, b >>> 0) >>> 0;
+      },
+      pmullw32(a, b) {
+        return exports.pmullw32(a >>> 0, b >>> 0) >>> 0;
+      },
+      psrlw32(a, count) {
+        return exports.psrlw32(a >>> 0, count >>> 0) >>> 0;
+      },
+      psraw32(a, count) {
+        return exports.psraw32(a >>> 0, count >>> 0) >>> 0;
+      },
+      psllw32(a, count) {
+        return exports.psllw32(a >>> 0, count >>> 0) >>> 0;
+      },
+      psrld32(a, count) {
+        return exports.psrld32(a >>> 0, count >>> 0) >>> 0;
+      },
+      psrad32(a, count) {
+        return exports.psrad32(a >>> 0, count >>> 0) >>> 0;
+      },
+      pslld32(a, count) {
+        return exports.pslld32(a >>> 0, count >>> 0) >>> 0;
+      },
+      packsswb64(dstLo, dstHi, srcLo, srcHi) {
+        exports.packsswb64_exec(dstLo >>> 0, dstHi >>> 0, srcLo >>> 0, srcHi >>> 0);
+        return readPacked64Result(exports);
+      },
+      packuswb64(dstLo, dstHi, srcLo, srcHi) {
+        exports.packuswb64_exec(dstLo >>> 0, dstHi >>> 0, srcLo >>> 0, srcHi >>> 0);
+        return readPacked64Result(exports);
+      },
+      packssdw64(dstLo, dstHi, srcLo, srcHi) {
+        exports.packssdw64_exec(dstLo >>> 0, dstHi >>> 0, srcLo >>> 0, srcHi >>> 0);
+        return readPacked64Result(exports);
+      },
+      punpcklbw64(dstLo, srcLo) {
+        exports.punpcklbw64_exec(dstLo >>> 0, srcLo >>> 0);
+        return readPacked64Result(exports);
+      },
+      punpckhbw64(dstHi, srcHi) {
+        exports.punpckhbw64_exec(dstHi >>> 0, srcHi >>> 0);
+        return readPacked64Result(exports);
+      },
+      punpcklwd64(dstLo, srcLo) {
+        exports.punpcklwd64_exec(dstLo >>> 0, srcLo >>> 0);
+        return readPacked64Result(exports);
+      },
+      punpckhwd64(dstHi, srcHi) {
+        exports.punpckhwd64_exec(dstHi >>> 0, srcHi >>> 0);
+        return readPacked64Result(exports);
       }
     };
     return cache.backend;

@@ -13,9 +13,9 @@ function assertClose(actual, expected, label) {
   }
 }
 
-function createBareEmulator() {
+function createBareEmulator(cpuBackend) {
   const surface = createHeadlessSurface(8, 8);
-  const emulator = new Emulator(surface, () => {});
+  const emulator = new Emulator(surface, () => {}, { cpuBackend });
   const mem = new Uint8Array(0x1000);
   const regs = new Uint32Array(10);
   regs[REG_ESP] = 0x1000;
@@ -33,47 +33,50 @@ function createBareEmulator() {
     xmmF: new Float32Array(new ArrayBuffer(32 * 4)),
     memFaultLogged: false
   };
+  emulator.ensureCpuBackendReady();
   return emulator;
 }
 
 try {
-  const rounder = createBareEmulator();
-  rounder.writeMem8(0, 0xd9);
-  rounder.writeMem8(1, 0xfc); // frndint
-  rounder.writeReg(REG_EIP, 0);
-  rounder.fpuPush(1.5);
-  if (!rounder.handleFpuD9(0)) {
-    throw new Error("FRNDINT instruction was not handled.");
-  }
-  assertClose(rounder.fpuPeek(), 2, "FRNDINT should round ST0 to nearest-even integer");
+  for (const cpuBackend of ["js", "wasm"]) {
+    const rounder = createBareEmulator(cpuBackend);
+    rounder.writeMem8(0, 0xd9);
+    rounder.writeMem8(1, 0xfc); // frndint
+    rounder.writeReg(REG_EIP, 0);
+    rounder.fpuPush(1.5);
+    if (!rounder.executeBasicInstruction(0)) {
+      throw new Error(`FRNDINT instruction was not handled for backend ${cpuBackend}.`);
+    }
+    assertClose(rounder.fpuPeek(), 2, `FRNDINT should round ST0 to nearest-even integer (${cpuBackend})`);
 
-  const scaler = createBareEmulator();
-  scaler.writeMem8(0, 0xd9);
-  scaler.writeMem8(1, 0xfd); // fscale
-  scaler.writeReg(REG_EIP, 0);
-  scaler.fpuPush(3.9);
-  scaler.fpuPush(1.25);
-  if (!scaler.handleFpuD9(0)) {
-    throw new Error("FSCALE instruction was not handled.");
-  }
-  assertClose(scaler.fpuPeek(), 10, "FSCALE should scale ST0 by 2^trunc(ST1)");
+    const scaler = createBareEmulator(cpuBackend);
+    scaler.writeMem8(0, 0xd9);
+    scaler.writeMem8(1, 0xfd); // fscale
+    scaler.writeReg(REG_EIP, 0);
+    scaler.fpuPush(3.9);
+    scaler.fpuPush(1.25);
+    if (!scaler.executeBasicInstruction(0)) {
+      throw new Error(`FSCALE instruction was not handled for backend ${cpuBackend}.`);
+    }
+    assertClose(scaler.fpuPeek(), 10, `FSCALE should scale ST0 by 2^trunc(ST1) (${cpuBackend})`);
 
-  const incTop = createBareEmulator();
-  incTop.writeMem8(0, 0xd9);
-  incTop.writeMem8(1, 0xf7); // fincstp
-  incTop.writeReg(REG_EIP, 0);
-  incTop.fpuPush(3);
-  incTop.fpuPush(2);
-  incTop.fpuPush(1);
-  if (!incTop.handleFpuD9(0)) {
-    throw new Error("FINCSTP instruction was not handled.");
-  }
-  assertClose(incTop.fpuPeek(), 2, "FINCSTP should advance TOP to the next stack entry");
-  if ((incTop.cpu.fpuSize | 0) !== 2) {
-    throw new Error(`FINCSTP should reduce the visible stack size in the simplified model, got ${incTop.cpu.fpuSize}.`);
+    const incTop = createBareEmulator(cpuBackend);
+    incTop.writeMem8(0, 0xd9);
+    incTop.writeMem8(1, 0xf7); // fincstp
+    incTop.writeReg(REG_EIP, 0);
+    incTop.fpuPush(3);
+    incTop.fpuPush(2);
+    incTop.fpuPush(1);
+    if (!incTop.executeBasicInstruction(0)) {
+      throw new Error(`FINCSTP instruction was not handled for backend ${cpuBackend}.`);
+    }
+    assertClose(incTop.fpuPeek(), 2, `FINCSTP should advance TOP to the next stack entry (${cpuBackend})`);
+    if ((incTop.cpu.fpuSize | 0) !== 2) {
+      throw new Error(`FINCSTP should reduce the visible stack size in the simplified model (${cpuBackend}), got ${incTop.cpu.fpuSize}.`);
+    }
   }
 
-  console.log("Autotest OK: x87 D9 FC/FD/F7 keep FRNDINT, FSCALE, and FINCSTP semantics aligned with TinyGL expectations.");
+  console.log("Autotest OK: x87 D9 FC/FD/F7 keep FRNDINT, FSCALE, and FINCSTP semantics aligned on JS and WASM helper backends.");
 } catch (err) {
   console.error(err instanceof Error ? err.stack || err.message : String(err));
   process.exit(2);
