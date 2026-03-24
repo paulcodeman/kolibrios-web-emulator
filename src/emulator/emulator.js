@@ -2203,6 +2203,21 @@ function getCpuSliceProfile(isBrowserMainThread, backend) {
   };
 }
 
+function getCpuBlockProfile(backend) {
+  if (normalizeCpuBackendMode(backend) === "wasm") {
+    return {
+      basicBlockMaxEntries: 48,
+      basicBlockImmediateCacheEntries: 2,
+      basicBlockHotThreshold: 2
+    };
+  }
+  return {
+    basicBlockMaxEntries: 32,
+    basicBlockImmediateCacheEntries: 4,
+    basicBlockHotThreshold: 3
+  };
+}
+
 function getCpuBackendAvailability() {
   const emu = KosEmu && KosEmu.emu ? KosEmu.emu : null;
   return {
@@ -2429,14 +2444,18 @@ class Emulator {
     this.segOverride = 0;
     this.lastStopReason = "";
     this.stopEventEmitted = false;
-    this.applyCpuBackendSliceProfile(this.cpuBackend);
+    this.applyCpuBackendRuntimeProfile(this.cpuBackend);
     this.resetSkinTheme();
   }
 
-  applyCpuBackendSliceProfile(mode) {
+  applyCpuBackendRuntimeProfile(mode) {
     const profile = getCpuSliceProfile(this.isBrowserMainThread, mode);
     this.maxSliceMs = profile.maxSliceMs | 0;
     this.backgroundMaxSliceMs = profile.backgroundMaxSliceMs | 0;
+    const blockProfile = getCpuBlockProfile(mode);
+    this.basicBlockMaxEntries = blockProfile.basicBlockMaxEntries | 0;
+    this.basicBlockImmediateCacheEntries = blockProfile.basicBlockImmediateCacheEntries | 0;
+    this.basicBlockHotThreshold = blockProfile.basicBlockHotThreshold | 0;
   }
 
   setCpuBackend(mode) {
@@ -2447,7 +2466,7 @@ class Emulator {
     this.requestedCpuBackend = next;
     this.cpuBackend = next;
     this.cpuHelperBackend = null;
-    this.applyCpuBackendSliceProfile(next);
+    this.applyCpuBackendRuntimeProfile(next);
     return next;
   }
 
@@ -2458,7 +2477,10 @@ class Emulator {
       active: this.cpuBackend,
       wasmAvailable: !!availability.wasm,
       maxSliceMs: this.maxSliceMs | 0,
-      backgroundMaxSliceMs: this.backgroundMaxSliceMs | 0
+      backgroundMaxSliceMs: this.backgroundMaxSliceMs | 0,
+      basicBlockMaxEntries: this.basicBlockMaxEntries | 0,
+      basicBlockImmediateCacheEntries: this.basicBlockImmediateCacheEntries | 0,
+      basicBlockHotThreshold: this.basicBlockHotThreshold | 0
     };
   }
 
@@ -2478,7 +2500,7 @@ class Emulator {
       this.cpuHelperBackend = null;
     }
     this.cpuBackend = next;
-    this.applyCpuBackendSliceProfile(next);
+    this.applyCpuBackendRuntimeProfile(next);
     return this.cpuBackend;
   }
 

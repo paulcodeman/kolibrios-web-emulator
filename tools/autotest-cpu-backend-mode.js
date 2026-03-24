@@ -1188,6 +1188,9 @@ try {
   assertEq(jsEmulator.setCpuBackend("wasm"), "wasm", "setCpuBackend should accept wasm requests before launch");
   assertEq(jsEmulator.ensureCpuBackendReady(), "wasm", "wasm backend should become active");
   assert(jsEmulator.cpuHelperBackend && jsEmulator.cpuHelperBackend.kind === "wasm", "emulator should bind wasm helper backend");
+  assertEq(jsEmulator.getCpuBackendInfo().basicBlockMaxEntries, 48, "wasm backend should use larger basic block windows");
+  assertEq(jsEmulator.getCpuBackendInfo().basicBlockImmediateCacheEntries, 2, "wasm backend should cache short blocks immediately");
+  assertEq(jsEmulator.getCpuBackendInfo().basicBlockHotThreshold, 2, "wasm backend should promote hot blocks earlier");
   assertEq(jsEmulator.setCpuBackend("js"), "js", "backend should switch back to js before launch");
 
   const startCacheEmulator = createInstructionEmulator("wasm");
