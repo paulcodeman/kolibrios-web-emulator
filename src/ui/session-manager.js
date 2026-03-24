@@ -14,6 +14,9 @@
   const TOUCH_SWIPE_MIN_DISTANCE = 42;
   const TOUCH_SWIPE_AXIS_RATIO = 1.35;
   const TOUCH_SWIPE_MAX_DURATION_MS = 450;
+  const TOUCH_LONG_PRESS_DELAY_MS = 520;
+  const TOUCH_LONG_PRESS_RELEASE_DELAY_MS = 18;
+  const TOUCH_LONG_PRESS_MOVE_TOLERANCE = 24;
   const CASCADE_STEP_X = 28;
   const CASCADE_STEP_Y = 24;
   const WINDOW_RESIZE_BORDER = 6;
@@ -561,6 +564,13 @@
     return "";
   }
 
+  function didTouchMoveBeyondTolerance(startX, startY, currentX, currentY, tolerance) {
+    const dx = (currentX - startX) | 0;
+    const dy = (currentY - startY) | 0;
+    const limit = Math.max(0, tolerance | 0);
+    return ((dx * dx) + (dy * dy)) > (limit * limit);
+  }
+
   function getSkinButtonRect(button, windowWidth) {
     if (!button || (button.width | 0) <= 0 || (button.height | 0) <= 0) {
       return null;
@@ -779,6 +789,15 @@
       this.touchSwipeEligible = false;
       this.touchSwipeHeldKey = "";
       this.touchSwipeMouseSuppressed = false;
+      this.touchPrimaryMouseActive = false;
+      this.touchSecondaryMouseActive = false;
+      this.touchLongPressTimer = 0;
+      this.touchLongPressReleaseTimer = 0;
+      this.touchLongPressTriggered = false;
+      this.touchLongPressEligible = false;
+      this.touchPrimaryStartClientX = 0;
+      this.touchPrimaryStartClientY = 0;
+      this.touchDeferredCapture = false;
       this.boundDocMouseMove = (event) => this.handleDocumentMouseMove(event);
       this.boundDocMouseUp = (event) => this.handleDocumentMouseUp(event);
       this.boundDocTouchMove = (event) => this.handleDocumentTouchMove(event);
@@ -1545,7 +1564,20 @@
       if (!this.captureMode) {
         return;
       }
-      if (this.captureMode === "app" && !this.touchSwipeMouseSuppressed) {
+      if (this.captureMode === "app" && this.touchSecondaryMouseActive) {
+        const releaseEvent = createSyntheticPointerEvent(
+          null,
+          {
+            clientX: this.touchSwipeLastX | 0,
+            clientY: this.touchSwipeLastY | 0
+          },
+          0,
+          2
+        );
+        this.forwardMouseEvent(releaseEvent, 0, 0x02, false, 0, 0, this.getPointerInfo(releaseEvent).inside);
+        this.touchSecondaryMouseActive = false;
+      }
+      if (this.captureMode === "app" && this.touchPrimaryMouseActive && !this.touchSwipeMouseSuppressed) {
         this.manager.forwardGlobalMouseEvent(
           this.emulator.mouseScreenX | 0,
           this.emulator.mouseScreenY | 0,
@@ -1565,12 +1597,27 @@
     }
 
     resetTouchSwipeTracking() {
+      if (this.touchLongPressTimer) {
+        clearTimeout(this.touchLongPressTimer);
+        this.touchLongPressTimer = 0;
+      }
+      if (this.touchLongPressReleaseTimer) {
+        clearTimeout(this.touchLongPressReleaseTimer);
+        this.touchLongPressReleaseTimer = 0;
+      }
       this.touchSwipeStartX = 0;
       this.touchSwipeStartY = 0;
       this.touchSwipeLastX = 0;
       this.touchSwipeLastY = 0;
       this.touchSwipeStartMs = 0;
       this.touchSwipeEligible = false;
+      this.touchPrimaryMouseActive = false;
+      this.touchSecondaryMouseActive = false;
+      this.touchLongPressTriggered = false;
+      this.touchLongPressEligible = false;
+      this.touchPrimaryStartClientX = 0;
+      this.touchPrimaryStartClientY = 0;
+      this.touchDeferredCapture = false;
     }
 
     beginTouchSwipeTracking(event, touch) {
@@ -1588,6 +1635,13 @@
       this.touchSwipeStartMs = Date.now();
       this.touchSwipeHeldKey = "";
       this.touchSwipeMouseSuppressed = false;
+      this.touchPrimaryMouseActive = false;
+      this.touchSecondaryMouseActive = false;
+      this.touchLongPressTriggered = false;
+      this.touchLongPressEligible = false;
+      this.touchPrimaryStartClientX = touch.clientX | 0;
+      this.touchPrimaryStartClientY = touch.clientY | 0;
+      this.touchDeferredCapture = false;
       this.touchSwipeEligible =
         !this.rolledUp &&
         !this.stopped &&
@@ -1625,6 +1679,163 @@
         Date.now() - (this.touchSwipeStartMs || 0),
         !!allowLongHold
       );
+    }
+
+    hasTouchLongPressMoved() {
+      return didTouchMoveBeyondTolerance(
+        this.touchPrimaryStartClientX | 0,
+        this.touchPrimaryStartClientY | 0,
+        this.touchSwipeLastX | 0,
+        this.touchSwipeLastY | 0,
+        TOUCH_LONG_PRESS_MOVE_TOLERANCE
+      );
+    }
+
+    scheduleTouchLongPress(event) {
+      if (this.touchLongPressTimer) {
+        clearTimeout(this.touchLongPressTimer);
+        this.touchLongPressTimer = 0;
+      }
+      if (!this.touchLongPressEligible || this.captureMode !== "app" || this.activeTouchId === null) {
+        return;
+      }
+      const sourceEvent = event || null;
+      const targetTouchId = this.activeTouchId | 0;
+      this.touchLongPressTimer = setTimeout(() => {
+        this.touchLongPressTimer = 0;
+        if (
+          this.removed ||
+          this.stopped ||
+          this.captureMode !== "app" ||
+          this.activeTouchId === null ||
+          (this.activeTouchId | 0) !== targetTouchId ||
+          !this.touchLongPressEligible ||
+          this.touchPrimaryMouseActive ||
+          this.touchSecondaryMouseActive ||
+          this.touchLongPressTriggered ||
+          this.touchSwipeHeldKey ||
+          this.touchSwipeMouseSuppressed ||
+          this.hasTouchLongPressMoved()
+        ) {
+          return;
+        }
+        const touchPoint = {
+          clientX: this.touchSwipeLastX | 0,
+          clientY: this.touchSwipeLastY | 0
+        };
+        const moveEvent = createSyntheticPointerEvent(sourceEvent, touchPoint, 0, 0);
+        const downEvent = createSyntheticPointerEvent(sourceEvent, touchPoint, 0x02, 2);
+        const inside = this.getPointerInfo(moveEvent).inside;
+        this.forwardMouseEvent(moveEvent, 0, 0, true, 0, 0, inside);
+        this.forwardMouseEvent(downEvent, 0x02, 0, false, 0, 0, inside);
+        this.touchSecondaryMouseActive = true;
+        this.touchLongPressTriggered = true;
+        this.touchSwipeMouseSuppressed = true;
+        this.scheduleTouchLongPressRelease(sourceEvent, touchPoint);
+      }, TOUCH_LONG_PRESS_DELAY_MS);
+    }
+
+    scheduleTouchLongPressRelease(event, touch) {
+      if (this.touchLongPressReleaseTimer) {
+        clearTimeout(this.touchLongPressReleaseTimer);
+        this.touchLongPressReleaseTimer = 0;
+      }
+      if (!this.touchSecondaryMouseActive || this.captureMode !== "app") {
+        return;
+      }
+      const sourceEvent = event || null;
+      const point = touch
+        ? { clientX: touch.clientX | 0, clientY: touch.clientY | 0 }
+        : { clientX: this.touchSwipeLastX | 0, clientY: this.touchSwipeLastY | 0 };
+      const targetTouchId = this.activeTouchId === null ? null : (this.activeTouchId | 0);
+      this.touchLongPressReleaseTimer = setTimeout(() => {
+        this.touchLongPressReleaseTimer = 0;
+        if (
+          !this.touchSecondaryMouseActive ||
+          this.captureMode !== "app" ||
+          this.activeTouchId === null ||
+          targetTouchId === null ||
+          (this.activeTouchId | 0) !== targetTouchId
+        ) {
+          return;
+        }
+        this.releaseTouchSecondaryMouse(sourceEvent, point);
+      }, TOUCH_LONG_PRESS_RELEASE_DELAY_MS);
+    }
+
+    ensureTouchPrimaryMouseDown(event) {
+      if (
+        this.touchPrimaryMouseActive ||
+        this.touchSecondaryMouseActive ||
+        this.captureMode !== "app" ||
+        this.touchLongPressTriggered ||
+        this.touchSwipeMouseSuppressed
+      ) {
+        return false;
+      }
+      if (this.touchLongPressTimer) {
+        clearTimeout(this.touchLongPressTimer);
+        this.touchLongPressTimer = 0;
+      }
+      const downEvent = createSyntheticPointerEvent(
+        event,
+        {
+          clientX: this.touchPrimaryStartClientX | 0,
+          clientY: this.touchPrimaryStartClientY | 0
+        },
+        this.captureButtonMask || 0x01,
+        0
+      );
+      this.forwardMouseEvent(downEvent, this.captureButtonMask || 0x01, 0, false, 0, 0, this.getPointerInfo(downEvent).inside);
+      this.touchPrimaryMouseActive = true;
+      return true;
+    }
+
+    releaseTouchSecondaryMouse(event, touch) {
+      if (!this.touchSecondaryMouseActive || this.captureMode !== "app") {
+        return false;
+      }
+      if (this.touchLongPressReleaseTimer) {
+        clearTimeout(this.touchLongPressReleaseTimer);
+        this.touchLongPressReleaseTimer = 0;
+      }
+      const releaseEvent = createSyntheticPointerEvent(event, touch, 0, 2);
+      this.forwardMouseEvent(releaseEvent, 0, 0x02, false, 0, 0, this.getPointerInfo(releaseEvent).inside);
+      this.touchSecondaryMouseActive = false;
+      return true;
+    }
+
+    dispatchTouchPrimaryTap(event, touch) {
+      if (this.captureMode !== "app" || this.touchLongPressTriggered || this.touchSwipeMouseSuppressed) {
+        return false;
+      }
+      const mask = this.captureButtonMask || 0x01;
+      const moveEvent = createSyntheticPointerEvent(
+        event,
+        {
+          clientX: this.touchPrimaryStartClientX | 0,
+          clientY: this.touchPrimaryStartClientY | 0
+        },
+        0,
+        0
+      );
+      const downEvent = createSyntheticPointerEvent(
+        event,
+        {
+          clientX: this.touchPrimaryStartClientX | 0,
+          clientY: this.touchPrimaryStartClientY | 0
+        },
+        mask,
+        0
+      );
+      const upEvent = createSyntheticPointerEvent(event, touch, 0, 0);
+      this.forwardMouseEvent(moveEvent, 0, 0, true, 0, 0, this.getPointerInfo(moveEvent).inside);
+      this.forwardMouseEvent(downEvent, mask, 0, false, 0, 0, this.getPointerInfo(downEvent).inside);
+      setTimeout(() => {
+        this.forwardMouseEvent(upEvent, 0, mask, false, 0, 0, this.getPointerInfo(upEvent).inside);
+      }, TOUCH_LONG_PRESS_RELEASE_DELAY_MS);
+      this.touchPrimaryMouseActive = false;
+      return true;
     }
 
     buildVirtualKeyPayload(code) {
@@ -1688,19 +1899,26 @@
     }
 
     releaseTouchSwipeMouse(event, touch) {
-      if (this.touchSwipeMouseSuppressed || this.captureMode !== "app" || !this.captureButtonMask) {
+      if (this.touchSwipeMouseSuppressed || this.captureMode !== "app") {
         return;
       }
-      const releaseEvent = createSyntheticPointerEvent(event, touch, 0, 0);
-      this.forwardMouseEvent(
-        releaseEvent,
-        0,
-        this.captureButtonMask | 0,
-        false,
-        0,
-        0,
-        this.getPointerInfo(releaseEvent).inside
-      );
+      if (this.touchLongPressTimer) {
+        clearTimeout(this.touchLongPressTimer);
+        this.touchLongPressTimer = 0;
+      }
+      if (this.touchPrimaryMouseActive && this.captureButtonMask) {
+        const releaseEvent = createSyntheticPointerEvent(event, touch, 0, 0);
+        this.forwardMouseEvent(
+          releaseEvent,
+          0,
+          this.captureButtonMask | 0,
+          false,
+          0,
+          0,
+          this.getPointerInfo(releaseEvent).inside
+        );
+      }
+      this.touchPrimaryMouseActive = false;
       this.touchSwipeMouseSuppressed = true;
     }
 
@@ -1743,7 +1961,21 @@
       }
       this.activeTouchId = touch.identifier | 0;
       this.beginTouchSwipeTracking(event, touch);
-      this.handleMouseDown(createSyntheticPointerEvent(event, touch, 0x01, 0));
+      const pointerEvent = createSyntheticPointerEvent(event, touch, 0x01, 0);
+      const pointer = this.getPointerInfo(pointerEvent);
+      const resizeHit = this.hitTestResize(pointer.x, pointer.y);
+      const chromeHit = this.hitTestChrome(pointer.x, pointer.y);
+      if (!this.rolledUp && !this.stopped && !resizeHit && !chromeHit && pointer.inside) {
+        this.manager.setActiveProcess(this);
+        this.focusShell();
+        event.preventDefault();
+        this.beginCapture("app", pointerEvent, { mask: 0x01 });
+        this.touchLongPressEligible = true;
+        this.touchDeferredCapture = true;
+        this.scheduleTouchLongPress(event);
+      } else {
+        this.handleMouseDown(pointerEvent);
+      }
       if (!this.captureMode) {
         this.activeTouchId = null;
         this.resetTouchSwipeTracking();
@@ -1946,10 +2178,37 @@
         return;
       }
       this.updateTouchSwipeTracking(touch);
+      if (!this.touchDeferredCapture) {
+        if (this.tryActivateHeldTouchSwipe(event, touch) || this.touchSwipeMouseSuppressed) {
+          event.preventDefault();
+          return;
+        }
+        this.handleDocumentMouseMove(createSyntheticPointerEvent(
+          event,
+          touch,
+          this.captureButtonMask || 0x01,
+          0
+        ));
+        event.preventDefault();
+        return;
+      }
+      if (this.hasTouchLongPressMoved() && this.touchLongPressTimer) {
+        clearTimeout(this.touchLongPressTimer);
+        this.touchLongPressTimer = 0;
+      }
+      if (this.touchLongPressTriggered) {
+        event.preventDefault();
+        return;
+      }
       if (this.tryActivateHeldTouchSwipe(event, touch) || this.touchSwipeMouseSuppressed) {
         event.preventDefault();
         return;
       }
+      if (!this.touchPrimaryMouseActive && !this.hasTouchLongPressMoved()) {
+        event.preventDefault();
+        return;
+      }
+      this.ensureTouchPrimaryMouseDown(event);
       this.handleDocumentMouseMove(createSyntheticPointerEvent(
         event,
         touch,
@@ -1968,6 +2227,34 @@
         return;
       }
       this.updateTouchSwipeTracking(touch);
+      if (!this.touchDeferredCapture) {
+        if (this.touchSwipeHeldKey) {
+          this.releaseVirtualKey(this.touchSwipeHeldKey);
+          this.touchSwipeHeldKey = "";
+          if (this.touchSwipeMouseSuppressed) {
+            this.endCapture();
+            event.preventDefault();
+            return;
+          }
+        }
+        const direction = this.resolveTouchSwipeDirection();
+        this.handleDocumentMouseUp(createSyntheticPointerEvent(event, touch, 0, 0));
+        if (direction) {
+          this.tapVirtualKey(direction);
+        }
+        event.preventDefault();
+        return;
+      }
+      if (this.touchLongPressTimer) {
+        clearTimeout(this.touchLongPressTimer);
+        this.touchLongPressTimer = 0;
+      }
+      if (this.touchLongPressTriggered) {
+        this.releaseTouchSecondaryMouse(event, touch);
+        this.endCapture();
+        event.preventDefault();
+        return;
+      }
       if (this.touchSwipeHeldKey) {
         this.releaseVirtualKey(this.touchSwipeHeldKey);
         this.touchSwipeHeldKey = "";
@@ -1978,7 +2265,14 @@
         }
       }
       const direction = this.resolveTouchSwipeDirection();
-      this.handleDocumentMouseUp(createSyntheticPointerEvent(event, touch, 0, 0));
+      if (this.touchPrimaryMouseActive) {
+        this.handleDocumentMouseUp(createSyntheticPointerEvent(event, touch, 0, 0));
+      } else if (!direction && !this.touchSwipeMouseSuppressed) {
+        this.dispatchTouchPrimaryTap(event, touch);
+        this.endCapture();
+      } else {
+        this.endCapture();
+      }
       if (direction) {
         this.tapVirtualKey(direction);
       }
@@ -1989,9 +2283,18 @@
       if (this.activeTouchId === null) {
         return;
       }
+      if (this.touchLongPressTimer) {
+        clearTimeout(this.touchLongPressTimer);
+        this.touchLongPressTimer = 0;
+      }
+      if (this.touchSecondaryMouseActive) {
+        this.releaseTouchSecondaryMouse(event, {
+          clientX: this.touchSwipeLastX | 0,
+          clientY: this.touchSwipeLastY | 0
+        });
+      }
       this.releaseVirtualKey(this.touchSwipeHeldKey);
       this.touchSwipeHeldKey = "";
-      this.resetTouchSwipeTracking();
       this.cancelCapture();
       event.preventDefault();
     }
@@ -2276,6 +2579,13 @@
       this.desktopSwipeHeldKey = "";
       this.desktopSwipeMouseSuppressed = false;
       this.desktopSwipeTarget = null;
+      this.desktopPrimaryMouseActive = false;
+      this.desktopSecondaryMouseActive = false;
+      this.desktopLongPressTimer = 0;
+      this.desktopLongPressReleaseTimer = 0;
+      this.desktopLongPressTriggered = false;
+      this.desktopTouchStartClientX = 0;
+      this.desktopTouchStartClientY = 0;
       this.boundDesktopTouchMove = (event) => this.handleDocumentDesktopTouchMove(event);
       this.boundDesktopTouchEnd = (event) => this.handleDocumentDesktopTouchEnd(event);
       this.boundDesktopTouchCancel = (event) => this.handleDocumentDesktopTouchCancel(event);
@@ -2312,6 +2622,14 @@
       this.desktopSwipeHeldKey = "";
       this.desktopSwipeMouseSuppressed = false;
       this.desktopSwipeTarget = null;
+      this.desktopPrimaryMouseActive = false;
+      this.desktopLongPressTriggered = false;
+      if (this.desktopLongPressTimer) {
+        clearTimeout(this.desktopLongPressTimer);
+        this.desktopLongPressTimer = 0;
+      }
+      this.desktopTouchStartClientX = 0;
+      this.desktopTouchStartClientY = 0;
       this.sharedNamedMemoryStore = new Map();
       resetDebugBoardState(this.debugBoardState);
       this.namedMemoryBootstrapActive = false;
@@ -3248,12 +3566,25 @@
     }
 
     resetDesktopSwipeTracking() {
+      if (this.desktopLongPressTimer) {
+        clearTimeout(this.desktopLongPressTimer);
+        this.desktopLongPressTimer = 0;
+      }
+      if (this.desktopLongPressReleaseTimer) {
+        clearTimeout(this.desktopLongPressReleaseTimer);
+        this.desktopLongPressReleaseTimer = 0;
+      }
       this.desktopSwipeStartX = 0;
       this.desktopSwipeStartY = 0;
       this.desktopSwipeLastX = 0;
       this.desktopSwipeLastY = 0;
       this.desktopSwipeStartMs = 0;
       this.desktopSwipeEligible = false;
+      this.desktopPrimaryMouseActive = false;
+      this.desktopSecondaryMouseActive = false;
+      this.desktopLongPressTriggered = false;
+      this.desktopTouchStartClientX = 0;
+      this.desktopTouchStartClientY = 0;
     }
 
     beginDesktopSwipeTracking(touch) {
@@ -3269,6 +3600,11 @@
       this.desktopSwipeHeldKey = "";
       this.desktopSwipeMouseSuppressed = false;
       this.desktopSwipeTarget = null;
+      this.desktopPrimaryMouseActive = false;
+      this.desktopSecondaryMouseActive = false;
+      this.desktopLongPressTriggered = false;
+      this.desktopTouchStartClientX = touch.clientX | 0;
+      this.desktopTouchStartClientY = touch.clientY | 0;
       this.desktopSwipeEligible = true;
     }
 
@@ -3293,6 +3629,154 @@
         Date.now() - (this.desktopSwipeStartMs || 0),
         !!allowLongHold
       );
+    }
+
+    hasDesktopLongPressMoved() {
+      return didTouchMoveBeyondTolerance(
+        this.desktopTouchStartClientX | 0,
+        this.desktopTouchStartClientY | 0,
+        this.desktopSwipeLastX | 0,
+        this.desktopSwipeLastY | 0,
+        TOUCH_LONG_PRESS_MOVE_TOLERANCE
+      );
+    }
+
+    scheduleDesktopLongPress(event) {
+      if (this.desktopLongPressTimer) {
+        clearTimeout(this.desktopLongPressTimer);
+        this.desktopLongPressTimer = 0;
+      }
+      if (this.desktopTouchId === null) {
+        return;
+      }
+      const sourceEvent = event || null;
+      const targetTouchId = this.desktopTouchId | 0;
+      this.desktopLongPressTimer = setTimeout(() => {
+        this.desktopLongPressTimer = 0;
+        if (
+          this.desktopTouchId === null ||
+          (this.desktopTouchId | 0) !== targetTouchId ||
+          this.desktopPrimaryMouseActive ||
+          this.desktopSecondaryMouseActive ||
+          this.desktopLongPressTriggered ||
+          this.desktopSwipeHeldKey ||
+          this.desktopSwipeMouseSuppressed ||
+          this.hasDesktopLongPressMoved()
+        ) {
+          return;
+        }
+        const touchPoint = {
+          clientX: this.desktopSwipeLastX | 0,
+          clientY: this.desktopSwipeLastY | 0
+        };
+        const moveEvent = createSyntheticPointerEvent(sourceEvent, touchPoint, 0, 0);
+        const downEvent = createSyntheticPointerEvent(sourceEvent, touchPoint, 0x02, 2);
+        this.setActiveProcess(null, { focusShell: false });
+        this.forwardDesktopMouseEvent(moveEvent, 0, 0, true, 0, 0);
+        this.forwardDesktopMouseEvent(downEvent, 0x02, 0, false, 0, 0);
+        this.desktopSecondaryMouseActive = true;
+        this.desktopLongPressTriggered = true;
+        this.desktopSwipeMouseSuppressed = true;
+        this.scheduleDesktopLongPressRelease(sourceEvent, touchPoint);
+      }, TOUCH_LONG_PRESS_DELAY_MS);
+    }
+
+    scheduleDesktopLongPressRelease(event, touch) {
+      if (this.desktopLongPressReleaseTimer) {
+        clearTimeout(this.desktopLongPressReleaseTimer);
+        this.desktopLongPressReleaseTimer = 0;
+      }
+      if (!this.desktopSecondaryMouseActive || this.desktopTouchId === null) {
+        return;
+      }
+      const sourceEvent = event || null;
+      const point = touch
+        ? { clientX: touch.clientX | 0, clientY: touch.clientY | 0 }
+        : { clientX: this.desktopSwipeLastX | 0, clientY: this.desktopSwipeLastY | 0 };
+      const targetTouchId = this.desktopTouchId | 0;
+      this.desktopLongPressReleaseTimer = setTimeout(() => {
+        this.desktopLongPressReleaseTimer = 0;
+        if (
+          !this.desktopSecondaryMouseActive ||
+          this.desktopTouchId === null ||
+          (this.desktopTouchId | 0) !== targetTouchId
+        ) {
+          return;
+        }
+        this.releaseDesktopSecondaryMouse(sourceEvent, point);
+      }, TOUCH_LONG_PRESS_RELEASE_DELAY_MS);
+    }
+
+    ensureDesktopPrimaryMouseDown(event) {
+      if (
+        this.desktopPrimaryMouseActive ||
+        this.desktopSecondaryMouseActive ||
+        this.desktopLongPressTriggered ||
+        this.desktopSwipeMouseSuppressed
+      ) {
+        return false;
+      }
+      if (this.desktopLongPressTimer) {
+        clearTimeout(this.desktopLongPressTimer);
+        this.desktopLongPressTimer = 0;
+      }
+      const downEvent = createSyntheticPointerEvent(
+        event,
+        {
+          clientX: this.desktopTouchStartClientX | 0,
+          clientY: this.desktopTouchStartClientY | 0
+        },
+        0x01,
+        0
+      );
+      this.handleDesktopMouseDown(downEvent);
+      this.desktopPrimaryMouseActive = true;
+      return true;
+    }
+
+    releaseDesktopSecondaryMouse(event, touch) {
+      if (!this.desktopSecondaryMouseActive) {
+        return false;
+      }
+      if (this.desktopLongPressReleaseTimer) {
+        clearTimeout(this.desktopLongPressReleaseTimer);
+        this.desktopLongPressReleaseTimer = 0;
+      }
+      this.forwardDesktopMouseEvent(createSyntheticPointerEvent(event, touch, 0, 2), 0, 0x02, false, 0, 0);
+      this.desktopSecondaryMouseActive = false;
+      return true;
+    }
+
+    dispatchDesktopPrimaryTap(event, touch) {
+      if (this.desktopLongPressTriggered || this.desktopSwipeMouseSuppressed) {
+        return false;
+      }
+      const moveEvent = createSyntheticPointerEvent(
+        event,
+        {
+          clientX: this.desktopTouchStartClientX | 0,
+          clientY: this.desktopTouchStartClientY | 0
+        },
+        0,
+        0
+      );
+      const downEvent = createSyntheticPointerEvent(
+        event,
+        {
+          clientX: this.desktopTouchStartClientX | 0,
+          clientY: this.desktopTouchStartClientY | 0
+        },
+        0x01,
+        0
+      );
+      const upEvent = createSyntheticPointerEvent(event, touch, 0, 0);
+      this.handleDesktopMouseMove(moveEvent);
+      this.handleDesktopMouseDown(downEvent);
+      setTimeout(() => {
+        this.handleDesktopMouseUp(upEvent);
+      }, TOUCH_LONG_PRESS_RELEASE_DELAY_MS);
+      this.desktopPrimaryMouseActive = false;
+      return true;
     }
 
     getSwipeTargetProcess() {
@@ -3328,14 +3812,21 @@
       if (this.desktopSwipeMouseSuppressed) {
         return;
       }
-      this.forwardDesktopMouseEvent(
-        createSyntheticPointerEvent(event, touch, 0, 0),
-        0,
-        0x01,
-        false,
-        0,
-        0
-      );
+      if (this.desktopLongPressTimer) {
+        clearTimeout(this.desktopLongPressTimer);
+        this.desktopLongPressTimer = 0;
+      }
+      if (this.desktopPrimaryMouseActive) {
+        this.forwardDesktopMouseEvent(
+          createSyntheticPointerEvent(event, touch, 0, 0),
+          0,
+          0x01,
+          false,
+          0,
+          0
+        );
+      }
+      this.desktopPrimaryMouseActive = false;
       this.desktopSwipeMouseSuppressed = true;
     }
 
@@ -3422,7 +3913,23 @@
       if (this.desktopTouchId === null) {
         return;
       }
-      if (!this.desktopSwipeMouseSuppressed) {
+      if (this.desktopSecondaryMouseActive) {
+        this.forwardDesktopMouseEvent(
+          createSyntheticPointerEvent(
+            null,
+            { clientX: this.desktopTouchClientX, clientY: this.desktopTouchClientY },
+            0,
+            2
+          ),
+          0,
+          0x02,
+          false,
+          0,
+          0
+        );
+        this.desktopSecondaryMouseActive = false;
+      }
+      if (this.desktopPrimaryMouseActive && !this.desktopSwipeMouseSuppressed) {
         this.forwardDesktopMouseEvent(
           createSyntheticPointerEvent(
             null,
@@ -3450,7 +3957,8 @@
         return;
       }
       this.beginDesktopTouchCapture(touch);
-      this.handleDesktopMouseDown(createSyntheticPointerEvent(event, touch, 0x01, 0));
+      event.preventDefault();
+      this.scheduleDesktopLongPress(event);
     }
 
     handleDocumentDesktopTouchMove(event) {
@@ -3462,10 +3970,23 @@
         return;
       }
       this.recordDesktopTouch(touch);
+      if (this.hasDesktopLongPressMoved() && this.desktopLongPressTimer) {
+        clearTimeout(this.desktopLongPressTimer);
+        this.desktopLongPressTimer = 0;
+      }
+      if (this.desktopLongPressTriggered) {
+        event.preventDefault();
+        return;
+      }
       if (this.tryActivateHeldDesktopSwipe(event, touch) || this.desktopSwipeMouseSuppressed) {
         event.preventDefault();
         return;
       }
+      if (!this.desktopPrimaryMouseActive && !this.hasDesktopLongPressMoved()) {
+        event.preventDefault();
+        return;
+      }
+      this.ensureDesktopPrimaryMouseDown(event);
       this.handleDesktopMouseMove(createSyntheticPointerEvent(event, touch, 0x01, 0));
       event.preventDefault();
     }
@@ -3479,6 +4000,16 @@
         return;
       }
       this.recordDesktopTouch(touch);
+      if (this.desktopLongPressTimer) {
+        clearTimeout(this.desktopLongPressTimer);
+        this.desktopLongPressTimer = 0;
+      }
+      if (this.desktopLongPressTriggered) {
+        this.releaseDesktopSecondaryMouse(event, touch);
+        this.endDesktopTouchCapture();
+        event.preventDefault();
+        return;
+      }
       if (this.desktopSwipeHeldKey) {
         this.releaseHeldDesktopSwipeKey();
         if (this.desktopSwipeMouseSuppressed) {
@@ -3488,7 +4019,11 @@
         }
       }
       const direction = this.resolveDesktopSwipeDirection();
-      this.handleDesktopMouseUp(createSyntheticPointerEvent(event, touch, 0, 0));
+      if (this.desktopPrimaryMouseActive) {
+        this.handleDesktopMouseUp(createSyntheticPointerEvent(event, touch, 0, 0));
+      } else if (!direction && !this.desktopSwipeMouseSuppressed) {
+        this.dispatchDesktopPrimaryTap(event, touch);
+      }
       if (direction) {
         this.tapSwipeKey(direction);
       }
@@ -3500,8 +4035,17 @@
       if (this.desktopTouchId === null) {
         return;
       }
+      if (this.desktopLongPressTimer) {
+        clearTimeout(this.desktopLongPressTimer);
+        this.desktopLongPressTimer = 0;
+      }
+      if (this.desktopSecondaryMouseActive) {
+        this.releaseDesktopSecondaryMouse(event, {
+          clientX: this.desktopSwipeLastX | 0,
+          clientY: this.desktopSwipeLastY | 0
+        });
+      }
       this.releaseHeldDesktopSwipeKey();
-      this.resetDesktopSwipeTracking();
       this.cancelDesktopTouchCapture();
       event.preventDefault();
     }

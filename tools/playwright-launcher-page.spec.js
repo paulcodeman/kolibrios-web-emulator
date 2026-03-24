@@ -405,6 +405,35 @@ test("bundled launcher page boots desktop", async ({ page }, testInfo) => {
 
   await page.evaluate(() => {
     const app = window.__app;
+    const workspace = document.getElementById("workspace");
+    if (!app || !workspace) {
+      throw new Error("Missing launcher workspace.");
+    }
+    app.handleLauncherOverlayPointerDown({
+      isPrimary: true,
+      pointerType: "touch",
+      button: 0,
+      pointerId: 77,
+      clientX: 240,
+      clientY: 180,
+      target: workspace
+    });
+  });
+  await page.waitForTimeout(220);
+  const touchOverlayState = await page.evaluate(() => {
+    const toolbar = document.querySelector(".launcher-toolbar");
+    const visible = !!toolbar && Number(getComputedStyle(toolbar).opacity) > 0.9;
+    const app = window.__app;
+    return {
+      visible,
+      pointerActive: !!(app && app.launcherOverlayPointerActive)
+    };
+  });
+  expect(touchOverlayState.visible).toBe(false);
+  expect(touchOverlayState.pointerActive).toBe(false);
+
+  await page.evaluate(() => {
+    const app = window.__app;
     app.launcherOverlayHoldMs = 120;
     app.launcherOverlayVisibleMs = 3000;
   });

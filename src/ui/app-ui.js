@@ -854,7 +854,11 @@
       if (!this.isLauncherPage() || !this.workspaceEl || !event || event.isPrimary === false) {
         return;
       }
-      if ((event.pointerType || "") === "mouse" && ((event.button | 0) !== 0)) {
+      const pointerType = String(event.pointerType || "");
+      if (pointerType !== "mouse") {
+        return;
+      }
+      if ((event.button | 0) !== 0) {
         return;
       }
       const target = event.target instanceof Element ? event.target : null;
