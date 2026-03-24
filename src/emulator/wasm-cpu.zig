@@ -26,6 +26,8 @@ var bit_test_last_result: u32 = 0;
 var bit_test_last_flags: u32 = 0;
 var imul_last_result: u32 = 0;
 var imul_last_flags: u32 = 0;
+var alu_last_result: u32 = 0;
+var alu_last_flags: u32 = 0;
 var x87_compare_last_code: u32 = 0;
 var shift_packed64_last_lo: u32 = 0;
 var shift_packed64_last_hi: u32 = 0;
@@ -390,6 +392,73 @@ pub export fn update_sub_flags(flags: u32, op1: u32, op2: u32, result: u32, widt
         next |= FLAG_PF;
     }
     return next;
+}
+
+pub export fn alu_binary_width_exec(op: u32, left: u32, right: u32, width_bits: u32, flags: u32) void {
+    const width: u32 = switch (width_bits) {
+        8 => 8,
+        16 => 16,
+        else => 32,
+    };
+    const mask = widthMask(width);
+    const a = widthValueUnsigned(left, width);
+    const b = widthValueUnsigned(right, width);
+    var result: u32 = a;
+    var next_flags: u32 = flags;
+    switch (op & 15) {
+        0 => {
+            result = if (width == 32) a +% b else ((a +% b) & mask);
+            next_flags = update_add_flags(next_flags, a, b, result, width);
+        },
+        1 => {
+            result = if (width == 32) (a | b) else ((a | b) & mask);
+            next_flags = update_logic_flags_width(next_flags, result, width);
+        },
+        2 => {
+            const carry: u32 = if ((next_flags & FLAG_CF) != 0) 1 else 0;
+            result = if (width == 32) a +% b +% carry else ((a +% b +% carry) & mask);
+            next_flags = update_adc_flags(next_flags, a, b, carry, result, width);
+        },
+        3 => {
+            const carry: u32 = if ((next_flags & FLAG_CF) != 0) 1 else 0;
+            result = if (width == 32) a -% b -% carry else ((a -% b -% carry) & mask);
+            next_flags = update_sbb_flags(next_flags, a, b, carry, result, width);
+        },
+        4 => {
+            result = if (width == 32) (a & b) else ((a & b) & mask);
+            next_flags = update_logic_flags_width(next_flags, result, width);
+        },
+        5 => {
+            result = if (width == 32) a -% b else ((a -% b) & mask);
+            next_flags = update_sub_flags(next_flags, a, b, result, width);
+        },
+        6 => {
+            result = if (width == 32) (a ^ b) else ((a ^ b) & mask);
+            next_flags = update_logic_flags_width(next_flags, result, width);
+        },
+        7 => {
+            result = if (width == 32) a -% b else ((a -% b) & mask);
+            next_flags = update_sub_flags(next_flags, a, b, result, width);
+        },
+        8 => {
+            result = if (width == 32) (a & b) else ((a & b) & mask);
+            next_flags = update_logic_flags_width(next_flags, result, width);
+        },
+        else => {
+            result = 0;
+            next_flags = flags;
+        },
+    }
+    alu_last_result = widthValueUnsigned(result, width);
+    alu_last_flags = next_flags;
+}
+
+pub export fn get_alu_last_result() u32 {
+    return alu_last_result;
+}
+
+pub export fn get_alu_last_flags() u32 {
+    return alu_last_flags;
 }
 
 pub export fn eval_jcc_condition(cc: u32, flags: u32) u32 {

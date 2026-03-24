@@ -45,6 +45,7 @@
       updateAdcFlags,
       updateSubFlags,
       updateSbbFlags,
+      aluBinaryWidth,
       shiftRotate,
       doubleShift,
       psubusb32,
@@ -1576,60 +1577,22 @@
           }
           op1 = this.readMem8(ea);
         }
-        let result = op1;
-        let flags = this.readReg(REG.EFLAGS);
-        switch (regField) {
-          case 0: // add
-            result = (op1 + imm) & 0xff;
-            flags = updateAddFlags(flags, op1, imm, result, 8);
-            break;
-          case 1: // or
-            result = (op1 | imm) & 0xff;
-            flags = updateLogicFlagsWidth(flags, result, 8);
-            break;
-          case 2: { // adc
-            const cf = (flags & FLAG_CF) ? 1 : 0;
-            result = (op1 + imm + cf) & 0xff;
-            flags = updateAdcFlags(flags, op1, imm, cf, result, 8);
-            break;
-          }
-          case 3: { // sbb
-            const cf = (flags & FLAG_CF) ? 1 : 0;
-            result = (op1 - imm - cf) & 0xff;
-            flags = updateSbbFlags(flags, op1, imm, cf, result, 8);
-            break;
-          }
-          case 4: // and
-            result = (op1 & imm) & 0xff;
-            flags = updateLogicFlagsWidth(flags, result, 8);
-            break;
-          case 5: // sub
-            result = (op1 - imm) & 0xff;
-            flags = updateSubFlags(flags, op1, imm, result, 8);
-            break;
-          case 6: // xor
-            result = (op1 ^ imm) & 0xff;
-            flags = updateLogicFlagsWidth(flags, result, 8);
-            break;
-          case 7: // cmp
-            result = (op1 - imm) & 0xff;
-            flags = updateSubFlags(flags, op1, imm, result, 8);
-            break;
-          default:
-            return false;
+        if (regField > 7) {
+          return false;
         }
+        const alu = aluBinaryWidth(regField, op1, imm, 8, this.readReg(REG.EFLAGS));
         if (regField !== 7) {
           if (modrmInfo.mod === 3) {
-            this.writeReg8ByIndex(modrmInfo.rm, result);
+            this.writeReg8ByIndex(modrmInfo.rm, alu.result & 0xff);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea === null) {
               return false;
             }
-            this.writeMem8(ea, result);
+            this.writeMem8(ea, alu.result & 0xff);
           }
         }
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size + 1) >>> 0);
         return true;
       }
@@ -1658,60 +1621,22 @@
           }
           op1 = this.readMem16(ea);
         }
-        let result = op1;
-        let flags = this.readReg(REG.EFLAGS);
-        switch (regField) {
-          case 0: // add
-            result = (op1 + imm) & 0xffff;
-            flags = updateAddFlags(flags, op1, imm, result, 16);
-            break;
-          case 1: // or
-            result = (op1 | imm) & 0xffff;
-            flags = updateLogicFlagsWidth(flags, result, 16);
-            break;
-          case 2: { // adc
-            const cf = (flags & FLAG_CF) ? 1 : 0;
-            result = (op1 + imm + cf) & 0xffff;
-            flags = updateAdcFlags(flags, op1, imm, cf, result, 16);
-            break;
-          }
-          case 3: { // sbb
-            const cf = (flags & FLAG_CF) ? 1 : 0;
-            result = (op1 - imm - cf) & 0xffff;
-            flags = updateSbbFlags(flags, op1, imm, cf, result, 16);
-            break;
-          }
-          case 4: // and
-            result = (op1 & imm) & 0xffff;
-            flags = updateLogicFlagsWidth(flags, result, 16);
-            break;
-          case 5: // sub
-            result = (op1 - imm) & 0xffff;
-            flags = updateSubFlags(flags, op1, imm, result, 16);
-            break;
-          case 6: // xor
-            result = (op1 ^ imm) & 0xffff;
-            flags = updateLogicFlagsWidth(flags, result, 16);
-            break;
-          case 7: // cmp
-            result = (op1 - imm) & 0xffff;
-            flags = updateSubFlags(flags, op1, imm, result, 16);
-            break;
-          default:
-            return false;
+        if (regField > 7) {
+          return false;
         }
+        const alu = aluBinaryWidth(regField, op1, imm, 16, this.readReg(REG.EFLAGS));
         if (regField !== 7) {
           if (modrmInfo.mod === 3) {
-            this.writeReg16ByIndex(modrmInfo.rm, result);
+            this.writeReg16ByIndex(modrmInfo.rm, alu.result & 0xffff);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea === null) {
               return false;
             }
-            this.writeMem16(ea, result);
+            this.writeMem16(ea, alu.result & 0xffff);
           }
         }
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         const immSize = op2 === 0x81 ? 2 : 1;
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size + immSize) >>> 0);
         return true;
@@ -2211,53 +2136,18 @@
       ) {
         const imm16 = this.readMem16((addr + 2) >>> 0) & 0xffff;
         const ax = this.readReg(REG.EAX) & 0xffff;
-        let flags = this.readReg(REG.EFLAGS);
-        let result = ax;
-        switch (op2) {
-          case 0x05: // add ax, imm16
-            result = (ax + imm16) & 0xffff;
-            flags = updateAddFlags(flags, ax, imm16, result, 16);
-            this.writeReg(REG.EAX, (this.readReg(REG.EAX) & 0xffff0000) | result);
-            break;
-          case 0x0d: // or ax, imm16
-            result = (ax | imm16) & 0xffff;
-            flags = updateLogicFlagsWidth(flags, result, 16);
-            this.writeReg(REG.EAX, (this.readReg(REG.EAX) & 0xffff0000) | result);
-            break;
-          case 0x15: { // adc ax, imm16
-            const cf = (flags & FLAG_CF) !== 0 ? 1 : 0;
-            result = (ax + imm16 + cf) & 0xffff;
-            flags = updateAdcFlags(flags, ax, imm16, cf, result, 16);
-            this.writeReg(REG.EAX, (this.readReg(REG.EAX) & 0xffff0000) | result);
-            break;
-          }
-          case 0x25: // and ax, imm16
-            result = (ax & imm16) & 0xffff;
-            flags = updateLogicFlagsWidth(flags, result, 16);
-            this.writeReg(REG.EAX, (this.readReg(REG.EAX) & 0xffff0000) | result);
-            break;
-          case 0x2d: // sub ax, imm16
-            result = (ax - imm16) & 0xffff;
-            flags = updateSubFlags(flags, ax, imm16, result, 16);
-            this.writeReg(REG.EAX, (this.readReg(REG.EAX) & 0xffff0000) | result);
-            break;
-          case 0x35: // xor ax, imm16
-            result = (ax ^ imm16) & 0xffff;
-            flags = updateLogicFlagsWidth(flags, result, 16);
-            this.writeReg(REG.EAX, (this.readReg(REG.EAX) & 0xffff0000) | result);
-            break;
-          case 0x3d: // cmp ax, imm16
-            result = (ax - imm16) & 0xffff;
-            flags = updateSubFlags(flags, ax, imm16, result, 16);
-            break;
-          case 0xa9: // test ax, imm16
-            result = (ax & imm16) & 0xffff;
-            flags = updateLogicFlagsWidth(flags, result, 16);
-            break;
-          default:
-            return false;
+        const op = op2 === 0x05 ? 0
+          : (op2 === 0x0d ? 1
+            : (op2 === 0x15 ? 2
+              : (op2 === 0x25 ? 4
+                : (op2 === 0x2d ? 5
+                  : (op2 === 0x35 ? 6
+                    : (op2 === 0x3d ? 7 : 8))))));
+        const alu = aluBinaryWidth(op, ax, imm16, 16, this.readReg(REG.EFLAGS));
+        if (op2 !== 0x3d && op2 !== 0xa9) {
+          this.writeReg(REG.EAX, (this.readReg(REG.EAX) & 0xffff0000) | (alu.result & 0xffff));
         }
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         this.writeReg(REG.EIP, (addr + 4) >>> 0);
         return true;
       }
@@ -2298,101 +2188,33 @@
           }
         } else if (op2 === 0x8b) { // mov r16, r/m16
           this.writeReg16ByIndex(modrmInfo.reg, rmVal);
-        } else if (op2 === 0x01) { // add r/m16, r16
-          const result = (rmVal + regVal) & 0xffff;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateAddFlags(flags, rmVal, regVal, result, 16);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
+        } else if (op2 === 0x01 || op2 === 0x09 || op2 === 0x21 || op2 === 0x29) {
+          const op = op2 === 0x01 ? 0 : (op2 === 0x09 ? 1 : (op2 === 0x21 ? 4 : 5));
+          const alu = aluBinaryWidth(op, rmVal, regVal, 16, this.readReg(REG.EFLAGS));
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
           if (modrmInfo.mod === 3) {
-            this.writeReg16ByIndex(modrmInfo.rm, result);
+            this.writeReg16ByIndex(modrmInfo.rm, alu.result & 0xffff);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea === null) {
               return false;
             }
-            this.writeMem16(ea, result);
+            this.writeMem16(ea, alu.result & 0xffff);
           }
-        } else if (op2 === 0x03) { // add r16, r/m16
-          const result = (regVal + rmVal) & 0xffff;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateAddFlags(flags, regVal, rmVal, result, 16);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
-          this.writeReg16ByIndex(modrmInfo.reg, result);
-        } else if (op2 === 0x09) { // or r/m16, r16
-          const result = (rmVal | regVal) & 0xffff;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateLogicFlagsWidth(flags, result, 16);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
-          if (modrmInfo.mod === 3) {
-            this.writeReg16ByIndex(modrmInfo.rm, result);
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            this.writeMem16(ea, result);
-          }
-        } else if (op2 === 0x0b) { // or r16, r/m16
-          const result = (regVal | rmVal) & 0xffff;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateLogicFlagsWidth(flags, result, 16);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
-          this.writeReg16ByIndex(modrmInfo.reg, result);
-        } else if (op2 === 0x21) { // and r/m16, r16
-          const result = (rmVal & regVal) & 0xffff;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateLogicFlagsWidth(flags, result, 16);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
-          if (modrmInfo.mod === 3) {
-            this.writeReg16ByIndex(modrmInfo.rm, result);
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            this.writeMem16(ea, result);
-          }
-        } else if (op2 === 0x23) { // and r16, r/m16
-          const result = (regVal & rmVal) & 0xffff;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateLogicFlagsWidth(flags, result, 16);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
-          this.writeReg16ByIndex(modrmInfo.reg, result);
-        } else if (op2 === 0x29) { // sub r/m16, r16
-          const result = (rmVal - regVal) & 0xffff;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateSubFlags(flags, rmVal, regVal, result, 16);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
-          if (modrmInfo.mod === 3) {
-            this.writeReg16ByIndex(modrmInfo.rm, result);
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            this.writeMem16(ea, result);
-          }
-        } else if (op2 === 0x2b) { // sub r16, r/m16
-          const result = (regVal - rmVal) & 0xffff;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateSubFlags(flags, regVal, rmVal, result, 16);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
-          this.writeReg16ByIndex(modrmInfo.reg, result);
-        } else if (op2 === 0x39) { // cmp r/m16, r16
-          const result = (rmVal - regVal) & 0xffff;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateSubFlags(flags, rmVal, regVal, result, 16);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
-        } else if (op2 === 0x3b) { // cmp r16, r/m16
-          const result = (regVal - rmVal) & 0xffff;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateSubFlags(flags, regVal, rmVal, result, 16);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
-        } else if (op2 === 0x85) { // test r/m16, r16
-          const result = (rmVal & regVal) & 0xffff;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateLogicFlagsWidth(flags, result, 16);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
+        } else if (op2 === 0x03 || op2 === 0x0b || op2 === 0x23 || op2 === 0x2b) {
+          const op = op2 === 0x03 ? 0 : (op2 === 0x0b ? 1 : (op2 === 0x23 ? 4 : 5));
+          const alu = aluBinaryWidth(op, regVal, rmVal, 16, this.readReg(REG.EFLAGS));
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
+          this.writeReg16ByIndex(modrmInfo.reg, alu.result & 0xffff);
+        } else if (op2 === 0x39) {
+          const alu = aluBinaryWidth(7, rmVal, regVal, 16, this.readReg(REG.EFLAGS));
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
+        } else if (op2 === 0x3b) {
+          const alu = aluBinaryWidth(7, regVal, rmVal, 16, this.readReg(REG.EFLAGS));
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
+        } else if (op2 === 0x85) {
+          const alu = aluBinaryWidth(8, rmVal, regVal, 16, this.readReg(REG.EFLAGS));
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         }
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size) >>> 0);
         return true;
@@ -2414,22 +2236,22 @@
           }
           rmVal = this.readMem16(ea) & 0xffff;
         }
-        const result = (regVal ^ rmVal) & 0xffff;
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateLogicFlagsWidth(flags, result, 16);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = op2 === 0x31
+          ? aluBinaryWidth(6, rmVal, regVal, 16, this.readReg(REG.EFLAGS))
+          : aluBinaryWidth(6, regVal, rmVal, 16, this.readReg(REG.EFLAGS));
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         if (op2 === 0x31) {
           if (modrmInfo.mod === 3) {
-            this.writeReg16ByIndex(modrmInfo.rm, result);
+            this.writeReg16ByIndex(modrmInfo.rm, alu.result & 0xffff);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea === null) {
               return false;
             }
-            this.writeMem16(ea, result);
+            this.writeMem16(ea, alu.result & 0xffff);
           }
         } else {
-          this.writeReg16ByIndex(modrmInfo.reg, result);
+          this.writeReg16ByIndex(modrmInfo.reg, alu.result & 0xffff);
         }
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size) >>> 0);
         return true;
@@ -2482,60 +2304,22 @@
           }
           op1 = this.readMem8(ea);
         }
-        let result = op1;
-        let flags = this.readReg(REG.EFLAGS);
-        switch (regField) {
-          case 0: // add
-            result = (op1 + imm) & 0xff;
-            flags = updateAddFlags(flags, op1, imm, result, 8);
-            break;
-          case 1: // or
-            result = (op1 | imm) & 0xff;
-            flags = updateLogicFlagsWidth(flags, result, 8);
-            break;
-          case 2: { // adc
-            const cf = (flags & FLAG_CF) !== 0 ? 1 : 0;
-            result = (op1 + imm + cf) & 0xff;
-            flags = updateAdcFlags(flags, op1, imm, cf, result, 8);
-            break;
-          }
-          case 3: { // sbb
-            const cf = (flags & FLAG_CF) !== 0 ? 1 : 0;
-            result = (op1 - imm - cf) & 0xff;
-            flags = updateSbbFlags(flags, op1, imm, cf, result, 8);
-            break;
-          }
-          case 4: // and
-            result = (op1 & imm) & 0xff;
-            flags = updateLogicFlagsWidth(flags, result, 8);
-            break;
-          case 5: // sub
-            result = (op1 - imm) & 0xff;
-            flags = updateSubFlags(flags, op1, imm, result, 8);
-            break;
-          case 6: // xor
-            result = (op1 ^ imm) & 0xff;
-            flags = updateLogicFlagsWidth(flags, result, 8);
-            break;
-          case 7: // cmp
-            result = (op1 - imm) & 0xff;
-            flags = updateSubFlags(flags, op1, imm, result, 8);
-            break;
-          default:
-            return false;
+        if (regField > 7) {
+          return false;
         }
+        const alu = aluBinaryWidth(regField, op1, imm, 8, this.readReg(REG.EFLAGS));
         if (regField !== 7) {
           if (modrmInfo.mod === 3) {
-            this.writeReg8ByIndex(modrmInfo.rm, result);
+            this.writeReg8ByIndex(modrmInfo.rm, alu.result & 0xff);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea === null) {
               return false;
             }
-            this.writeMem8(ea, result);
+            this.writeMem8(ea, alu.result & 0xff);
           }
         }
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size + 1) >>> 0);
         return true;
       }
@@ -2562,60 +2346,22 @@
           }
           op1 = this.readMem16(ea);
         }
-        let result = op1;
-        let flags = this.readReg(REG.EFLAGS);
-        switch (regField) {
-          case 0: // add
-            result = (op1 + imm) & 0xffff;
-            flags = updateAddFlags(flags, op1, imm, result, 16);
-            break;
-          case 1: // or
-            result = (op1 | imm) & 0xffff;
-            flags = updateLogicFlagsWidth(flags, result, 16);
-            break;
-          case 2: { // adc
-            const cf = (flags & FLAG_CF) !== 0 ? 1 : 0;
-            result = (op1 + imm + cf) & 0xffff;
-            flags = updateAdcFlags(flags, op1, imm, cf, result, 16);
-            break;
-          }
-          case 3: { // sbb
-            const cf = (flags & FLAG_CF) !== 0 ? 1 : 0;
-            result = (op1 - imm - cf) & 0xffff;
-            flags = updateSbbFlags(flags, op1, imm, cf, result, 16);
-            break;
-          }
-          case 4: // and
-            result = (op1 & imm) & 0xffff;
-            flags = updateLogicFlagsWidth(flags, result, 16);
-            break;
-          case 5: // sub
-            result = (op1 - imm) & 0xffff;
-            flags = updateSubFlags(flags, op1, imm, result, 16);
-            break;
-          case 6: // xor
-            result = (op1 ^ imm) & 0xffff;
-            flags = updateLogicFlagsWidth(flags, result, 16);
-            break;
-          case 7: // cmp
-            result = (op1 - imm) & 0xffff;
-            flags = updateSubFlags(flags, op1, imm, result, 16);
-            break;
-          default:
-            return false;
+        if (regField > 7) {
+          return false;
         }
+        const alu = aluBinaryWidth(regField, op1, imm, 16, this.readReg(REG.EFLAGS));
         if (regField !== 7) {
           if (modrmInfo.mod === 3) {
-            this.writeReg16ByIndex(modrmInfo.rm, result);
+            this.writeReg16ByIndex(modrmInfo.rm, alu.result & 0xffff);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea === null) {
               return false;
             }
-            this.writeMem16(ea, result);
+            this.writeMem16(ea, alu.result & 0xffff);
           }
         }
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         const len = op2 === 0x81 ? (2 + modrmInfo.size + 2) : (2 + modrmInfo.size + 1);
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -3359,23 +3105,22 @@
         return false;
       }
       const modrmInfo = this.getCachedModRmInfo(addr, bytes, 1);
-      let flags = this.readReg(REG.EFLAGS);
       if (opcode === 0x08) {
         const rhs = this.readReg8ByIndex(modrmInfo.reg);
         if (modrmInfo.mod === 3) {
           const lhs = this.readReg8ByIndex(modrmInfo.rm);
-          const result = (lhs | rhs) & 0xff;
-          this.writeReg8ByIndex(modrmInfo.rm, result);
-          flags = updateLogicFlagsWidth(flags, result, 8);
+          const alu = aluBinaryWidth(1, lhs, rhs, 8, this.readReg(REG.EFLAGS));
+          this.writeReg8ByIndex(modrmInfo.rm, alu.result & 0xff);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
           const lhs = this.readMem8(ea);
-          const result = (lhs | rhs) & 0xff;
-          this.writeMem8(ea, result);
-          flags = updateLogicFlagsWidth(flags, result, 8);
+          const alu = aluBinaryWidth(1, lhs, rhs, 8, this.readReg(REG.EFLAGS));
+          this.writeMem8(ea, alu.result & 0xff);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         }
       } else {
         let rhs = 0;
@@ -3389,11 +3134,10 @@
           rhs = this.readMem8(ea);
         }
         const lhs = this.readReg8ByIndex(modrmInfo.reg);
-        const result = (lhs | rhs) & 0xff;
-        this.writeReg8ByIndex(modrmInfo.reg, result);
-        flags = updateLogicFlagsWidth(flags, result, 8);
+        const alu = aluBinaryWidth(1, lhs, rhs, 8, this.readReg(REG.EFLAGS));
+        this.writeReg8ByIndex(modrmInfo.reg, alu.result & 0xff);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
-      this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
@@ -3407,22 +3151,18 @@
       const rhs = this.readReg32ByIndex(modrmInfo.reg);
       if (modrmInfo.mod === 3) {
         lhs = this.readReg32ByIndex(modrmInfo.rm);
-        const result = (lhs | rhs) >>> 0;
-        this.writeReg32ByIndex(modrmInfo.rm, result);
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateLogicFlagsWidth(flags, result, 32);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(1, lhs, rhs, 32, this.readReg(REG.EFLAGS));
+        this.writeReg32ByIndex(modrmInfo.rm, alu.result >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       } else {
         const ea = this.calcEffectiveAddress(modrmInfo);
         if (ea === null) {
           return false;
         }
         lhs = this.readMem32(ea);
-        const result = (lhs | rhs) >>> 0;
-        this.writeMem32(ea, result);
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateLogicFlagsWidth(flags, result, 32);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(1, lhs, rhs, 32, this.readReg(REG.EFLAGS));
+        this.writeMem32(ea, alu.result >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
@@ -3444,11 +3184,9 @@
         rhs = this.readMem32(ea);
       }
       const lhs = this.readReg32ByIndex(modrmInfo.reg);
-      const result = (lhs | rhs) >>> 0;
-      this.writeReg32ByIndex(modrmInfo.reg, result >>> 0);
-      let flags = this.readReg(REG.EFLAGS);
-      flags = updateLogicFlagsWidth(flags, result, 32);
-      this.writeReg(REG.EFLAGS, flags >>> 0);
+      const alu = aluBinaryWidth(1, lhs, rhs, 32, this.readReg(REG.EFLAGS));
+      this.writeReg32ByIndex(modrmInfo.reg, alu.result >>> 0);
+      this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
@@ -3462,22 +3200,18 @@
       const rhs = this.readReg32ByIndex(modrmInfo.reg);
       if (modrmInfo.mod === 3) {
         lhs = this.readReg32ByIndex(modrmInfo.rm);
-        const result = (lhs ^ rhs) >>> 0;
-        this.writeReg32ByIndex(modrmInfo.rm, result);
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateLogicFlagsWidth(flags, result, 32);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(6, lhs, rhs, 32, this.readReg(REG.EFLAGS));
+        this.writeReg32ByIndex(modrmInfo.rm, alu.result >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       } else {
         const ea = this.calcEffectiveAddress(modrmInfo);
         if (ea === null) {
           return false;
         }
         lhs = this.readMem32(ea);
-        const result = (lhs ^ rhs) >>> 0;
-        this.writeMem32(ea, result);
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateLogicFlagsWidth(flags, result, 32);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(6, lhs, rhs, 32, this.readReg(REG.EFLAGS));
+        this.writeMem32(ea, alu.result >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
@@ -3499,11 +3233,9 @@
         rhs = this.readMem32(ea);
       }
       const lhs = this.readReg32ByIndex(modrmInfo.reg);
-      const result = (lhs ^ rhs) >>> 0;
-      this.writeReg32ByIndex(modrmInfo.reg, result >>> 0);
-      let flags = this.readReg(REG.EFLAGS);
-      flags = updateLogicFlagsWidth(flags, result, 32);
-      this.writeReg(REG.EFLAGS, flags >>> 0);
+      const alu = aluBinaryWidth(6, lhs, rhs, 32, this.readReg(REG.EFLAGS));
+      this.writeReg32ByIndex(modrmInfo.reg, alu.result >>> 0);
+      this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
@@ -3892,25 +3624,23 @@
         }
         rmVal = this.readMem8(ea);
       }
-      const result = opcode === 0x30
-        ? ((rmVal ^ regVal) & 0xff)
-        : ((regVal ^ rmVal) & 0xff);
+      const alu = opcode === 0x30
+        ? aluBinaryWidth(6, rmVal, regVal, 8, this.readReg(REG.EFLAGS))
+        : aluBinaryWidth(6, regVal, rmVal, 8, this.readReg(REG.EFLAGS));
       if (opcode === 0x30) {
         if (modrmInfo.mod === 3) {
-          this.writeReg8ByIndex(modrmInfo.rm, result);
+          this.writeReg8ByIndex(modrmInfo.rm, alu.result & 0xff);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
-          this.writeMem8(ea, result);
+          this.writeMem8(ea, alu.result & 0xff);
         }
       } else {
-        this.writeReg8ByIndex(modrmInfo.reg, result);
+        this.writeReg8ByIndex(modrmInfo.reg, alu.result & 0xff);
       }
-      let flags = this.readReg(REG.EFLAGS);
-      flags = updateLogicFlagsWidth(flags, result, 8);
-      this.writeReg(REG.EFLAGS, flags >>> 0);
+      this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
@@ -3931,25 +3661,23 @@
         }
         rmVal = this.readMem8(ea);
       }
-      let result = 0;
       if (opcode === 0x20) { // and r/m8, r8
-        result = (rmVal & regVal) & 0xff;
+        const alu = aluBinaryWidth(4, rmVal, regVal, 8, this.readReg(REG.EFLAGS));
         if (modrmInfo.mod === 3) {
-          this.writeReg8ByIndex(modrmInfo.rm, result);
+          this.writeReg8ByIndex(modrmInfo.rm, alu.result & 0xff);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
-          this.writeMem8(ea, result);
+          this.writeMem8(ea, alu.result & 0xff);
         }
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       } else { // and r8, r/m8
-        result = (regVal & rmVal) & 0xff;
-        this.writeReg8ByIndex(modrmInfo.reg, result);
+        const alu = aluBinaryWidth(4, regVal, rmVal, 8, this.readReg(REG.EFLAGS));
+        this.writeReg8ByIndex(modrmInfo.reg, alu.result & 0xff);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
-      let flags = this.readReg(REG.EFLAGS);
-      flags = updateLogicFlagsWidth(flags, result, 8);
-      this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
@@ -3970,25 +3698,23 @@
         }
         lhs = this.readMem32(ea);
       }
-      let result = 0;
       if (opcode === 0x21) {
-        result = (lhs & rhs) >>> 0;
+        const alu = aluBinaryWidth(4, lhs, rhs, 32, this.readReg(REG.EFLAGS));
         if (modrmInfo.mod === 3) {
-          this.writeReg32ByIndex(modrmInfo.rm, result);
+          this.writeReg32ByIndex(modrmInfo.rm, alu.result >>> 0);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
-          this.writeMem32(ea, result);
+          this.writeMem32(ea, alu.result >>> 0);
         }
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       } else {
-        result = (rhs & lhs) >>> 0;
-        this.writeReg32ByIndex(modrmInfo.reg, result);
+        const alu = aluBinaryWidth(4, rhs, lhs, 32, this.readReg(REG.EFLAGS));
+        this.writeReg32ByIndex(modrmInfo.reg, alu.result >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
-      let flags = this.readReg(REG.EFLAGS);
-      flags = updateLogicFlagsWidth(flags, result, 32);
-      this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
@@ -4014,17 +3740,13 @@
         }
         rmVal = isByte ? this.readMem8(ea) : this.readMem32(ea);
       }
-
-      let result = 0;
       if (opcode === 0x28 || opcode === 0x29) {
-        // sub r/m, reg
-        result = (rmVal - regVal) | 0;
-        const flags = updateSubFlags(this.readReg(REG.EFLAGS), rmVal, regVal, result, isByte ? 8 : 32);
+        const alu = aluBinaryWidth(5, rmVal, regVal, isByte ? 8 : 32, this.readReg(REG.EFLAGS));
         if (modrmInfo.mod === 3) {
           if (isByte) {
-            this.writeReg8ByIndex(modrmInfo.rm, result & 0xff);
+            this.writeReg8ByIndex(modrmInfo.rm, alu.result & 0xff);
           } else {
-            this.writeReg32ByIndex(modrmInfo.rm, result >>> 0);
+            this.writeReg32ByIndex(modrmInfo.rm, alu.result >>> 0);
           }
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
@@ -4032,22 +3754,20 @@
             return false;
           }
           if (isByte) {
-            this.writeMem8(ea, result & 0xff);
+            this.writeMem8(ea, alu.result & 0xff);
           } else {
-            this.writeMem32(ea, result >>> 0);
+            this.writeMem32(ea, alu.result >>> 0);
           }
         }
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       } else {
-        // sub reg, r/m
-        result = (regVal - rmVal) | 0;
-        const flags = updateSubFlags(this.readReg(REG.EFLAGS), regVal, rmVal, result, isByte ? 8 : 32);
+        const alu = aluBinaryWidth(5, regVal, rmVal, isByte ? 8 : 32, this.readReg(REG.EFLAGS));
         if (isByte) {
-          this.writeReg8ByIndex(modrmInfo.reg, result & 0xff);
+          this.writeReg8ByIndex(modrmInfo.reg, alu.result & 0xff);
         } else {
-          this.writeReg32ByIndex(modrmInfo.reg, result >>> 0);
+          this.writeReg32ByIndex(modrmInfo.reg, alu.result >>> 0);
         }
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
@@ -4069,31 +3789,24 @@
         }
         rmVal = this.readMem8(ea);
       }
-      let result = 0;
-      let flags = this.readReg(REG.EFLAGS);
       if (opcode === 0x38) { // cmp r/m8, r8
-        result = (rmVal - regVal) & 0xff;
-        flags = updateSubFlags(flags, rmVal, regVal, result, 8);
+        const alu = aluBinaryWidth(7, rmVal, regVal, 8, this.readReg(REG.EFLAGS));
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       } else { // cmp r8, r/m8
-        result = (regVal - rmVal) & 0xff;
-        flags = updateSubFlags(flags, regVal, rmVal, result, 8);
+        const alu = aluBinaryWidth(7, regVal, rmVal, 8, this.readReg(REG.EFLAGS));
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
-      this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
     if (opcode === 0x1c || opcode === 0x1d) {
-      const cf = (this.readReg(REG.EFLAGS) & FLAG_CF) !== 0 ? 1 : 0;
       if (opcode === 0x1c) {
         const imm = this.readMem8((addr + 1) >>> 0) & 0xff;
         const eax = this.readReg(REG.EAX);
         const al = eax & 0xff;
-        const op2 = (imm + cf) & 0xff;
-        const result = (al - op2) & 0xff;
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateSubFlags(flags, al, op2, result, 8);
-        this.writeReg(REG.EAX, ((eax & 0xffffff00) | result) >>> 0);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(3, al, imm, 8, this.readReg(REG.EFLAGS));
+        this.writeReg(REG.EAX, ((eax & 0xffffff00) | (alu.result & 0xff)) >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         this.writeReg(REG.EIP, (addr + 2) >>> 0);
         return true;
       }
@@ -4103,12 +3816,9 @@
         (this.readMem8((addr + 3) >>> 0) << 16) |
         (this.readMem8((addr + 4) >>> 0) << 24);
       const eax = this.readReg(REG.EAX);
-      const op2 = (imm + cf) | 0;
-      const result = (eax - op2) | 0;
-      let flags = this.readReg(REG.EFLAGS);
-      flags = updateSubFlags(flags, eax, op2, result, 32);
-      this.writeReg(REG.EAX, result >>> 0);
-      this.writeReg(REG.EFLAGS, flags >>> 0);
+      const alu = aluBinaryWidth(3, eax, imm, 32, this.readReg(REG.EFLAGS));
+      this.writeReg(REG.EAX, alu.result >>> 0);
+      this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       this.writeReg(REG.EIP, (addr + 5) >>> 0);
       return true;
     }
@@ -4124,35 +3834,17 @@
       const imm = this.readMem8((addr + 1) >>> 0) & 0xff;
       const eax = this.readReg(REG.EAX);
       const al = eax & 0xff;
-      let flags = this.readReg(REG.EFLAGS);
-      let result = al;
-      if (opcode === 0x04) {
-        result = (al + imm) & 0xff;
-        flags = updateAddFlags(flags, al, imm, result, 8);
-      } else if (opcode === 0x0c) {
-        result = (al | imm) & 0xff;
-        flags = updateLogicFlagsWidth(flags, result, 8);
-      } else if (opcode === 0x14) {
-        const cf = (flags & FLAG_CF) !== 0 ? 1 : 0;
-        result = (al + imm + cf) & 0xff;
-        flags = updateAdcFlags(flags, al, imm, cf, result, 8);
-      } else if (opcode === 0x24) {
-        result = (al & imm) & 0xff;
-        flags = updateLogicFlagsWidth(flags, result, 8);
-      } else if (opcode === 0x2c) {
-        result = (al - imm) & 0xff;
-        flags = updateSubFlags(flags, al, imm, result, 8);
-      } else if (opcode === 0x34) {
-        result = (al ^ imm) & 0xff;
-        flags = updateLogicFlagsWidth(flags, result, 8);
-      } else {
-        result = (al - imm) & 0xff;
-        flags = updateSubFlags(flags, al, imm, result, 8);
-      }
+      const op = opcode === 0x04 ? 0
+        : (opcode === 0x0c ? 1
+          : (opcode === 0x14 ? 2
+            : (opcode === 0x24 ? 4
+              : (opcode === 0x2c ? 5
+                : (opcode === 0x34 ? 6 : 7)))));
+      const alu = aluBinaryWidth(op, al, imm, 8, this.readReg(REG.EFLAGS));
       if (opcode !== 0x3c) {
-        this.writeReg(REG.EAX, ((eax & 0xffffff00) | result) >>> 0);
+        this.writeReg(REG.EAX, ((eax & 0xffffff00) | (alu.result & 0xff)) >>> 0);
       }
-      this.writeReg(REG.EFLAGS, flags >>> 0);
+      this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       this.writeReg(REG.EIP, (addr + 2) >>> 0);
       return true;
     }
@@ -4170,50 +3862,18 @@
         (this.readMem8((addr + 2) >>> 0) << 8) |
         (this.readMem8((addr + 3) >>> 0) << 16) |
         (this.readMem8((addr + 4) >>> 0) << 24);
-      const eax = this.readReg(REG.EAX) | 0;
-      let flags = this.readReg(REG.EFLAGS);
-      let result = eax;
-      switch (opcode) {
-        case 0x05: // add eax, imm32
-          result = (eax + imm) | 0;
-          flags = updateAddFlags(flags, eax, imm, result, 32);
-          this.writeReg(REG.EAX, result >>> 0);
-          break;
-        case 0x0d: // or eax, imm32
-          result = (eax | imm) | 0;
-          flags = updateLogicFlagsWidth(flags, result, 32);
-          this.writeReg(REG.EAX, result >>> 0);
-          break;
-        case 0x15: { // adc eax, imm32
-          const cf = (flags & FLAG_CF) !== 0 ? 1 : 0;
-          result = (eax + imm + cf) | 0;
-          flags = updateAdcFlags(flags, eax, imm, cf, result, 32);
-          this.writeReg(REG.EAX, result >>> 0);
-          break;
-        }
-        case 0x25: // and eax, imm32
-          result = (eax & imm) | 0;
-          flags = updateLogicFlagsWidth(flags, result, 32);
-          this.writeReg(REG.EAX, result >>> 0);
-          break;
-        case 0x2d: // sub eax, imm32
-          result = (eax - imm) | 0;
-          flags = updateSubFlags(flags, eax, imm, result, 32);
-          this.writeReg(REG.EAX, result >>> 0);
-          break;
-        case 0x35: // xor eax, imm32
-          result = (eax ^ imm) | 0;
-          flags = updateLogicFlagsWidth(flags, result, 32);
-          this.writeReg(REG.EAX, result >>> 0);
-          break;
-        case 0x3d: // cmp eax, imm32
-          result = (eax - imm) | 0;
-          flags = updateSubFlags(flags, eax, imm, result, 32);
-          break;
-        default:
-          return false;
+      const eax = this.readReg(REG.EAX);
+      const op = opcode === 0x05 ? 0
+        : (opcode === 0x0d ? 1
+          : (opcode === 0x15 ? 2
+            : (opcode === 0x25 ? 4
+              : (opcode === 0x2d ? 5
+                : (opcode === 0x35 ? 6 : 7)))));
+      const alu = aluBinaryWidth(op, eax, imm, 32, this.readReg(REG.EFLAGS));
+      if (opcode !== 0x3d) {
+        this.writeReg(REG.EAX, alu.result >>> 0);
       }
-      this.writeReg(REG.EFLAGS, flags >>> 0);
+      this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       this.writeReg(REG.EIP, (addr + 5) >>> 0);
       return true;
     }
@@ -4254,10 +3914,8 @@
         if (value === null) {
           return false;
         }
-        const result = (value & imm) & 0xff;
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateLogicFlagsWidth(flags, result, 8);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(8, value, imm, 8, this.readReg(REG.EFLAGS));
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         this.writeReg(REG.EIP, (addr + immOffset + 1) >>> 0);
         return true;
       }
@@ -4277,11 +3935,9 @@
         if (value === null) {
           return false;
         }
-        const result = (0 - value) & 0xff;
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateSubFlags(flags, 0, value, result, 8);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
-        if (!writeOp(result)) {
+        const alu = aluBinaryWidth(5, 0, value, 8, this.readReg(REG.EFLAGS));
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
+        if (!writeOp(alu.result & 0xff)) {
           return false;
         }
         this.writeReg(REG.EIP, (addr + immOffset) >>> 0);
@@ -4367,20 +4023,16 @@
       const imm = this.readMem8((addr + 1) >>> 0) & 0xff;
       const eax = this.readReg(REG.EAX);
       const al = eax & 0xff;
-      const result = (al & imm) & 0xff;
-      let flags = this.readReg(REG.EFLAGS);
-      flags = updateLogicFlagsWidth(flags, result, 8);
-      this.writeReg(REG.EFLAGS, flags >>> 0);
+      const alu = aluBinaryWidth(8, al, imm, 8, this.readReg(REG.EFLAGS));
+      this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       this.writeReg(REG.EIP, (addr + 2) >>> 0);
       return true;
     }
     if (opcode === 0xa9) {
       const imm = this.readMem32((addr + 1) >>> 0) >>> 0;
       const eax = this.readReg(REG.EAX) >>> 0;
-      const result = (eax & imm) >>> 0;
-      let flags = this.readReg(REG.EFLAGS);
-      flags = updateLogicFlagsWidth(flags, result, 32);
-      this.writeReg(REG.EFLAGS, flags >>> 0);
+      const alu = aluBinaryWidth(8, eax, imm, 32, this.readReg(REG.EFLAGS));
+      this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       this.writeReg(REG.EIP, (addr + 5) >>> 0);
       return true;
     }
@@ -4439,48 +4091,12 @@
         }
       }
 
-      let result = op1;
-      let flags = this.readReg(REG.EFLAGS);
-      switch (regField) {
-        case 0: // add
-          result = (op1 + imm) | 0;
-          flags = updateAddFlags(flags, op1, imm, result, widthBits);
-          break;
-        case 1: // or
-          result = (op1 | imm) | 0;
-          flags = updateLogicFlagsWidth(flags, result, widthBits);
-          break;
-        case 2: { // adc
-          const cf = (flags & FLAG_CF) !== 0 ? 1 : 0;
-          result = (op1 + imm + cf) | 0;
-          flags = updateAdcFlags(flags, op1, imm, cf, result, widthBits);
-          break;
-        }
-        case 3: { // sbb
-          const cf = (flags & FLAG_CF) !== 0 ? 1 : 0;
-          result = (op1 - imm - cf) | 0;
-          flags = updateSbbFlags(flags, op1, imm, cf, result, widthBits);
-          break;
-        }
-        case 4: // and
-          result = (op1 & imm) | 0;
-          flags = updateLogicFlagsWidth(flags, result, widthBits);
-          break;
-        case 5: // sub
-          result = (op1 - imm) | 0;
-          flags = updateSubFlags(flags, op1, imm, result, widthBits);
-          break;
-        case 6: // xor
-          result = (op1 ^ imm) | 0;
-          flags = updateLogicFlagsWidth(flags, result, widthBits);
-          break;
-        case 7: // cmp
-          result = (op1 - imm) | 0;
-          flags = updateSubFlags(flags, op1, imm, result, widthBits);
-          break;
-        default:
-          return false;
+      if (regField > 7) {
+        return false;
       }
+      const alu = aluBinaryWidth(regField, op1, imm, widthBits, this.readReg(REG.EFLAGS));
+      const result = alu.result >>> 0;
+      const flags = alu.flags >>> 0;
 
       if (regField !== 7) {
         if (widthBits === 8) {
@@ -4552,32 +4168,12 @@
           op1 = this.readMem32(ea);
         }
       }
-      let result = op1;
-      let flags = this.readReg(REG.EFLAGS);
-      switch (regField) {
-        case 0: // add
-          result = (op1 + imm) | 0;
-          flags = updateAddFlags(flags, op1, imm, result, widthBits);
-          break;
-        case 1: // or
-          result = (op1 | imm) | 0;
-          flags = updateLogicFlagsWidth(flags, result, widthBits);
-          break;
-        case 4: // and
-          result = (op1 & imm) | 0;
-          flags = updateLogicFlagsWidth(flags, result, widthBits);
-          break;
-        case 5: // sub
-          result = (op1 - imm) | 0;
-          flags = updateSubFlags(flags, op1, imm, result, widthBits);
-          break;
-        case 7: // cmp
-          result = (op1 - imm) | 0;
-          flags = updateSubFlags(flags, op1, imm, result, widthBits);
-          break;
-        default:
-          return false;
+      if (regField !== 0 && regField !== 1 && regField !== 4 && regField !== 5 && regField !== 7) {
+        return false;
       }
+      const alu = aluBinaryWidth(regField, op1, imm, widthBits, this.readReg(REG.EFLAGS));
+      const result = alu.result >>> 0;
+      const flags = alu.flags >>> 0;
       if (regField !== 7) {
         if (widthBits === 8) {
           if (modrmInfo.mod === 3) {
@@ -4614,25 +4210,20 @@
       const modrmInfo = this.getCachedModRmInfo(addr, bytes, 1);
       if (opcode === 0x00) {
         const src = this.readReg8ByIndex(modrmInfo.reg);
-        let dst = 0;
         if (modrmInfo.mod === 3) {
-          dst = this.readReg8ByIndex(modrmInfo.rm);
-          const result = (dst + src) & 0xff;
-          this.writeReg8ByIndex(modrmInfo.rm, result);
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateAddFlags(flags, dst, src, result, 8);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
+          const dst = this.readReg8ByIndex(modrmInfo.rm);
+          const alu = aluBinaryWidth(0, dst, src, 8, this.readReg(REG.EFLAGS));
+          this.writeReg8ByIndex(modrmInfo.rm, alu.result & 0xff);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
-          dst = this.readMem8(ea);
-          const result = (dst + src) & 0xff;
-          this.writeMem8(ea, result);
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateAddFlags(flags, dst, src, result, 8);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
+          const dst = this.readMem8(ea);
+          const alu = aluBinaryWidth(0, dst, src, 8, this.readReg(REG.EFLAGS));
+          this.writeMem8(ea, alu.result & 0xff);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         }
       } else {
         let src = 0;
@@ -4646,11 +4237,9 @@
           src = this.readMem8(ea);
         }
         const dst = this.readReg8ByIndex(modrmInfo.reg);
-        const result = (dst + src) & 0xff;
-        this.writeReg8ByIndex(modrmInfo.reg, result);
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateAddFlags(flags, dst, src, result, 8);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(0, dst, src, 8, this.readReg(REG.EFLAGS));
+        this.writeReg8ByIndex(modrmInfo.reg, alu.result & 0xff);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
@@ -4701,10 +4290,8 @@
           lhs = this.readMem32(ea);
         }
       }
-      const result = (lhs - rhs) | 0;
-      let flags = this.readReg(REG.EFLAGS);
-      flags = updateSubFlags(flags, lhs, rhs, result, 32);
-      this.writeReg(REG.EFLAGS, flags >>> 0);
+      const alu = aluBinaryWidth(7, lhs, rhs, 32, this.readReg(REG.EFLAGS));
+      this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
@@ -4714,25 +4301,22 @@
         return false;
       }
       const modrmInfo = this.getCachedModRmInfo(addr, bytes, 1);
-      const cf = (this.readReg(REG.EFLAGS) & FLAG_CF) ? 1 : 0;
-      let flags = this.readReg(REG.EFLAGS);
       if (opcode === 0x10) {
         const src = this.readReg8ByIndex(modrmInfo.reg);
-        let dst = 0;
         if (modrmInfo.mod === 3) {
-          dst = this.readReg8ByIndex(modrmInfo.rm);
-          const result = (dst + src + cf) & 0xff;
-          this.writeReg8ByIndex(modrmInfo.rm, result);
-          flags = updateAdcFlags(flags, dst, src, cf, result, 8);
+          const dst = this.readReg8ByIndex(modrmInfo.rm);
+          const alu = aluBinaryWidth(2, dst, src, 8, this.readReg(REG.EFLAGS));
+          this.writeReg8ByIndex(modrmInfo.rm, alu.result & 0xff);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
-          dst = this.readMem8(ea);
-          const result = (dst + src + cf) & 0xff;
-          this.writeMem8(ea, result);
-          flags = updateAdcFlags(flags, dst, src, cf, result, 8);
+          const dst = this.readMem8(ea);
+          const alu = aluBinaryWidth(2, dst, src, 8, this.readReg(REG.EFLAGS));
+          this.writeMem8(ea, alu.result & 0xff);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         }
       } else {
         let src = 0;
@@ -4746,11 +4330,10 @@
           src = this.readMem8(ea);
         }
         const dst = this.readReg8ByIndex(modrmInfo.reg);
-        const result = (dst + src + cf) & 0xff;
-        this.writeReg8ByIndex(modrmInfo.reg, result);
-        flags = updateAdcFlags(flags, dst, src, cf, result, 8);
+        const alu = aluBinaryWidth(2, dst, src, 8, this.readReg(REG.EFLAGS));
+        this.writeReg8ByIndex(modrmInfo.reg, alu.result & 0xff);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
-      this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
@@ -4760,24 +4343,22 @@
         return false;
       }
       const modrmInfo = this.getCachedModRmInfo(addr, bytes, 1);
-      const cf = (this.readReg(REG.EFLAGS) & FLAG_CF) ? 1 : 0;
-      let flags = this.readReg(REG.EFLAGS);
       if (opcode === 0x18) {
         const src = this.readReg8ByIndex(modrmInfo.reg);
         if (modrmInfo.mod === 3) {
           const dst = this.readReg8ByIndex(modrmInfo.rm);
-          const result = (dst - src - cf) & 0xff;
-          this.writeReg8ByIndex(modrmInfo.rm, result);
-          flags = updateSbbFlags(flags, dst, src, cf, result, 8);
+          const alu = aluBinaryWidth(3, dst, src, 8, this.readReg(REG.EFLAGS));
+          this.writeReg8ByIndex(modrmInfo.rm, alu.result & 0xff);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
           const dst = this.readMem8(ea);
-          const result = (dst - src - cf) & 0xff;
-          this.writeMem8(ea, result);
-          flags = updateSbbFlags(flags, dst, src, cf, result, 8);
+          const alu = aluBinaryWidth(3, dst, src, 8, this.readReg(REG.EFLAGS));
+          this.writeMem8(ea, alu.result & 0xff);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         }
       } else {
         let src = 0;
@@ -4791,11 +4372,10 @@
           src = this.readMem8(ea);
         }
         const dst = this.readReg8ByIndex(modrmInfo.reg);
-        const result = (dst - src - cf) & 0xff;
-        this.writeReg8ByIndex(modrmInfo.reg, result);
-        flags = updateSbbFlags(flags, dst, src, cf, result, 8);
+        const alu = aluBinaryWidth(3, dst, src, 8, this.readReg(REG.EFLAGS));
+        this.writeReg8ByIndex(modrmInfo.reg, alu.result & 0xff);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
-      this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
@@ -4805,25 +4385,22 @@
         return false;
       }
       const modrmInfo = this.getCachedModRmInfo(addr, bytes, 1);
-      const cf = (this.readReg(REG.EFLAGS) & FLAG_CF) ? 1 : 0;
-      let flags = this.readReg(REG.EFLAGS);
       if (opcode === 0x11) {
         const src = this.readReg32ByIndex(modrmInfo.reg);
-        let dst = 0;
         if (modrmInfo.mod === 3) {
-          dst = this.readReg32ByIndex(modrmInfo.rm);
-          const result = (dst + src + cf) >>> 0;
-          this.writeReg32ByIndex(modrmInfo.rm, result >>> 0);
-          flags = updateAdcFlags(flags, dst, src, cf, result, 32);
+          const dst = this.readReg32ByIndex(modrmInfo.rm);
+          const alu = aluBinaryWidth(2, dst, src, 32, this.readReg(REG.EFLAGS));
+          this.writeReg32ByIndex(modrmInfo.rm, alu.result >>> 0);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
-          dst = this.readMem32(ea);
-          const result = (dst + src + cf) >>> 0;
-          this.writeMem32(ea, result >>> 0);
-          flags = updateAdcFlags(flags, dst, src, cf, result, 32);
+          const dst = this.readMem32(ea);
+          const alu = aluBinaryWidth(2, dst, src, 32, this.readReg(REG.EFLAGS));
+          this.writeMem32(ea, alu.result >>> 0);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         }
       } else {
         let src = 0;
@@ -4837,11 +4414,10 @@
           src = this.readMem32(ea);
         }
         const dst = this.readReg32ByIndex(modrmInfo.reg);
-        const result = (dst + src + cf) >>> 0;
-        this.writeReg32ByIndex(modrmInfo.reg, result >>> 0);
-        flags = updateAdcFlags(flags, dst, src, cf, result, 32);
+        const alu = aluBinaryWidth(2, dst, src, 32, this.readReg(REG.EFLAGS));
+        this.writeReg32ByIndex(modrmInfo.reg, alu.result >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
-      this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
@@ -4863,31 +4439,25 @@
           src = this.readMem32(ea);
         }
         const dst = this.readReg32ByIndex(modrmInfo.reg);
-        const result = (dst + src) | 0;
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateAddFlags(flags, dst, src, result, 32);
-        this.writeReg32ByIndex(modrmInfo.reg, result >>> 0);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(0, dst, src, 32, this.readReg(REG.EFLAGS));
+        this.writeReg32ByIndex(modrmInfo.reg, alu.result >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       } else {
         const src = this.readReg32ByIndex(modrmInfo.reg);
         if (modrmInfo.mod === 3) {
           const dst = this.readReg32ByIndex(modrmInfo.rm);
-          const result = (dst + src) | 0;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateAddFlags(flags, dst, src, result, 32);
-          this.writeReg32ByIndex(modrmInfo.rm, result >>> 0);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
+          const alu = aluBinaryWidth(0, dst, src, 32, this.readReg(REG.EFLAGS));
+          this.writeReg32ByIndex(modrmInfo.rm, alu.result >>> 0);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
           const dst = this.readMem32(ea);
-          const result = (dst + src) | 0;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateAddFlags(flags, dst, src, result, 32);
-          this.writeMem32(ea, result >>> 0);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
+          const alu = aluBinaryWidth(0, dst, src, 32, this.readReg(REG.EFLAGS));
+          this.writeMem32(ea, alu.result >>> 0);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         }
       }
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
@@ -4911,31 +4481,25 @@
           src = this.readMem32(ea);
         }
         const dst = this.readReg32ByIndex(modrmInfo.reg);
-        const result = (dst - src) | 0;
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateSubFlags(flags, dst, src, result, 32);
-        this.writeReg32ByIndex(modrmInfo.reg, result >>> 0);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(5, dst, src, 32, this.readReg(REG.EFLAGS));
+        this.writeReg32ByIndex(modrmInfo.reg, alu.result >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       } else {
         const src = this.readReg32ByIndex(modrmInfo.reg);
         if (modrmInfo.mod === 3) {
           const dst = this.readReg32ByIndex(modrmInfo.rm);
-          const result = (dst - src) | 0;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateSubFlags(flags, dst, src, result, 32);
-          this.writeReg32ByIndex(modrmInfo.rm, result >>> 0);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
+          const alu = aluBinaryWidth(5, dst, src, 32, this.readReg(REG.EFLAGS));
+          this.writeReg32ByIndex(modrmInfo.rm, alu.result >>> 0);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
           const dst = this.readMem32(ea);
-          const result = (dst - src) | 0;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = updateSubFlags(flags, dst, src, result, 32);
-          this.writeMem32(ea, result >>> 0);
-          this.writeReg(REG.EFLAGS, flags >>> 0);
+          const alu = aluBinaryWidth(5, dst, src, 32, this.readReg(REG.EFLAGS));
+          this.writeMem32(ea, alu.result >>> 0);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         }
       }
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
@@ -4960,10 +4524,8 @@
           }
           lhs = this.readMem32(ea);
         }
-        const result = (lhs & rhs) >>> 0;
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateLogicFlagsWidth(flags, result, 32);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(8, lhs, rhs, 32, this.readReg(REG.EFLAGS));
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       } else {
         rhs = this.readReg8ByIndex(modrmInfo.reg);
         if (modrmInfo.mod === 3) {
@@ -4975,10 +4537,8 @@
           }
           lhs = this.readMem8(ea);
         }
-        const result = (lhs & rhs) & 0xff;
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateLogicFlagsWidth(flags, result, 8);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(8, lhs, rhs, 8, this.readReg(REG.EFLAGS));
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
@@ -5035,24 +4595,22 @@
         return false;
       }
       const modrmInfo = this.getCachedModRmInfo(addr, bytes, 1);
-      const cf = (this.readReg(REG.EFLAGS) & FLAG_CF) ? 1 : 0;
-      let flags = this.readReg(REG.EFLAGS);
       if (opcode === 0x19) {
         const src = this.readReg32ByIndex(modrmInfo.reg);
         if (modrmInfo.mod === 3) {
           const dst = this.readReg32ByIndex(modrmInfo.rm);
-          const result = (dst - src - cf) | 0;
-          this.writeReg32ByIndex(modrmInfo.rm, result >>> 0);
-          flags = updateSbbFlags(flags, dst, src, cf, result, 32);
+          const alu = aluBinaryWidth(3, dst, src, 32, this.readReg(REG.EFLAGS));
+          this.writeReg32ByIndex(modrmInfo.rm, alu.result >>> 0);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
           const dst = this.readMem32(ea);
-          const result = (dst - src - cf) | 0;
-          this.writeMem32(ea, result >>> 0);
-          flags = updateSbbFlags(flags, dst, src, cf, result, 32);
+          const alu = aluBinaryWidth(3, dst, src, 32, this.readReg(REG.EFLAGS));
+          this.writeMem32(ea, alu.result >>> 0);
+          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         }
       } else {
         let src = 0;
@@ -5066,11 +4624,10 @@
           src = this.readMem32(ea);
         }
         const dst = this.readReg32ByIndex(modrmInfo.reg);
-        const result = (dst - src - cf) | 0;
-        this.writeReg32ByIndex(modrmInfo.reg, result >>> 0);
-        flags = updateSbbFlags(flags, dst, src, cf, result, 32);
+        const alu = aluBinaryWidth(3, dst, src, 32, this.readReg(REG.EFLAGS));
+        this.writeReg32ByIndex(modrmInfo.reg, alu.result >>> 0);
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
       }
-      this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
@@ -5206,10 +4763,8 @@
         if (op === null) {
           return false;
         }
-        const result = (op & imm) >>> 0;
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateLogicFlagsWidth(flags, result, 32);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const alu = aluBinaryWidth(8, op, imm, 32, this.readReg(REG.EFLAGS));
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
         this.writeReg(REG.EIP, (addr + immOffset + 4) >>> 0);
         return true;
       }
@@ -5231,11 +4786,9 @@
         if (op === null) {
           return false;
         }
-        const result = (0 - op) | 0;
-        let flags = this.readReg(REG.EFLAGS);
-        flags = updateSubFlags(flags, 0, op, result, 32);
-        this.writeReg(REG.EFLAGS, flags >>> 0);
-        if (!writeOp(result >>> 0)) {
+        const alu = aluBinaryWidth(5, 0, op, 32, this.readReg(REG.EFLAGS));
+        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
+        if (!writeOp(alu.result >>> 0)) {
           return false;
         }
         this.writeReg(REG.EIP, (addr + immOffset) >>> 0);

@@ -812,6 +812,70 @@ function updateSubFlags(flags, op1, op2, result, widthBits) {
   return updateSubFlagsJs(flags, op1, op2, result, widthBits);
 }
 
+function aluBinaryWidthJs(op, left, right, widthBits, flags) {
+  const width = (widthBits >>> 0) === 8 ? 8 : ((widthBits >>> 0) === 16 ? 16 : 32);
+  const mask = widthMask(width);
+  const a = widthValueUnsigned(left, width) >>> 0;
+  const b = widthValueUnsigned(right, width) >>> 0;
+  let result = a >>> 0;
+  let nextFlags = flags >>> 0;
+  switch (op >>> 0) {
+    case 0:
+      result = width === 32 ? ((a + b) >>> 0) : ((a + b) & mask);
+      nextFlags = updateAddFlagsJs(nextFlags, a, b, result, width);
+      break;
+    case 1:
+      result = width === 32 ? ((a | b) >>> 0) : ((a | b) & mask);
+      nextFlags = updateLogicFlagsWidthJs(nextFlags, result, width);
+      break;
+    case 2: {
+      const carry = (nextFlags & FLAG_CF) !== 0 ? 1 : 0;
+      result = width === 32 ? ((a + b + carry) >>> 0) : ((a + b + carry) & mask);
+      nextFlags = updateAdcFlagsJs(nextFlags, a, b, carry, result, width);
+      break;
+    }
+    case 3: {
+      const carry = (nextFlags & FLAG_CF) !== 0 ? 1 : 0;
+      result = width === 32 ? ((a - b - carry) >>> 0) : ((a - b - carry) & mask);
+      nextFlags = updateSbbFlagsJs(nextFlags, a, b, carry, result, width);
+      break;
+    }
+    case 4:
+      result = width === 32 ? ((a & b) >>> 0) : ((a & b) & mask);
+      nextFlags = updateLogicFlagsWidthJs(nextFlags, result, width);
+      break;
+    case 5:
+      result = width === 32 ? ((a - b) >>> 0) : ((a - b) & mask);
+      nextFlags = updateSubFlagsJs(nextFlags, a, b, result, width);
+      break;
+    case 6:
+      result = width === 32 ? ((a ^ b) >>> 0) : ((a ^ b) & mask);
+      nextFlags = updateLogicFlagsWidthJs(nextFlags, result, width);
+      break;
+    case 7:
+      result = width === 32 ? ((a - b) >>> 0) : ((a - b) & mask);
+      nextFlags = updateSubFlagsJs(nextFlags, a, b, result, width);
+      break;
+    case 8:
+      result = width === 32 ? ((a & b) >>> 0) : ((a & b) & mask);
+      nextFlags = updateLogicFlagsWidthJs(nextFlags, result, width);
+      break;
+    default:
+      result = 0;
+      nextFlags = flags >>> 0;
+      break;
+  }
+  return { result: result >>> 0, flags: nextFlags >>> 0 };
+}
+
+function aluBinaryWidth(op, left, right, widthBits, flags) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.aluBinaryWidth === "function") {
+    return backend.aluBinaryWidth(op >>> 0, left >>> 0, right >>> 0, widthBits >>> 0, flags >>> 0);
+  }
+  return aluBinaryWidthJs(op, left, right, widthBits, flags);
+}
+
 function shiftRotateJs(value, count, widthBits, mode, flags) {
   const mask = widthMask(widthBits);
   const signBit = widthSign(widthBits);
@@ -1177,6 +1241,9 @@ function getJsCpuHelperBackend() {
       },
       updateSbbFlags(flags, op1, op2, carry, result, widthBits) {
         return updateSbbFlagsJs(flags, op1, op2, carry, result, widthBits);
+      },
+      aluBinaryWidth(op, left, right, widthBits, flags) {
+        return aluBinaryWidthJs(op, left, right, widthBits, flags);
       },
       shiftRotate(value, count, widthBits, mode, flags) {
         return shiftRotateJs(value, count, widthBits, mode, flags);
@@ -2757,6 +2824,7 @@ class Emulator {
     updateAdcFlags,
     updateSubFlags,
     updateSbbFlags,
+    aluBinaryWidth,
     shiftRotate,
     doubleShift,
     psubusb32,

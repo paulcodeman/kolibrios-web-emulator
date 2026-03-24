@@ -104,6 +104,13 @@
     };
   }
 
+  function readAluResult(exports) {
+    return {
+      result: (exports.get_alu_last_result?.() || 0) >>> 0,
+      flags: (exports.get_alu_last_flags?.() || 0) >>> 0
+    };
+  }
+
   function readShiftPacked64Result(exports) {
     return {
       lo: (exports.get_shift_packed64_last_lo?.() || 0) >>> 0,
@@ -160,6 +167,9 @@
       typeof exports.imul_signed_width_exec !== "function" ||
       typeof exports.get_imul_last_result !== "function" ||
       typeof exports.get_imul_last_flags !== "function" ||
+      typeof exports.alu_binary_width_exec !== "function" ||
+      typeof exports.get_alu_last_result !== "function" ||
+      typeof exports.get_alu_last_flags !== "function" ||
       typeof exports.x87_compare_code !== "function" ||
       typeof exports.shift_packed64_exec !== "function" ||
       typeof exports.get_shift_packed64_last_lo !== "function" ||
@@ -264,6 +274,10 @@
       imulSignedWidth(left, right, widthBits, flags) {
         exports.imul_signed_width_exec(left >>> 0, right >>> 0, widthBits >>> 0, flags >>> 0);
         return readImulResult(exports);
+      },
+      aluBinaryWidth(op, left, right, widthBits, flags) {
+        exports.alu_binary_width_exec(op >>> 0, left >>> 0, right >>> 0, widthBits >>> 0, flags >>> 0);
+        return readAluResult(exports);
       },
       x87CompareCode(left, right) {
         return exports.x87_compare_code(Number(left), Number(right)) >>> 0;

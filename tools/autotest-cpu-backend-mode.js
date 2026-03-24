@@ -3,6 +3,13 @@ const { loadKosRuntime } = require("./ui-harness");
 const runtime = loadKosRuntime();
 const { Emulator, createHeadlessSurface } = runtime;
 const emuApi = global.KosEmu && global.KosEmu.emu ? global.KosEmu.emu : null;
+const REG_EAX = 0;
+const REG_ECX = 1;
+const REG_EDX = 2;
+const REG_EBX = 3;
+const REG_ESP = 4;
+const REG_EIP = 8;
+const REG_EFLAGS = 9;
 
 function assert(condition, message) {
   if (!condition) {
@@ -58,6 +65,54 @@ function createLcg(seed) {
   };
 }
 
+function createInstructionEmulator(cpuBackend) {
+  const surface = createHeadlessSurface(8, 8);
+  const emulator = new Emulator(surface, () => {}, { cpuBackend });
+  const mem = new Uint8Array(0x2000);
+  const regs = new Uint32Array(10);
+  regs[REG_ESP] = 0x1800;
+  regs[REG_EFLAGS] = 0x202;
+  emulator.running = true;
+  emulator.cpu = {
+    mem,
+    view: new DataView(mem.buffer),
+    regs,
+    fpu: new Float64Array(8),
+    fpuSize: 0,
+    fpuStatusWord: 0,
+    mmx: new Uint32Array(16),
+    xmm: new Uint32Array(32),
+    xmmF: new Float32Array(new ArrayBuffer(32 * 4)),
+    memFaultLogged: false
+  };
+  emulator.ensureCpuBackendReady();
+  return emulator;
+}
+
+function runInstructionScenario(cpuBackend, bytes, setup) {
+  const emulator = createInstructionEmulator(cpuBackend);
+  for (let i = 0; i < bytes.length; i += 1) {
+    emulator.writeMem8(i, bytes[i] & 0xff);
+  }
+  if (typeof setup === "function") {
+    setup(emulator);
+  }
+  emulator.writeReg(REG_EIP, 0);
+  const ok = !!emulator.executeBasicInstruction(0);
+  return {
+    ok,
+    eip: emulator.readReg(REG_EIP) >>> 0,
+    eflags: emulator.readReg(REG_EFLAGS) >>> 0,
+    eax: emulator.readReg(REG_EAX) >>> 0,
+    ecx: emulator.readReg(REG_ECX) >>> 0,
+    edx: emulator.readReg(REG_EDX) >>> 0,
+    ebx: emulator.readReg(REG_EBX) >>> 0,
+    mem0: emulator.readMem32(0) >>> 0,
+    mem4: emulator.readMem32(4) >>> 0,
+    mem8: emulator.readMem32(8) >>> 0
+  };
+}
+
 try {
   assertEq(Emulator.normalizeCpuBackendMode("js"), "js", "js mode should stay js");
   assertEq(Emulator.normalizeCpuBackendMode("WASM"), "wasm", "wasm mode should normalize case-insensitively");
@@ -81,6 +136,7 @@ try {
   assert(typeof wasmBackend.bitScan === "function", "wasm helper backend should expose bit scan helpers");
   assert(typeof wasmBackend.bitTestModify === "function", "wasm helper backend should expose bit test helpers");
   assert(typeof wasmBackend.imulSignedWidth === "function", "wasm helper backend should expose IMUL helpers");
+  assert(typeof wasmBackend.aluBinaryWidth === "function", "wasm helper backend should expose ALU binary helpers");
   assert(typeof wasmBackend.x87CompareCode === "function", "wasm helper backend should expose x87 compare helpers");
   assert(typeof wasmBackend.shiftPacked64 === "function", "wasm helper backend should expose 64-bit shift helpers");
   assert(typeof wasmBackend.mulFullWidth === "function", "wasm helper backend should expose full-width multiply helpers");
@@ -265,6 +321,21 @@ try {
           wasmBackend.updateSbbFlags(flags, op1, op2, carry, result, width),
           jsBackend.updateSbbFlags(flags, op1, op2, carry, result, width),
           `updateSbbFlags should match for width ${width}`
+        );
+      }
+    }
+  }
+
+  for (const width of widths) {
+    for (const op of [0, 1, 2, 3, 4, 5, 6, 7, 8]) {
+      for (let i = 0; i < 160; i += 1) {
+        const flags = nextRand();
+        const left = nextRand();
+        const right = nextRand();
+        assertDeepEq(
+          wasmBackend.aluBinaryWidth(op, left, right, width, flags),
+          jsBackend.aluBinaryWidth(op, left, right, width, flags),
+          `aluBinaryWidth should match for width=${width}, op=${op}`
         );
       }
     }
@@ -590,6 +661,100 @@ try {
         );
       }
     }
+  }
+
+  const instructionScenarios = [
+    {
+      name: "or rm32, r32",
+      bytes: [0x09, 0xc1],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x0f0f0000);
+        emulator.writeReg(REG_ECX, 0x00f000f0);
+      }
+    },
+    {
+      name: "xor r8, r/m8",
+      bytes: [0x32, 0xc1],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x0000005a);
+        emulator.writeReg(REG_ECX, 0x000000c3);
+      }
+    },
+    {
+      name: "and rm8, r8",
+      bytes: [0x20, 0xc1],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x000000f0);
+        emulator.writeReg(REG_ECX, 0x0000005a);
+      }
+    },
+    {
+      name: "sub rm8, r8",
+      bytes: [0x28, 0xc1],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x00000011);
+        emulator.writeReg(REG_ECX, 0x00000044);
+      }
+    },
+    {
+      name: "cmp r8, r/m8",
+      bytes: [0x3a, 0xc1],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x00000033);
+        emulator.writeReg(REG_ECX, 0x00000099);
+      }
+    },
+    {
+      name: "sbb eax, imm32",
+      bytes: [0x1d, 0x34, 0x12, 0x00, 0x00],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x00008000);
+        emulator.writeReg(REG_EFLAGS, 0x203);
+      }
+    },
+    {
+      name: "test eax, imm32",
+      bytes: [0xa9, 0x0f, 0x00, 0xf0, 0x00],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x00f000f0);
+      }
+    },
+    {
+      name: "f6 test cl, imm8",
+      bytes: [0xf6, 0xc1, 0x0f],
+      setup(emulator) {
+        emulator.writeReg(REG_ECX, 0x000000a5);
+      }
+    },
+    {
+      name: "f7 neg ecx",
+      bytes: [0xf7, 0xd9],
+      setup(emulator) {
+        emulator.writeReg(REG_ECX, 0x00001234);
+      }
+    },
+    {
+      name: "66 or rm16, r16",
+      bytes: [0x66, 0x09, 0xc1],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x00001234);
+        emulator.writeReg(REG_ECX, 0x000000f0);
+      }
+    },
+    {
+      name: "66 group1 sub ax, imm8",
+      bytes: [0x66, 0x83, 0xe8, 0x01],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x00008000);
+      }
+    }
+  ];
+  for (const scenario of instructionScenarios) {
+    const jsState = runInstructionScenario("js", scenario.bytes, scenario.setup);
+    const wasmState = runInstructionScenario("wasm", scenario.bytes, scenario.setup);
+    assert(jsState.ok, `instruction scenario should execute in js backend: ${scenario.name}`);
+    assert(wasmState.ok, `instruction scenario should execute in wasm backend: ${scenario.name}`);
+    assertDeepEq(wasmState, jsState, `instruction scenario should match between js and wasm: ${scenario.name}`);
   }
 
   const jsEmulator = new Emulator(createHeadlessSurface(8, 8), () => {}, { cpuBackend: "js" });
