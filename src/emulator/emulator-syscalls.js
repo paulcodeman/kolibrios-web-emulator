@@ -5538,7 +5538,18 @@
           this.writeReg(REG.EAX, 55);
           return;
         }
-        this.writeReg(REG.EAX, this.speakerDisabled ? 55 : 0);
+        if (this.hostSession && typeof this.hostSession.getSpeakerDisabled === "function") {
+          this.speakerDisabled = !!this.hostSession.getSpeakerDisabled();
+        }
+        if (this.speakerDisabled) {
+          this.writeReg(REG.EAX, 55);
+          return;
+        }
+        const ptr = this.readReg(REG.ESI) >>> 0;
+        const result = typeof this.playHostSpeakerSequence === "function"
+          ? (this.playHostSpeakerSequence(ptr) >>> 0)
+          : 0;
+        this.writeReg(REG.EAX, result === 55 ? 55 : 0);
       },
 
       sysPciBios() {

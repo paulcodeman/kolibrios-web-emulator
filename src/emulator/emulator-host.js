@@ -2,6 +2,11 @@
   const KosEmu = globalThis.KosEmu;
   const UTF8_DECODER = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8") : null;
   const DEBUG_BOARD_CAPACITY = 512;
+  const SPEAKER_TIMER_HZ = 1193180;
+  const SPEAKER_NOTE_DIVIDERS = new Uint16Array([
+    0x4742, 0x4342, 0x3F7C, 0x3BEC, 0x388F, 0x3562,
+    0x3264, 0x2F8F, 0x2CE4, 0x2A5F, 0x2802, 0x25BF
+  ]);
 
   function ensureDebugBoardState(owner) {
     if (
@@ -87,6 +92,16 @@
       out += String.fromCodePoint(value);
     }
     return out;
+  }
+
+  function decodeSpeakerNoteDivider(noteCode) {
+    const packed = noteCode & 0xff;
+    const noteIndex = (packed & 0x0f) - 1;
+    if (noteIndex < 0 || noteIndex >= SPEAKER_NOTE_DIVIDERS.length) {
+      return 0;
+    }
+    const octave = (packed >>> 4) & 0x0f;
+    return (SPEAKER_NOTE_DIVIDERS[noteIndex] >>> octave) >>> 0;
   }
 
   function decodeUtf8Z(bytes) {
@@ -1265,6 +1280,94 @@
           false,
           `terminateProcessId for pid ${pid >>> 0}`
         );
+      },
+
+      decodeSpeakerSequence(ptr) {
+        const start = ptr >>> 0;
+        const items = [];
+        let offset = start >>> 0;
+        let totalDurationMs = 0;
+        let bytesRead = 0;
+        let terminated = false;
+        const maxItems = 4096;
+        const maxBytes = 65536;
+        for (let index = 0; index < maxItems && bytesRead < maxBytes; index += 1) {
+          const control = this.readMem8(offset) & 0xff;
+          offset = (offset + 1) >>> 0;
+          bytesRead = (bytesRead + 1) >>> 0;
+          if (control === 0) {
+            terminated = true;
+            break;
+          }
+
+          let durationCs = 0;
+          let divider = 0;
+          let noteCode = 0;
+          let kind = "rest";
+          if (control < 0x81) {
+            durationCs = control & 0xff;
+            divider = this.readMem16(offset) & 0xffff;
+            offset = (offset + 2) >>> 0;
+            bytesRead = (bytesRead + 2) >>> 0;
+            if (!divider) {
+              break;
+            }
+            kind = "tone";
+          } else {
+            durationCs = (control - 0x81) & 0xff;
+            noteCode = this.readMem8(offset) & 0xff;
+            offset = (offset + 1) >>> 0;
+            bytesRead = (bytesRead + 1) >>> 0;
+            if (noteCode === 0xff) {
+              kind = "rest";
+            } else {
+              divider = decodeSpeakerNoteDivider(noteCode);
+              if (!divider) {
+                break;
+              }
+              kind = "tone";
+            }
+          }
+
+          const durationMs = Math.max(0, durationCs * 10) | 0;
+          totalDurationMs = (totalDurationMs + durationMs) | 0;
+          items.push({
+            kind,
+            durationCs: durationCs & 0xff,
+            durationMs,
+            divider: divider >>> 0,
+            frequencyHz: divider ? (SPEAKER_TIMER_HZ / divider) : 0,
+            noteCode: noteCode >>> 0
+          });
+        }
+        return {
+          ptr: start >>> 0,
+          bytesRead: bytesRead >>> 0,
+          totalDurationMs: totalDurationMs >>> 0,
+          terminated: !!terminated,
+          items
+        };
+      },
+
+      playHostSpeakerSequence(ptr) {
+        const sequence = this.decodeSpeakerSequence(ptr >>> 0);
+        const result = this.callHostSession(
+          "playSpeakerSequence",
+          [{
+            ownerPid: this.processId >>> 0,
+            ownerSlot: this.threadSlot >>> 0,
+            processPath: String(this.processPathOverride || this.processPath || ""),
+            ptr: ptr >>> 0,
+            bytesRead: sequence.bytesRead >>> 0,
+            totalDurationMs: sequence.totalDurationMs >>> 0,
+            terminated: !!sequence.terminated,
+            items: sequence.items
+          }],
+          this.speakerDisabled ? 55 : 0,
+          "playSpeakerSequence",
+          55
+        );
+        return (result | 0) >>> 0;
       },
 
       startHostApplication(path, params, flags) {

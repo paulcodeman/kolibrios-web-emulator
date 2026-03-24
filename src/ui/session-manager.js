@@ -42,6 +42,20 @@
   const WINDOW_Z_ALWAYS_BACK = -1;
   const WINDOW_Z_NORMAL = 0;
   const WINDOW_Z_ALWAYS_TOP = 1;
+  const SPEAKER_AUDIO_LATENCY = 0.01;
+  const SPEAKER_SEGMENT_ATTACK_SEC = 0.003;
+  const SPEAKER_SEGMENT_RELEASE_SEC = 0.006;
+  const SPEAKER_MASTER_GAIN = 0.05;
+
+  function getAudioContextCtor() {
+    if (typeof AudioContext === "function") {
+      return AudioContext;
+    }
+    if (typeof webkitAudioContext === "function") {
+      return webkitAudioContext;
+    }
+    return null;
+  }
 
   function packCanvasColor(color, alpha) {
     const a = alpha === undefined ? 255 : (alpha & 0xff);
@@ -1817,6 +1831,9 @@
         event.preventDefault();
         return;
       }
+      if (this.manager && typeof this.manager.primeSpeakerAudio === "function") {
+        this.manager.primeSpeakerAudio();
+      }
       const touch = getRelevantTouch(event, null);
       if (!touch) {
         return;
@@ -1847,6 +1864,9 @@
     handleMouseDown(event) {
       if (this.removed) {
         return;
+      }
+      if (this.manager && typeof this.manager.primeSpeakerAudio === "function") {
+        this.manager.primeSpeakerAudio();
       }
       const mask = getDomButtonMask(event.button);
       if (!mask) {
@@ -2183,6 +2203,9 @@
       if (this.removed || this.stopped || !this.emulator) {
         return;
       }
+      if (this.manager && typeof this.manager.primeSpeakerAudio === "function") {
+        this.manager.primeSpeakerAudio();
+      }
       if (this.manager.getActiveProcess() !== this) {
         this.manager.setActiveProcess(this, { focusShell: false });
       }
@@ -2408,6 +2431,16 @@
       this.fontSmoothingMode = 1;
       this.fontSizePx = 9;
       this.speakerDisabled = false;
+      this.speakerAudioContext = null;
+      this.speakerAudioOutput = null;
+      this.speakerPlayback = null;
+      this.speakerPlaybackSerial = 0;
+      this.speakerPlayCount = 0;
+      this.lastSpeakerPlayback = null;
+      this.speakerAudioLogState = {
+        unavailable: false,
+        blocked: false
+      };
       this.lowLevelHdAccessEnabled = false;
       this.lowLevelPciAccessEnabled = false;
       this.loadedDrivers = new Map();
@@ -2510,7 +2543,14 @@
       this.systemSkinColorTableBytes = null;
       this.fontSmoothingMode = 1;
       this.fontSizePx = 9;
+      this.stopSpeakerPlayback();
       this.speakerDisabled = false;
+      this.speakerPlayCount = 0;
+      this.lastSpeakerPlayback = null;
+      this.speakerAudioLogState = {
+        unavailable: false,
+        blocked: false
+      };
       this.lowLevelHdAccessEnabled = false;
       this.lowLevelPciAccessEnabled = false;
       this.loadedDrivers = new Map();
@@ -2881,12 +2921,261 @@
 
     setSpeakerDisabled(value) {
       this.speakerDisabled = !!value;
+      if (this.speakerDisabled) {
+        this.stopSpeakerPlayback();
+      }
       return true;
     }
 
     toggleSpeakerDisabled() {
       this.speakerDisabled = !this.speakerDisabled;
+      if (this.speakerDisabled) {
+        this.stopSpeakerPlayback();
+      }
       return !!this.speakerDisabled;
+    }
+
+    getSpeakerPlaybackInfo() {
+      const playback = this.speakerPlayback || null;
+      const current = playback
+        ? {
+            ownerPid: playback.ownerPid >>> 0,
+            ownerSlot: playback.ownerSlot >>> 0,
+            processPath: String(playback.processPath || ""),
+            totalDurationMs: playback.totalDurationMs >>> 0,
+            startedAtMs: playback.startedAtMs >>> 0,
+            serial: playback.serial >>> 0
+          }
+        : null;
+      const last = this.lastSpeakerPlayback || null;
+      return {
+        disabled: !!this.speakerDisabled,
+        busy: !!playback,
+        playCount: this.speakerPlayCount >>> 0,
+        audioAvailable: !!getAudioContextCtor(),
+        audioState: this.speakerAudioContext ? String(this.speakerAudioContext.state || "") : "unavailable",
+        current,
+        last: last
+          ? {
+              ownerPid: last.ownerPid >>> 0,
+              ownerSlot: last.ownerSlot >>> 0,
+              processPath: String(last.processPath || ""),
+              totalDurationMs: last.totalDurationMs >>> 0,
+              itemCount: last.itemCount >>> 0,
+              toneCount: last.toneCount >>> 0,
+              startedAtMs: last.startedAtMs >>> 0,
+              serial: last.serial >>> 0
+            }
+          : null
+      };
+    }
+
+    ensureSpeakerAudioOutput() {
+      const AudioCtor = getAudioContextCtor();
+      if (!AudioCtor) {
+        if (!this.speakerAudioLogState.unavailable && this.app && typeof this.app.log === "function") {
+          this.app.log("speaker: WebAudio is unavailable in this browser environment");
+          this.speakerAudioLogState.unavailable = true;
+        }
+        return null;
+      }
+      let context = this.speakerAudioContext;
+      if (!context) {
+        try {
+          context = new AudioCtor();
+          this.speakerAudioContext = context;
+        } catch (err) {
+          if (!this.speakerAudioLogState.unavailable && this.app && typeof this.app.log === "function") {
+            this.app.log(`speaker: failed to create audio context: ${err instanceof Error ? err.message : String(err)}`);
+            this.speakerAudioLogState.unavailable = true;
+          }
+          return null;
+        }
+      }
+      if (!this.speakerAudioOutput) {
+        try {
+          const gainNode = context.createGain();
+          gainNode.gain.value = SPEAKER_MASTER_GAIN;
+          gainNode.connect(context.destination);
+          this.speakerAudioOutput = gainNode;
+        } catch (err) {
+          if (!this.speakerAudioLogState.unavailable && this.app && typeof this.app.log === "function") {
+            this.app.log(`speaker: failed to initialize audio output: ${err instanceof Error ? err.message : String(err)}`);
+            this.speakerAudioLogState.unavailable = true;
+          }
+          return null;
+        }
+      }
+      if (context.state === "suspended" && typeof context.resume === "function") {
+        context.resume().catch((err) => {
+          if (!this.speakerAudioLogState.blocked && this.app && typeof this.app.log === "function") {
+            this.app.log(`speaker: audio resume is blocked until a user gesture: ${err instanceof Error ? err.message : String(err)}`);
+            this.speakerAudioLogState.blocked = true;
+          }
+        });
+      }
+      return {
+        context,
+        output: this.speakerAudioOutput
+      };
+    }
+
+    primeSpeakerAudio() {
+      return !!this.ensureSpeakerAudioOutput();
+    }
+
+    finalizeSpeakerPlayback(playback) {
+      if (!playback || this.speakerPlayback !== playback) {
+        return false;
+      }
+      this.speakerPlayback = null;
+      if (playback.timeoutId) {
+        clearTimeout(playback.timeoutId);
+        playback.timeoutId = 0;
+      }
+      if (playback.gainNode && typeof playback.gainNode.disconnect === "function") {
+        try {
+          playback.gainNode.disconnect();
+        } catch (err) {
+          // ignore disconnect races from ended/stopped nodes
+        }
+      }
+      if (playback.oscillator) {
+        playback.oscillator.onended = null;
+      }
+      return true;
+    }
+
+    stopSpeakerPlayback(ownerPid) {
+      const playback = this.speakerPlayback || null;
+      if (!playback) {
+        return false;
+      }
+      if (ownerPid !== undefined && ownerPid !== null && (playback.ownerPid >>> 0) !== (ownerPid >>> 0)) {
+        return false;
+      }
+      if (playback.timeoutId) {
+        clearTimeout(playback.timeoutId);
+        playback.timeoutId = 0;
+      }
+      if (playback.oscillator && typeof playback.oscillator.stop === "function") {
+        try {
+          playback.oscillator.stop();
+        } catch (err) {
+          // ignore repeated stop on completed nodes
+        }
+      }
+      return this.finalizeSpeakerPlayback(playback);
+    }
+
+    playSpeakerSequence(request) {
+      if (this.speakerDisabled) {
+        return 55;
+      }
+      if (this.speakerPlayback) {
+        return 55;
+      }
+      const payload = request || {};
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      const totalDurationMs = Math.max(0, payload.totalDurationMs | 0) >>> 0;
+      const ownerPid = payload.ownerPid >>> 0;
+      const ownerSlot = payload.ownerSlot >>> 0;
+      const processPath = String(payload.processPath || "");
+      const serial = ((this.speakerPlaybackSerial + 1) >>> 0) || 1;
+      this.speakerPlaybackSerial = serial;
+      let toneCount = 0;
+      for (let i = 0; i < items.length; i += 1) {
+        if (items[i] && items[i].kind === "tone") {
+          toneCount += 1;
+        }
+      }
+      const playback = {
+        ownerPid,
+        ownerSlot,
+        processPath,
+        totalDurationMs,
+        startedAtMs: Date.now() >>> 0,
+        serial,
+        oscillator: null,
+        gainNode: null,
+        timeoutId: 0
+      };
+      this.lastSpeakerPlayback = {
+        ownerPid,
+        ownerSlot,
+        processPath,
+        totalDurationMs,
+        startedAtMs: playback.startedAtMs >>> 0,
+        serial,
+        itemCount: items.length >>> 0,
+        toneCount: toneCount >>> 0
+      };
+      this.speakerPlayCount = ((this.speakerPlayCount + 1) >>> 0);
+
+      if (!items.length || totalDurationMs <= 0) {
+        return 0;
+      }
+
+      this.speakerPlayback = playback;
+      const audio = this.ensureSpeakerAudioOutput();
+      if (audio && audio.context && audio.output) {
+        try {
+          const context = audio.context;
+          const gainNode = context.createGain();
+          const oscillator = context.createOscillator();
+          oscillator.type = "square";
+          oscillator.connect(gainNode);
+          gainNode.connect(audio.output);
+          const startTime = Math.max(context.currentTime, 0) + SPEAKER_AUDIO_LATENCY;
+          let cursor = startTime;
+          gainNode.gain.setValueAtTime(0, startTime);
+          let hasTone = false;
+          for (let i = 0; i < items.length; i += 1) {
+            const item = items[i] || null;
+            const durationSec = Math.max(0, Number(item && item.durationMs) || 0) / 1000;
+            const segmentStart = cursor;
+            const segmentEnd = segmentStart + durationSec;
+            if (item && item.kind === "tone" && (Number(item.frequencyHz) || 0) > 0 && durationSec > 0) {
+              oscillator.frequency.setValueAtTime(Number(item.frequencyHz), segmentStart);
+              const attackEnd = Math.min(segmentEnd, segmentStart + SPEAKER_SEGMENT_ATTACK_SEC);
+              const releaseStart = Math.max(segmentStart, segmentEnd - SPEAKER_SEGMENT_RELEASE_SEC);
+              gainNode.gain.setValueAtTime(0, segmentStart);
+              if (attackEnd > segmentStart) {
+                gainNode.gain.linearRampToValueAtTime(1, attackEnd);
+              } else {
+                gainNode.gain.setValueAtTime(1, segmentStart);
+              }
+              if (releaseStart > attackEnd) {
+                gainNode.gain.setValueAtTime(1, releaseStart);
+              }
+              gainNode.gain.linearRampToValueAtTime(0, segmentEnd);
+              hasTone = true;
+            } else {
+              gainNode.gain.setValueAtTime(0, segmentStart);
+            }
+            cursor = segmentEnd;
+          }
+          if (hasTone) {
+            oscillator.start(startTime);
+            oscillator.stop(cursor + SPEAKER_SEGMENT_RELEASE_SEC);
+            oscillator.onended = () => {
+              this.finalizeSpeakerPlayback(playback);
+            };
+            playback.oscillator = oscillator;
+            playback.gainNode = gainNode;
+          } else if (typeof gainNode.disconnect === "function") {
+            gainNode.disconnect();
+          }
+        } catch (err) {
+          if (this.app && typeof this.app.log === "function") {
+            this.app.log(`speaker: audio scheduling failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+      playback.timeoutId = setTimeout(() => {
+        this.finalizeSpeakerPlayback(playback);
+      }, Math.max(0, totalDurationMs + 32) | 0);
+      return 0;
     }
 
     getLowLevelHdAccessEnabled() {
@@ -4799,6 +5088,7 @@
       }
       const threadGroupId = process.threadGroupId >>> 0;
       const slot = process.slot >>> 0;
+      this.stopSpeakerPlayback(process.pid >>> 0);
       const index = this.processes.indexOf(process);
       if (index >= 0) {
         this.processes.splice(index, 1);

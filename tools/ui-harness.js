@@ -393,6 +393,10 @@ class HeadlessUiHarness {
     this.fontSmoothingMode = 1;
     this.fontSizePx = 9;
     this.speakerDisabled = false;
+    this.speakerPlayback = null;
+    this.speakerPlaybackSerial = 0;
+    this.speakerPlayCount = 0;
+    this.lastSpeakerPlayback = null;
     this.lowLevelHdAccessEnabled = false;
     this.lowLevelPciAccessEnabled = false;
     this.loadedDrivers = new Map();
@@ -482,7 +486,10 @@ class HeadlessUiHarness {
     this.systemLanguageId = 1;
     this.fontSmoothingMode = 1;
     this.fontSizePx = 9;
+    this.stopSpeakerPlayback();
     this.speakerDisabled = false;
+    this.speakerPlayCount = 0;
+    this.lastSpeakerPlayback = null;
     this.lowLevelHdAccessEnabled = false;
     this.lowLevelPciAccessEnabled = false;
     this.loadedDrivers = new Map();
@@ -778,12 +785,120 @@ class HeadlessUiHarness {
 
   setSpeakerDisabled(value) {
     this.speakerDisabled = !!value;
+    if (this.speakerDisabled) {
+      this.stopSpeakerPlayback();
+    }
     return true;
   }
 
   toggleSpeakerDisabled() {
     this.speakerDisabled = !this.speakerDisabled;
+    if (this.speakerDisabled) {
+      this.stopSpeakerPlayback();
+    }
     return !!this.speakerDisabled;
+  }
+
+  getSpeakerPlaybackInfo() {
+    const playback = this.speakerPlayback || null;
+    const last = this.lastSpeakerPlayback || null;
+    return {
+      disabled: !!this.speakerDisabled,
+      busy: !!playback,
+      playCount: this.speakerPlayCount >>> 0,
+      current: playback
+        ? {
+            ownerPid: playback.ownerPid >>> 0,
+            ownerSlot: playback.ownerSlot >>> 0,
+            processPath: String(playback.processPath || ""),
+            totalDurationMs: playback.totalDurationMs >>> 0,
+            serial: playback.serial >>> 0
+          }
+        : null,
+      last: last
+        ? {
+            ownerPid: last.ownerPid >>> 0,
+            ownerSlot: last.ownerSlot >>> 0,
+            processPath: String(last.processPath || ""),
+            totalDurationMs: last.totalDurationMs >>> 0,
+            itemCount: last.itemCount >>> 0,
+            toneCount: last.toneCount >>> 0,
+            serial: last.serial >>> 0
+          }
+        : null
+    };
+  }
+
+  finalizeSpeakerPlayback(playback) {
+    if (!playback || this.speakerPlayback !== playback) {
+      return false;
+    }
+    this.speakerPlayback = null;
+    if (playback.timeoutId) {
+      clearTimeout(playback.timeoutId);
+      playback.timeoutId = 0;
+    }
+    return true;
+  }
+
+  stopSpeakerPlayback(ownerPid) {
+    const playback = this.speakerPlayback || null;
+    if (!playback) {
+      return false;
+    }
+    if (ownerPid !== undefined && ownerPid !== null && (playback.ownerPid >>> 0) !== (ownerPid >>> 0)) {
+      return false;
+    }
+    return this.finalizeSpeakerPlayback(playback);
+  }
+
+  playSpeakerSequence(request) {
+    if (this.speakerDisabled) {
+      return 55;
+    }
+    if (this.speakerPlayback) {
+      return 55;
+    }
+    const payload = request || {};
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const totalDurationMs = Math.max(0, payload.totalDurationMs | 0) >>> 0;
+    const ownerPid = payload.ownerPid >>> 0;
+    const ownerSlot = payload.ownerSlot >>> 0;
+    const processPath = String(payload.processPath || "");
+    let toneCount = 0;
+    for (let i = 0; i < items.length; i += 1) {
+      if (items[i] && items[i].kind === "tone") {
+        toneCount += 1;
+      }
+    }
+    const serial = ((this.speakerPlaybackSerial + 1) >>> 0) || 1;
+    this.speakerPlaybackSerial = serial;
+    this.lastSpeakerPlayback = {
+      ownerPid,
+      ownerSlot,
+      processPath,
+      totalDurationMs,
+      itemCount: items.length >>> 0,
+      toneCount: toneCount >>> 0,
+      serial
+    };
+    this.speakerPlayCount = ((this.speakerPlayCount + 1) >>> 0);
+    if (!items.length || totalDurationMs <= 0) {
+      return 0;
+    }
+    const playback = {
+      ownerPid,
+      ownerSlot,
+      processPath,
+      totalDurationMs,
+      serial,
+      timeoutId: 0
+    };
+    playback.timeoutId = setTimeout(() => {
+      this.finalizeSpeakerPlayback(playback);
+    }, Math.max(0, totalDurationMs + 8) | 0);
+    this.speakerPlayback = playback;
+    return 0;
   }
 
   getLowLevelHdAccessEnabled() {
@@ -1321,6 +1436,7 @@ class HeadlessUiHarness {
   unregisterProcess(process) {
     const threadGroupId = process ? (process.threadGroupId >>> 0) : 0;
     const slot = process ? (process.slot >>> 0) : 0;
+    this.stopSpeakerPlayback(process ? (process.pid >>> 0) : 0);
     const index = this.processes.indexOf(process);
     if (index >= 0) {
       this.processes.splice(index, 1);
@@ -1550,6 +1666,7 @@ class HeadlessUiHarness {
   }
 
   close() {
+    this.stopSpeakerPlayback();
     const list = this.processes.slice();
     for (let i = 0; i < list.length; i += 1) {
       const process = list[i];
