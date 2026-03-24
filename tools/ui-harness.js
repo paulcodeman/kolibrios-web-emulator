@@ -1447,6 +1447,8 @@ class HeadlessUiHarness {
   }
 
   unregisterProcess(process) {
+    const threadGroupId = process ? (process.threadGroupId >>> 0) : 0;
+    const slot = process ? (process.slot >>> 0) : 0;
     const index = this.processes.indexOf(process);
     if (index >= 0) {
       this.processes.splice(index, 1);
@@ -1458,6 +1460,7 @@ class HeadlessUiHarness {
       this.activeProcess = next || null;
     }
     this.syncActiveAliases();
+    this.queueSiblingRedraw(threadGroupId, slot);
   }
 
   writeDebugBoardByte(value) {
@@ -2854,6 +2857,29 @@ class HeadlessUiHarness {
         continue;
       }
       process.emulator.wakeExecution(!!forceWake);
+    }
+  }
+
+  queueSiblingRedraw(threadGroupId, excludedSlot) {
+    const groupId = threadGroupId >>> 0;
+    const excluded = excludedSlot >>> 0;
+    if (!groupId) {
+      return;
+    }
+    for (let i = 0; i < this.processes.length; i += 1) {
+      const process = this.processes[i];
+      if (
+        !process ||
+        process.removed ||
+        !process.emulator ||
+        !process.emulator.running ||
+        (process.slot >>> 0) === excluded ||
+        (process.threadGroupId >>> 0) !== groupId
+      ) {
+        continue;
+      }
+      process.emulator.queueEvent(1);
+      process.emulator.wakeExecution(true);
     }
   }
 

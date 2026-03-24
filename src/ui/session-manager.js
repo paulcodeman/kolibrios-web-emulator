@@ -4737,6 +4737,29 @@
       }
     }
 
+    queueSiblingRedraw(threadGroupId, excludedSlot) {
+      const groupId = threadGroupId >>> 0;
+      const excluded = excludedSlot >>> 0;
+      if (!groupId) {
+        return;
+      }
+      for (let i = 0; i < this.processes.length; i += 1) {
+        const process = this.processes[i];
+        if (
+          !process ||
+          process.removed ||
+          !process.emulator ||
+          !process.emulator.running ||
+          (process.slot >>> 0) === excluded ||
+          (process.threadGroupId >>> 0) !== groupId
+        ) {
+          continue;
+        }
+        process.emulator.queueEvent(1);
+        process.emulator.wakeExecution(true);
+      }
+    }
+
     focusThreadSlot(slot) {
       const process = this.processBySlot.get(slot >>> 0) || null;
       if (!process || process.removed) {
@@ -4945,6 +4968,8 @@
       if (!process || process.removed) {
         return;
       }
+      const threadGroupId = process.threadGroupId >>> 0;
+      const slot = process.slot >>> 0;
       const index = this.processes.indexOf(process);
       if (index >= 0) {
         this.processes.splice(index, 1);
@@ -4961,6 +4986,7 @@
       } else {
         this.onProcessVisualStateChanged();
       }
+      this.queueSiblingRedraw(threadGroupId, slot);
     }
 
     syncDesktopSize() {
