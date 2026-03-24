@@ -1,7 +1,7 @@
 (() => {
   const KosEmu = globalThis.KosEmu;
   const { parseKex, formatKexInfo } = KosEmu.core.loader;
-  const { BrowserFsRoot } = KosEmu.ui.browserFs || {};
+  const { BrowserFsRoot, wrapWithHdMounts } = KosEmu.ui.browserFs || {};
 
   function keyboardKey(scanCode, extended) {
     return {
@@ -472,6 +472,11 @@
           void this.handleRestoreBundledDefaults();
         });
       }
+      if (this.mountFolderBtn) {
+        this.mountFolderBtn.addEventListener("click", () => {
+          void this.handleMountFolder();
+        });
+      }
       if (this.pickRootBtn) {
         this.pickRootBtn.addEventListener("click", () => this.handlePickRootFolder());
       }
@@ -527,6 +532,7 @@
       this.clearRootBtn = document.getElementById("clearRootBtn");
       this.fullscreenBtn = document.getElementById("fullscreenBtn");
       this.restoreDefaultsBtn = document.getElementById("restoreDefaultsBtn");
+      this.mountFolderBtn = document.getElementById("mountFolderBtn");
       this.traceSyscallsInput = document.getElementById("traceSyscalls");
       this.traceOpcodesInput = document.getElementById("traceOpcodes");
       this.traceImagesInput = document.getElementById("traceImages");
@@ -1240,6 +1246,19 @@
       }
     }
 
+    ensureHdMountableRoot() {
+      if (!this.browserFsRoot || typeof wrapWithHdMounts !== "function") {
+        return this.browserFsRoot || null;
+      }
+      const nextRoot = wrapWithHdMounts(this.browserFsRoot, {
+        log: (message) => this.log(message)
+      });
+      if (nextRoot && nextRoot !== this.browserFsRoot) {
+        this.browserFsRoot = nextRoot;
+      }
+      return this.browserFsRoot || null;
+    }
+
     async handleRestoreBundledDefaults() {
       if (!this.isLauncherPage()) {
         return;
@@ -1273,8 +1292,71 @@
       }
     }
 
+    async handleMountFolder() {
+      if (!BrowserFsRoot || !BrowserFsRoot.supportsDirectoryPicker || !BrowserFsRoot.supportsDirectoryPicker()) {
+        this.log("Browser directory access is unavailable in this browser.");
+        return;
+      }
+      if (!this.browserFsRoot) {
+        this.log("No active FS root available for HD mount.");
+        return;
+      }
+      const root = this.ensureHdMountableRoot();
+      if (!root || typeof root.mountDirectoryHandle !== "function") {
+        this.log("HD mounts are unavailable for the current FS root.");
+        return;
+      }
+      this.fsRootBusy = true;
+      this.updateFsRootStatus();
+      this.setStatus("Selecting folder to mount...");
+      try {
+        const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+        this.setStatus(`Scanning ${handle.name}...`);
+        const mounted = await root.mountDirectoryHandle(handle, {
+          log: (msg) => this.log(msg),
+          onProgress: (progress) => {
+            if (!progress) {
+              return;
+            }
+            this.setStatus(`Scanning ${progress.label}: ${progress.files} files`);
+          }
+        });
+        if (!mounted || !mounted.root || mounted.root.permission !== "granted" || !mounted.diskName) {
+          throw new Error("Directory access was not granted.");
+        }
+        if (typeof mounted.root.verifyWriteAccess === "function") {
+          const writeAccess = await mounted.root.verifyWriteAccess();
+          if (!writeAccess || !writeAccess.ok) {
+            if (typeof root.removeMount === "function") {
+              root.removeMount(mounted.diskName);
+            }
+            throw new Error(
+              `Mounted folder is readable, but write access failed: ${writeAccess && writeAccess.message ? writeAccess.message : "Unknown error."}`
+            );
+          }
+        }
+        const mountPath = `/${mounted.diskName}/${mounted.volumeName}`;
+        this.log(`Mounted browser folder '${mounted.label}' as ${mountPath}`);
+        this.setStatus(`Mounted ${mountPath}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message !== "The user aborted a request.") {
+          this.log(`Folder mount failed: ${message}`);
+          this.setStatus("Mount failed");
+          return;
+        }
+        this.setStatus("Session ready");
+      } finally {
+        this.fsRootBusy = false;
+        this.updateFsRootStatus();
+      }
+    }
+
     updateFsRootStatus() {
       const supported = !!(BrowserFsRoot && BrowserFsRoot.supportsDirectoryPicker && BrowserFsRoot.supportsDirectoryPicker());
+      if (this.mountFolderBtn) {
+        this.mountFolderBtn.disabled = this.fsRootBusy || !supported || !this.browserFsRoot;
+      }
       if (this.pickRootBtn) {
         this.pickRootBtn.disabled = this.fsRootBusy || !supported;
       }
@@ -1551,6 +1633,13 @@
       return (kpath) => this.browserFsRoot.fileProvider(kpath);
     }
 
+    getFileProviderAsync() {
+      if (!this.browserFsRoot || typeof this.browserFsRoot.fileProviderAsync !== "function") {
+        return null;
+      }
+      return (kpath) => this.browserFsRoot.fileProviderAsync(kpath);
+    }
+
     getFileInfoProvider() {
       if (!this.browserFsRoot) {
         return null;
@@ -1558,11 +1647,25 @@
       return (kpath, kind) => this.browserFsRoot.fileInfoProvider(kpath, kind);
     }
 
+    getFileInfoProviderAsync() {
+      if (!this.browserFsRoot || typeof this.browserFsRoot.fileInfoProviderAsync !== "function") {
+        return null;
+      }
+      return (kpath, kind) => this.browserFsRoot.fileInfoProviderAsync(kpath, kind);
+    }
+
     getFileMutationProvider() {
       if (!this.browserFsRoot) {
         return null;
       }
       return (op, kpath, options) => this.browserFsRoot.mutationProvider(op, kpath, options);
+    }
+
+    getFileMutationProviderAsync() {
+      if (!this.browserFsRoot || typeof this.browserFsRoot.mutationProviderAsync !== "function") {
+        return null;
+      }
+      return (op, kpath, options) => this.browserFsRoot.mutationProviderAsync(op, kpath, options);
     }
   }
 

@@ -855,8 +855,11 @@
       emulator.getHostPixelOwnerAt = (x, y) => this.manager.getPixelOwnerAt(x | 0, y | 0);
       emulator.getHostPixelColorAt = (x, y) => this.manager.getPixelColorAt(x | 0, y | 0);
       emulator.fileProvider = this.app.getFileProvider();
+      emulator.fileProviderAsync = this.app.getFileProviderAsync();
       emulator.fileInfoProvider = this.app.getFileInfoProvider();
+      emulator.fileInfoProviderAsync = this.app.getFileInfoProviderAsync();
       emulator.fileMutationProvider = this.app.getFileMutationProvider();
+      emulator.fileMutationProviderAsync = this.app.getFileMutationProviderAsync();
       const applyHostWindowGeometry = typeof emulator.applyHostWindowGeometry === "function"
         ? emulator.applyHostWindowGeometry.bind(emulator)
         : null;

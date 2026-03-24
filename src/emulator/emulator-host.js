@@ -2178,6 +2178,37 @@
         return null;
       },
 
+      async loadHostFileAsync(path) {
+        if (!path) {
+          return null;
+        }
+        const resolvedPath = this.resolveKosPath(path);
+        const provider = typeof this.fileProviderAsync === "function"
+          ? this.fileProviderAsync
+          : null;
+        if (!provider) {
+          return this.loadHostFile(resolvedPath);
+        }
+        try {
+          const data = await provider(resolvedPath);
+          if (!data) {
+            return null;
+          }
+          if (data instanceof Uint8Array) {
+            return data;
+          }
+          if (data instanceof ArrayBuffer) {
+            return new Uint8Array(data);
+          }
+          if (ArrayBuffer.isView(data)) {
+            return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+          }
+        } catch (err) {
+          this.log(`File provider error for '${resolvedPath}': ${err}`);
+        }
+        return null;
+      },
+
       maybeUnpackHostFile(data, path) {
         if (!data || !data.length || typeof unpackKpck !== "function") {
           return data;
@@ -2216,6 +2247,25 @@
         return null;
       },
 
+      async loadHostInfoAsync(path, kind) {
+        if (!path) {
+          return null;
+        }
+        const resolvedPath = this.resolveKosPath(path);
+        const provider = typeof this.fileInfoProviderAsync === "function"
+          ? this.fileInfoProviderAsync
+          : null;
+        if (!provider) {
+          return this.loadHostInfo(resolvedPath, kind);
+        }
+        try {
+          return await provider(resolvedPath, kind || "stat") || null;
+        } catch (err) {
+          this.log(`File info provider error for '${resolvedPath}': ${err}`);
+        }
+        return null;
+      },
+
       mutateHostPath(op, path, options) {
         if (!this.fileMutationProvider || !path) {
           return { errorCode: 2, written: 0 };
@@ -2239,8 +2289,41 @@
         }
       },
 
+      async mutateHostPathAsync(op, path, options) {
+        if (!path) {
+          return { errorCode: 2, written: 0 };
+        }
+        const resolvedPath = this.resolveKosPath(path);
+        const provider = typeof this.fileMutationProviderAsync === "function"
+          ? this.fileMutationProviderAsync
+          : null;
+        if (!provider) {
+          return this.mutateHostPath(op, resolvedPath, options);
+        }
+        try {
+          const result = await provider(op, resolvedPath, options || {});
+          if (typeof result === "number") {
+            return {
+              errorCode: result >>> 0,
+              written: 0
+            };
+          }
+          return {
+            errorCode: result && result.errorCode !== undefined ? (result.errorCode >>> 0) : 0,
+            written: result && result.written !== undefined ? (result.written >>> 0) : 0
+          };
+        } catch (err) {
+          this.log(`File mutation provider error for '${resolvedPath}' (${op}): ${err}`);
+          return { errorCode: 10, written: 0 };
+        }
+      },
+
       createOrRewriteHostFile(path, data) {
         return this.mutateHostPath("create-file", path, { data });
+      },
+
+      createOrRewriteHostFileAsync(path, data) {
+        return this.mutateHostPathAsync("create-file", path, { data });
       },
 
       writeExistingHostFile(path, offset, data) {
@@ -2250,20 +2333,43 @@
         });
       },
 
+      writeExistingHostFileAsync(path, offset, data) {
+        return this.mutateHostPathAsync("write-file", path, {
+          offset: offset >>> 0,
+          data
+        });
+      },
+
       setHostFileSize(path, size) {
         return this.mutateHostPath("set-end", path, { size: size >>> 0 });
+      },
+
+      setHostFileSizeAsync(path, size) {
+        return this.mutateHostPathAsync("set-end", path, { size: size >>> 0 });
       },
 
       deleteHostPath(path) {
         return this.mutateHostPath("delete", path, {});
       },
 
+      deleteHostPathAsync(path) {
+        return this.mutateHostPathAsync("delete", path, {});
+      },
+
       createHostFolder(path) {
         return this.mutateHostPath("create-folder", path, {});
       },
 
+      createHostFolderAsync(path) {
+        return this.mutateHostPathAsync("create-folder", path, {});
+      },
+
       renameOrMoveHostPath(path, nextPath) {
         return this.mutateHostPath("move", path, { nextPath });
+      },
+
+      renameOrMoveHostPathAsync(path, nextPath) {
+        return this.mutateHostPathAsync("move", path, { nextPath });
       },
 
       loadFileToHeap(path) {

@@ -5005,12 +5005,143 @@
         return this.readCString(ptr, maxLen || 4096);
       },
 
+      yieldForSuccessfulFileMutation(result) {
+        if (!result || !this.fileMutationProvider) {
+          return;
+        }
+        if ((result.errorCode >>> 0) !== 0) {
+          return;
+        }
+        this.requestYield(0, "host-fs");
+      },
+
+      continueAsyncHostFsRequest(stateKey, promiseFactory, options) {
+        const key = String(stateKey || "");
+        if (!key) {
+          return null;
+        }
+        const pending = this[key] || null;
+        if (pending) {
+          if (pending.ready) {
+            this[key] = null;
+            return pending.result;
+          }
+          this.repeatCurrentInstruction = true;
+          this.requestYield(0, "host-fs");
+          return null;
+        }
+        const createPromise = typeof promiseFactory === "function" ? promiseFactory : null;
+        if (!createPromise) {
+          return null;
+        }
+        let promise;
+        try {
+          promise = createPromise();
+        } catch (err) {
+          this.log(`${options && options.setupLabel ? options.setupLabel : "Async host FS setup failed"}: ${err}`);
+          return options && Object.prototype.hasOwnProperty.call(options, "fallbackResult")
+            ? options.fallbackResult
+            : null;
+        }
+        if (!promise || typeof promise.then !== "function") {
+          return null;
+        }
+        const normalizeResult = options && typeof options.normalizeResult === "function"
+          ? options.normalizeResult
+          : ((result) => result);
+        const state = {
+          ready: false,
+          result: options && Object.prototype.hasOwnProperty.call(options, "fallbackResult")
+            ? options.fallbackResult
+            : null
+        };
+        this[key] = state;
+        Promise.resolve(promise).then((result) => {
+          state.result = normalizeResult(result);
+          state.ready = true;
+          if (typeof this.wakeExecution === "function") {
+            this.wakeExecution(true);
+          }
+        }).catch((err) => {
+          this.log(`${options && options.failLabel ? options.failLabel : "Async host FS failed"}: ${err}`);
+          state.result = options && Object.prototype.hasOwnProperty.call(options, "fallbackResult")
+            ? options.fallbackResult
+            : null;
+          state.ready = true;
+          if (typeof this.wakeExecution === "function") {
+            this.wakeExecution(true);
+          }
+        });
+        this.repeatCurrentInstruction = true;
+        this.requestYield(0, "host-fs");
+        return null;
+      },
+
+      continueAsyncHostFileMutation(promiseFactory) {
+        return this.continueAsyncHostFsRequest("pendingHostFsMutation", promiseFactory, {
+          fallbackResult: {
+            errorCode: 10,
+            written: 0
+          },
+          setupLabel: "Async host file mutation setup failed",
+          failLabel: "Async host file mutation failed",
+          normalizeResult(result) {
+            return {
+              errorCode: result && result.errorCode !== undefined ? (result.errorCode >>> 0) : 0,
+              written: result && result.written !== undefined ? (result.written >>> 0) : 0
+            };
+          }
+        });
+      },
+
+      continueAsyncHostFileRead(promiseFactory) {
+        return this.continueAsyncHostFsRequest("pendingHostFsRead", promiseFactory, {
+          fallbackResult: null,
+          setupLabel: "Async host file read setup failed",
+          failLabel: "Async host file read failed",
+          normalizeResult(result) {
+            if (!result) {
+              return null;
+            }
+            if (result instanceof Uint8Array) {
+              return result;
+            }
+            if (result instanceof ArrayBuffer) {
+              return new Uint8Array(result);
+            }
+            if (ArrayBuffer.isView(result)) {
+              return new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
+            }
+            return null;
+          }
+        });
+      },
+
+      continueAsyncHostFileInfo(promiseFactory) {
+        return this.continueAsyncHostFsRequest("pendingHostFsInfo", promiseFactory, {
+          fallbackResult: null,
+          setupLabel: "Async host file info setup failed",
+          failLabel: "Async host file info failed",
+          normalizeResult(result) {
+            return result || null;
+          }
+        });
+      },
+
       sysFileRead(infoPtr, encoded) {
         const offset = this.readMem32((infoPtr + 4) >>> 0) >>> 0;
         const size = this.readMem32((infoPtr + 0x0c) >>> 0) >>> 0;
         const bufferPtr = this.readMem32((infoPtr + 0x10) >>> 0) >>> 0;
         const path = this.readFileApiPath(infoPtr, encoded);
-        const data = this.maybeUnpackHostFile(this.loadHostFile(path), path);
+        const asyncData = this.continueAsyncHostFileRead(
+          typeof this.loadHostFileAsync === "function" && this.fileProviderAsync
+            ? () => this.loadHostFileAsync(path)
+            : null
+        );
+        if (this.repeatCurrentInstruction) {
+          return;
+        }
+        const data = this.maybeUnpackHostFile(asyncData || this.loadHostFile(path), path);
         if (!data) {
           this.writeReg(REG.EAX, 5);
           this.writeReg(REG.EBX, 0);
@@ -5040,7 +5171,15 @@
         const count = this.readMem32((infoPtr + 0x0c) >>> 0) >>> 0;
         const bufferPtr = this.readMem32((infoPtr + 0x10) >>> 0) >>> 0;
         const path = this.readFileApiPath(infoPtr, encoded);
-        const info = this.loadHostInfo(path, "list");
+        const asyncInfo = this.continueAsyncHostFileInfo(
+          typeof this.loadHostInfoAsync === "function" && this.fileInfoProviderAsync
+            ? () => this.loadHostInfoAsync(path, "list")
+            : null
+        );
+        if (this.repeatCurrentInstruction) {
+          return;
+        }
+        const info = asyncInfo || this.loadHostInfo(path, "list");
         if (!info || !info.exists) {
           this.writeReg(REG.EAX, 5);
           this.writeReg(REG.EBX, 0);
@@ -5082,9 +5221,18 @@
         const bufferPtr = this.readMem32((infoPtr + 0x10) >>> 0) >>> 0;
         const path = this.readFileApiPath(infoPtr, encoded);
         const data = size && bufferPtr ? (this.readMemBlock(bufferPtr, size) || new Uint8Array(0)) : new Uint8Array(0);
-        const result = this.createOrRewriteHostFile(path, data);
+        const asyncResult = this.continueAsyncHostFileMutation(
+          typeof this.createOrRewriteHostFileAsync === "function" && this.fileMutationProviderAsync
+            ? () => this.createOrRewriteHostFileAsync(path, data)
+            : null
+        );
+        if (this.repeatCurrentInstruction) {
+          return;
+        }
+        const result = asyncResult || this.createOrRewriteHostFile(path, data);
         this.writeReg(REG.EAX, result.errorCode >>> 0);
         this.writeReg(REG.EBX, result.errorCode ? 0 : (result.written >>> 0));
+        this.yieldForSuccessfulFileMutation(result);
       },
 
       sysFileWrite(infoPtr, encoded) {
@@ -5093,9 +5241,18 @@
         const bufferPtr = this.readMem32((infoPtr + 0x10) >>> 0) >>> 0;
         const path = this.readFileApiPath(infoPtr, encoded);
         const data = size && bufferPtr ? (this.readMemBlock(bufferPtr, size) || new Uint8Array(0)) : new Uint8Array(0);
-        const result = this.writeExistingHostFile(path, offset, data);
+        const asyncResult = this.continueAsyncHostFileMutation(
+          typeof this.writeExistingHostFileAsync === "function" && this.fileMutationProviderAsync
+            ? () => this.writeExistingHostFileAsync(path, offset, data)
+            : null
+        );
+        if (this.repeatCurrentInstruction) {
+          return;
+        }
+        const result = asyncResult || this.writeExistingHostFile(path, offset, data);
         this.writeReg(REG.EAX, result.errorCode >>> 0);
         this.writeReg(REG.EBX, result.errorCode ? 0 : (result.written >>> 0));
+        this.yieldForSuccessfulFileMutation(result);
       },
 
       sysFileSetEnd(infoPtr, encoded) {
@@ -5107,15 +5264,32 @@
           this.writeReg(REG.EBX, 0);
           return;
         }
-        const result = this.setHostFileSize(path, sizeLo >>> 0);
+        const asyncResult = this.continueAsyncHostFileMutation(
+          typeof this.setHostFileSizeAsync === "function" && this.fileMutationProviderAsync
+            ? () => this.setHostFileSizeAsync(path, sizeLo >>> 0)
+            : null
+        );
+        if (this.repeatCurrentInstruction) {
+          return;
+        }
+        const result = asyncResult || this.setHostFileSize(path, sizeLo >>> 0);
         this.writeReg(REG.EAX, result.errorCode >>> 0);
         this.writeReg(REG.EBX, 0);
+        this.yieldForSuccessfulFileMutation(result);
       },
 
       sysFileGetInfo(infoPtr, encoded) {
         const bufferPtr = this.readMem32((infoPtr + 0x10) >>> 0) >>> 0;
         const path = this.readFileApiPath(infoPtr, encoded);
-        const info = this.loadHostInfo(path, "stat");
+        const asyncInfo = this.continueAsyncHostFileInfo(
+          typeof this.loadHostInfoAsync === "function" && this.fileInfoProviderAsync
+            ? () => this.loadHostInfoAsync(path, "stat")
+            : null
+        );
+        if (this.repeatCurrentInstruction) {
+          return;
+        }
+        const info = asyncInfo || this.loadHostInfo(path, "stat");
         if (!info || !info.exists) {
           this.writeReg(REG.EAX, 5);
           this.writeReg(REG.EBX, 0);
@@ -5130,23 +5304,49 @@
 
       sysFileSetInfo(infoPtr, encoded) {
         const path = this.readFileApiPath(infoPtr, encoded);
-        const info = this.loadHostInfo(path, "stat");
+        const asyncInfo = this.continueAsyncHostFileInfo(
+          typeof this.loadHostInfoAsync === "function" && this.fileInfoProviderAsync
+            ? () => this.loadHostInfoAsync(path, "stat")
+            : null
+        );
+        if (this.repeatCurrentInstruction) {
+          return;
+        }
+        const info = asyncInfo || this.loadHostInfo(path, "stat");
         this.writeReg(REG.EAX, info && info.exists ? 0 : 5);
         this.writeReg(REG.EBX, 0);
       },
 
       sysFileDelete(infoPtr, encoded) {
         const path = this.readFileApiPath(infoPtr, encoded);
-        const result = this.deleteHostPath(path);
+        const asyncResult = this.continueAsyncHostFileMutation(
+          typeof this.deleteHostPathAsync === "function" && this.fileMutationProviderAsync
+            ? () => this.deleteHostPathAsync(path)
+            : null
+        );
+        if (this.repeatCurrentInstruction) {
+          return;
+        }
+        const result = asyncResult || this.deleteHostPath(path);
         this.writeReg(REG.EAX, result.errorCode >>> 0);
         this.writeReg(REG.EBX, 0);
+        this.yieldForSuccessfulFileMutation(result);
       },
 
       sysFileCreateFolder(infoPtr, encoded) {
         const path = this.readFileApiPath(infoPtr, encoded);
-        const result = this.createHostFolder(path);
+        const asyncResult = this.continueAsyncHostFileMutation(
+          typeof this.createHostFolderAsync === "function" && this.fileMutationProviderAsync
+            ? () => this.createHostFolderAsync(path)
+            : null
+        );
+        if (this.repeatCurrentInstruction) {
+          return;
+        }
+        const result = asyncResult || this.createHostFolder(path);
         this.writeReg(REG.EAX, result.errorCode >>> 0);
         this.writeReg(REG.EBX, 0);
+        this.yieldForSuccessfulFileMutation(result);
       },
 
       sysFileRenameMove(infoPtr, encoded) {
@@ -5158,9 +5358,18 @@
           this.writeReg(REG.EBX, 0);
           return;
         }
-        const result = this.renameOrMoveHostPath(path, nextPath);
+        const asyncResult = this.continueAsyncHostFileMutation(
+          typeof this.renameOrMoveHostPathAsync === "function" && this.fileMutationProviderAsync
+            ? () => this.renameOrMoveHostPathAsync(path, nextPath)
+            : null
+        );
+        if (this.repeatCurrentInstruction) {
+          return;
+        }
+        const result = asyncResult || this.renameOrMoveHostPath(path, nextPath);
         this.writeReg(REG.EAX, result.errorCode >>> 0);
         this.writeReg(REG.EBX, 0);
+        this.yieldForSuccessfulFileMutation(result);
       },
 
       sysFileStartApp(infoPtr, encoded) {

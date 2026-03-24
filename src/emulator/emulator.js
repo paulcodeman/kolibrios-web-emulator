@@ -1045,6 +1045,9 @@ class Emulator {
     this.sliceDeadlineAt = 0;
     this.sliceTimeCheckCounter = this.sliceTimeCheckInterval | 0;
     this.repeatCurrentInstruction = false;
+    this.pendingHostFsRead = null;
+    this.pendingHostFsInfo = null;
+    this.pendingHostFsMutation = null;
     this.waitEventDeadlineAt = 0;
     this.heapEnabled = false;
     this.heapBase = 0;
