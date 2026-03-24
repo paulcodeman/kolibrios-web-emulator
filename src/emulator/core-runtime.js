@@ -66,7 +66,6 @@
         this.yieldDelay = 0;
         this.yieldMode = "";
         this.presentYieldPending = false;
-        this.presentYieldDelay = 0;
         let executed = 0;
         const busyStart = typeof this.getWallClockMs === "function" ? this.getWallClockMs() : Date.now();
         this.cpuBusyActiveStartMs = busyStart;
@@ -169,13 +168,11 @@
         if (!this.running) {
           return;
         }
-        if (!this.yieldRequested && this.presentYieldPending) {
-          this.yieldRequested = true;
-          this.yieldDelay = Math.max(0, this.presentYieldDelay | 0);
-          this.yieldMode = "";
+        const deferredPresentPending = !!this.presentYieldPending;
+        if (!this.yieldRequested && deferredPresentPending && this.surfaceDirty && !this.inRedraw) {
+          this.presentIfNeeded(true);
         }
         this.presentYieldPending = false;
-        this.presentYieldDelay = 0;
         const delay = this.yieldRequested ? this.yieldDelay : 0;
         this.scheduleStep(delay);
       },

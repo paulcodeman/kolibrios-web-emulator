@@ -4250,23 +4250,21 @@
         if (this.inRedraw && !force) {
           return;
         }
-        const canThrottlePresent =
+        const canDeferPresent =
+          !force &&
           this.running &&
           !this.inRedraw &&
           this.windowDefined &&
           (this.useImmediateScheduler || typeof requestAnimationFrame === "function");
+        if (canDeferPresent) {
+          this.presentYieldPending = true;
+          return;
+        }
         const now =
           typeof performance !== "undefined" && typeof performance.now === "function"
             ? performance.now()
             : Date.now();
         if (!force && now - this.lastPresentAt < 16) {
-          if (canThrottlePresent) {
-            this.presentYieldPending = true;
-            this.presentYieldDelay = Math.max(
-              this.presentYieldDelay | 0,
-              Math.max(1, 16 - Math.max(0, (now - this.lastPresentAt) | 0))
-            );
-          }
           return;
         }
         this.lastPresentAt = now;

@@ -55,9 +55,9 @@ try {
   assertEq(executed, 3, "present should not stop the current interpreter slice");
   assertEq(presentCalls, 1, "present throttling should still coalesce repeated flushes");
   assert(scheduled && scheduled.mode === "", "present throttling should not switch the scheduler into frame-wait mode");
-  assert(scheduled && scheduled.delay >= 1 && scheduled.delay <= 16, "present throttling should resume after the remaining frame budget");
+  assertEq(scheduled && scheduled.delay, 0, "deferred present should not add an extra scheduler sleep");
 
-  console.log("Autotest OK: present scheduling coalesces rapid presents without stalling the current slice.");
+  console.log("Autotest OK: present batching coalesces rapid presents without adding extra frame delay.");
 } catch (err) {
   console.error(err instanceof Error ? err.stack || err.message : String(err));
   process.exit(2);

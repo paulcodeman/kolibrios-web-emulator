@@ -853,7 +853,6 @@ class Emulator {
     this.yieldDelay = 0;
     this.yieldMode = "";
     this.presentYieldPending = false;
-    this.presentYieldDelay = 0;
     this.repeatCurrentInstruction = false;
     this.waitEventDeadlineAt = 0;
     this.maxInstructions = isWorkerContext ? 1000000 : 800000;
@@ -1043,7 +1042,6 @@ class Emulator {
     this.yieldDelay = 0;
     this.yieldMode = "";
     this.presentYieldPending = false;
-    this.presentYieldDelay = 0;
     this.sliceDeadlineAt = 0;
     this.sliceTimeCheckCounter = this.sliceTimeCheckInterval | 0;
     this.repeatCurrentInstruction = false;
