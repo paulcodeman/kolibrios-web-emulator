@@ -1961,6 +1961,8 @@
         this.removeQueuedEvent(2);
         this.pendingButtonResult = 1;
         this.removeQueuedEvent(3);
+        this.mouseEventBuffer.length = 0;
+        this.removeQueuedEvent(6);
         this.activeButtonSerial = 0;
     
         const winX = ebx >> 16;
@@ -2213,6 +2215,10 @@
         return typeof this.isHostThreadActive === "function"
           ? this.isHostThreadActive()
           : true;
+      },
+
+      hasPendingMouseEvent() {
+        return Array.isArray(this.mouseEventBuffer) && this.mouseEventBuffer.length > 0;
       },
 
       sysGetKey() {
@@ -6411,7 +6417,7 @@
       },
 
       isPersistentBufferedEvent(eventId) {
-        return eventId === 1 || eventId === 2 || eventId === 3;
+        return eventId === 1 || eventId === 2 || eventId === 3 || eventId === 6;
       },
 
       hasQueuedEvent(eventId) {
@@ -6439,6 +6445,9 @@
           if (eventId === 3 && !this.hasPendingButtonEvent()) {
             continue;
           }
+          if (eventId === 6 && !this.hasPendingMouseEvent()) {
+            continue;
+          }
           return eventId;
         }
         for (let i = 0; i < this.eventQueue.length; i += 1) {
@@ -6452,6 +6461,9 @@
           if (eventId === 3 && !this.hasPendingButtonEvent()) {
             continue;
           }
+          if (eventId === 6 && !this.hasPendingMouseEvent()) {
+            continue;
+          }
           if (this.isEventAllowed(eventId)) {
             return eventId;
           }
@@ -6463,6 +6475,18 @@
         const eventId = this.getNextQueuedEventId();
         if (!eventId) {
           return 0;
+        }
+        if (eventId === 6) {
+          const nextMouseEvent = this.hasPendingMouseEvent()
+            ? this.mouseEventBuffer.shift()
+            : null;
+          if (typeof this.applyBufferedMouseEvent === "function") {
+            this.applyBufferedMouseEvent(nextMouseEvent);
+          }
+          if (!this.hasPendingMouseEvent()) {
+            this.removeQueuedEvent(6);
+          }
+          return 6;
         }
         if (!this.isPersistentBufferedEvent(eventId)) {
           this.removeQueuedEvent(eventId);

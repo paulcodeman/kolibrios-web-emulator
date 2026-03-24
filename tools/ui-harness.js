@@ -2690,7 +2690,15 @@ class HeadlessUiHarness {
   }
 
   getMaxThreadSlot() {
-    return Math.max(0, this.nextSlot - 1) >>> 0;
+    let maxSlot = 0;
+    for (let i = 0; i < this.processes.length; i += 1) {
+      const process = this.processes[i];
+      if (!process || process.removed) {
+        continue;
+      }
+      maxSlot = Math.max(maxSlot, process.slot | 0);
+    }
+    return Math.max(0, maxSlot | 0) >>> 0;
   }
 
   getActiveThreadSlot() {

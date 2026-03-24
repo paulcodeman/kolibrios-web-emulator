@@ -942,6 +942,7 @@ class Emulator {
     this.mouseScrollX = 0;
     this.mouseScrollY = 0;
     this.mouseInside = false;
+    this.mouseEventBuffer = [];
     this.mouseSpeedDivider = 4;
     this.mouseSensitivity = 3;
     this.mouseDoubleClickDelay = 50;
@@ -1115,6 +1116,7 @@ class Emulator {
     this.mouseScrollX = 0;
     this.mouseScrollY = 0;
     this.mouseInside = false;
+    this.mouseEventBuffer.length = 0;
     this.mouseSpeedDivider = 4;
     this.mouseSensitivity = 3;
     this.mouseDoubleClickDelay = 50;

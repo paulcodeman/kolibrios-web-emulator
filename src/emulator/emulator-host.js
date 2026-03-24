@@ -516,6 +516,10 @@
       setMouseState(x, y, buttons, inside, pressMask, releaseMask, wheelX, wheelY, moved, screenX, screenY) {
         this.setMousePosition(x, y, inside, screenX, screenY);
         this.mouseButtons = buttons & 0x1f;
+        const eventFlags =
+          (((pressMask & 0x1f) << 8) | ((releaseMask & 0x1f) << 16)) >>> 0 |
+          (wheelY ? (1 << 15) : 0) |
+          (wheelX ? (1 << 23) : 0);
         let buttonEventQueued = false;
         if (pressMask) {
           this.mouseEventFlags |= ((pressMask & 0x1f) << 8) >>> 0;
@@ -546,6 +550,20 @@
           typeof this.shouldRecordMouseEvent === "function" &&
           this.shouldRecordMouseEvent();
         if (mouseEventQueued) {
+          this.pushBufferedMouseEvent(
+            x,
+            y,
+            buttons,
+            inside,
+            pressMask,
+            releaseMask,
+            wheelX,
+            wheelY,
+            moved,
+            screenX,
+            screenY,
+            eventFlags
+          );
           this.queueEvent(6);
         }
         const shouldWakeForMouse =
@@ -571,6 +589,39 @@
         });
         this.removeQueuedEvent(2);
         this.queueEvent(2);
+      },
+
+      pushBufferedMouseEvent(x, y, buttons, inside, pressMask, releaseMask, wheelX, wheelY, moved, screenX, screenY, eventFlags) {
+        this.mouseEventBuffer.push({
+          x: x | 0,
+          y: y | 0,
+          buttons: buttons & 0x1f,
+          inside: !!inside,
+          screenX: screenX === undefined ? (x | 0) : (screenX | 0),
+          screenY: screenY === undefined ? (y | 0) : (screenY | 0),
+          eventFlags: eventFlags >>> 0,
+          scrollX: wheelX | 0,
+          scrollY: wheelY | 0,
+          moved: !!moved,
+          pressMask: pressMask & 0x1f,
+          releaseMask: releaseMask & 0x1f
+        });
+      },
+
+      applyBufferedMouseEvent(entry) {
+        if (!entry) {
+          return false;
+        }
+        this.mouseX = entry.x | 0;
+        this.mouseY = entry.y | 0;
+        this.mouseButtons = entry.buttons & 0x1f;
+        this.mouseInside = !!entry.inside;
+        this.mouseScreenX = entry.screenX | 0;
+        this.mouseScreenY = entry.screenY | 0;
+        this.mouseEventFlags = entry.eventFlags >>> 0;
+        this.mouseScrollX = entry.scrollX | 0;
+        this.mouseScrollY = entry.scrollY | 0;
+        return true;
       },
 
       queueKeyEvent(asciiCode, scanCode, controlMask, hotkey) {
