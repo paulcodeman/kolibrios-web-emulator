@@ -652,6 +652,18 @@ function sseBinaryFloat32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) 
   return sseBinaryFloat32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op);
 }
 
+function sseBinaryFloat32BitsJs(dst, src, op) {
+  return numberToF32Bits(sseBinaryFloatJs(f32BitsToNumber(dst), f32BitsToNumber(src), op));
+}
+
+function sseBinaryFloat32Bits(dst, src, op) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.sseBinaryFloat32Bits === "function") {
+    return backend.sseBinaryFloat32Bits(dst >>> 0, src >>> 0, op >>> 0) >>> 0;
+  }
+  return sseBinaryFloat32BitsJs(dst, src, op);
+}
+
 function sseCompare32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
   const predicate = imm & 7;
   const out = [0, 0, 0, 0];
@@ -710,6 +722,32 @@ function cvtdq2ps32x4(v0, v1, v2, v3) {
     return backend.cvtdq2ps32x4(v0 >>> 0, v1 >>> 0, v2 >>> 0, v3 >>> 0);
   }
   return cvtdq2ps32x4Js(v0, v1, v2, v3);
+}
+
+function haddps32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3) {
+  return [
+    numberToF32Bits(f32BitsToNumber(dst0) + f32BitsToNumber(dst1)),
+    numberToF32Bits(f32BitsToNumber(dst2) + f32BitsToNumber(dst3)),
+    numberToF32Bits(f32BitsToNumber(src0) + f32BitsToNumber(src1)),
+    numberToF32Bits(f32BitsToNumber(src2) + f32BitsToNumber(src3))
+  ];
+}
+
+function haddps32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.haddps32x4 === "function") {
+    return backend.haddps32x4(
+      dst0 >>> 0,
+      dst1 >>> 0,
+      dst2 >>> 0,
+      dst3 >>> 0,
+      src0 >>> 0,
+      src1 >>> 0,
+      src2 >>> 0,
+      src3 >>> 0
+    );
+  }
+  return haddps32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3);
 }
 
 function widthMask(widthBits) {
@@ -1360,11 +1398,17 @@ function getJsCpuHelperBackend() {
       sseBinaryFloat32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) {
         return sseBinaryFloat32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op);
       },
+      sseBinaryFloat32Bits(dst, src, op) {
+        return sseBinaryFloat32BitsJs(dst, src, op);
+      },
       sseCompare32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
         return sseCompare32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm);
       },
       cvtdq2ps32x4(v0, v1, v2, v3) {
         return cvtdq2ps32x4Js(v0, v1, v2, v3);
+      },
+      haddps32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3) {
+        return haddps32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3);
       },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
@@ -3036,8 +3080,10 @@ class Emulator {
     sseCompareCode,
     sseUnaryFloat32x4,
     sseBinaryFloat32x4,
+    sseBinaryFloat32Bits,
     sseCompare32x4,
     cvtdq2ps32x4,
+    haddps32x4,
     updateLogicFlagsWidth,
     updateAddFlags,
     updateAdcFlags,

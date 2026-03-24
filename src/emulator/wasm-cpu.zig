@@ -1050,6 +1050,10 @@ pub export fn sse_binary_float32x4_exec(
     );
 }
 
+pub export fn sse_binary_float32_bits(dst: u32, src: u32, op: u32) u32 {
+    return f32ToBits(sseBinaryFloat32Impl(bitsToF32(dst), bitsToF32(src), op));
+}
+
 pub export fn sse_compare32x4_exec(
     dst0: u32,
     dst1: u32,
@@ -1083,6 +1087,24 @@ pub export fn cvtdq2ps32x4_exec(v0: u32, v1: u32, v2: u32, v3: u32) void {
         f32ToBits(@as(f32, @floatFromInt(iv1))),
         f32ToBits(@as(f32, @floatFromInt(iv2))),
         f32ToBits(@as(f32, @floatFromInt(iv3))),
+    );
+}
+
+pub export fn haddps32x4_exec(
+    dst0: u32,
+    dst1: u32,
+    dst2: u32,
+    dst3: u32,
+    src0: u32,
+    src1: u32,
+    src2: u32,
+    src3: u32,
+) void {
+    setPacked128(
+        f32ToBits(bitsToF32(dst0) + bitsToF32(dst1)),
+        f32ToBits(bitsToF32(dst2) + bitsToF32(dst3)),
+        f32ToBits(bitsToF32(src0) + bitsToF32(src1)),
+        f32ToBits(bitsToF32(src2) + bitsToF32(src3)),
     );
 }
 

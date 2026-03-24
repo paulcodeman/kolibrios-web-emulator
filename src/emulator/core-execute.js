@@ -42,8 +42,10 @@
       sseCompareCode,
       sseUnaryFloat32x4,
       sseBinaryFloat32x4,
+      sseBinaryFloat32Bits,
       sseCompare32x4,
       cvtdq2ps32x4,
+      haddps32x4,
       updateLogicFlagsWidth,
       updateAddFlags,
       updateAdcFlags,
@@ -6511,26 +6513,32 @@
             return true;
           }
           if (op === 0x58 || op === 0x59 || op === 0x5c || op === 0x5e || op === 0x5d || op === 0x5f) {
-            const src = readSrcFloat();
-            if (src === null) {
-              return false;
+            let srcBits = 0;
+            if (modrmInfo.mod === 3) {
+              srcBits = this.readXmmU32(modrmInfo.rm, 0) >>> 0;
+            } else {
+              const ea = this.calcEffectiveAddress(modrmInfo);
+              if (ea === null) {
+                return false;
+              }
+              srcBits = this.readMem32(ea >>> 0) >>> 0;
             }
-            const dst = this.readXmmF32(regIdx, 0);
-            let result = dst;
+            const dstBits = this.readXmmU32(regIdx, 0) >>> 0;
+            let resultBits = dstBits >>> 0;
             if (op === 0x58) { // addss
-              result = sseBinaryFloat(dst, src, 0);
+              resultBits = sseBinaryFloat32Bits(dstBits, srcBits, 0);
             } else if (op === 0x59) { // mulss
-              result = sseBinaryFloat(dst, src, 2);
+              resultBits = sseBinaryFloat32Bits(dstBits, srcBits, 2);
             } else if (op === 0x5c) { // subss
-              result = sseBinaryFloat(dst, src, 1);
+              resultBits = sseBinaryFloat32Bits(dstBits, srcBits, 1);
             } else if (op === 0x5e) { // divss
-              result = sseBinaryFloat(dst, src, 3);
+              resultBits = sseBinaryFloat32Bits(dstBits, srcBits, 3);
             } else if (op === 0x5d) { // minss
-              result = sseBinaryFloat(dst, src, 4);
+              resultBits = sseBinaryFloat32Bits(dstBits, srcBits, 4);
             } else if (op === 0x5f) { // maxss
-              result = sseBinaryFloat(dst, src, 5);
+              resultBits = sseBinaryFloat32Bits(dstBits, srcBits, 5);
             }
-            this.writeXmmF32(regIdx, 0, result);
+            this.writeXmmU32(regIdx, 0, resultBits >>> 0);
             this.writeReg(REG.EIP, (addr + len) >>> 0);
             return true;
           }
@@ -6540,7 +6548,7 @@
             let src = [0, 0, 0, 0];
             if (modrmInfo.mod === 3) {
               for (let i = 0; i < 4; i += 1) {
-                src[i] = this.readXmmF32(modrmInfo.rm, i);
+                src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
               }
             } else {
               const ea = this.calcEffectiveAddress(modrmInfo);
@@ -6548,17 +6556,19 @@
                 return false;
               }
               for (let i = 0; i < 4; i += 1) {
-                src[i] = this.readMemFloat32((ea + i * 4) >>> 0);
+                src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
               }
             }
-            const dst0 = this.readXmmF32(regIdx, 0);
-            const dst1 = this.readXmmF32(regIdx, 1);
-            const dst2 = this.readXmmF32(regIdx, 2);
-            const dst3 = this.readXmmF32(regIdx, 3);
-            this.writeXmmF32(regIdx, 0, dst0 + dst1);
-            this.writeXmmF32(regIdx, 1, dst2 + dst3);
-            this.writeXmmF32(regIdx, 2, src[0] + src[1]);
-            this.writeXmmF32(regIdx, 3, src[2] + src[3]);
+            const out = haddps32x4(
+              this.readXmmU32(regIdx, 0) >>> 0,
+              this.readXmmU32(regIdx, 1) >>> 0,
+              this.readXmmU32(regIdx, 2) >>> 0,
+              this.readXmmU32(regIdx, 3) >>> 0,
+              src[0], src[1], src[2], src[3]
+            );
+            for (let i = 0; i < 4; i += 1) {
+              this.writeXmmU32(regIdx, i, out[i] >>> 0);
+            }
             this.writeReg(REG.EIP, (addr + len) >>> 0);
             return true;
           }

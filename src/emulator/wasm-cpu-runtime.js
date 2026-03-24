@@ -227,8 +227,10 @@
       typeof exports.sse_compare_code !== "function" ||
       typeof exports.sse_unary_float32x4_exec !== "function" ||
       typeof exports.sse_binary_float32x4_exec !== "function" ||
+      typeof exports.sse_binary_float32_bits !== "function" ||
       typeof exports.sse_compare32x4_exec !== "function" ||
       typeof exports.cvtdq2ps32x4_exec !== "function" ||
+      typeof exports.haddps32x4_exec !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
@@ -403,6 +405,9 @@
         );
         return readPacked128Result(exports);
       },
+      sseBinaryFloat32Bits(dst, src, op) {
+        return exports.sse_binary_float32_bits(dst >>> 0, src >>> 0, op >>> 0) >>> 0;
+      },
       sseCompare32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
         exports.sse_compare32x4_exec(
           dst0 >>> 0,
@@ -419,6 +424,19 @@
       },
       cvtdq2ps32x4(v0, v1, v2, v3) {
         exports.cvtdq2ps32x4_exec(v0 >>> 0, v1 >>> 0, v2 >>> 0, v3 >>> 0);
+        return readPacked128Result(exports);
+      },
+      haddps32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3) {
+        exports.haddps32x4_exec(
+          dst0 >>> 0,
+          dst1 >>> 0,
+          dst2 >>> 0,
+          dst3 >>> 0,
+          src0 >>> 0,
+          src1 >>> 0,
+          src2 >>> 0,
+          src3 >>> 0
+        );
         return readPacked128Result(exports);
       },
       shiftRotate(value, count, widthBits, mode, flags) {
