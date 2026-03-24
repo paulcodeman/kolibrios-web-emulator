@@ -102,6 +102,14 @@
     };
   }
 
+  function readMulResult(exports) {
+    return {
+      lo: (exports.get_mul_last_lo?.() || 0) >>> 0,
+      hi: (exports.get_mul_last_hi?.() || 0) >>> 0,
+      flags: (exports.get_mul_last_flags?.() || 0) >>> 0
+    };
+  }
+
   function createWasmCpuBackend() {
     if (cache.backend) {
       return cache.backend;
@@ -132,6 +140,10 @@
       typeof exports.shift_packed64_exec !== "function" ||
       typeof exports.get_shift_packed64_last_lo !== "function" ||
       typeof exports.get_shift_packed64_last_hi !== "function" ||
+      typeof exports.mul_full_width_exec !== "function" ||
+      typeof exports.get_mul_last_lo !== "function" ||
+      typeof exports.get_mul_last_hi !== "function" ||
+      typeof exports.get_mul_last_flags !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
@@ -206,6 +218,10 @@
       shiftPacked64(lo, hi, count, leftShift) {
         exports.shift_packed64_exec(lo >>> 0, hi >>> 0, count >>> 0, leftShift ? 1 : 0);
         return readShiftPacked64Result(exports);
+      },
+      mulFullWidth(left, right, widthBits, signed, flags) {
+        exports.mul_full_width_exec(left >>> 0, right >>> 0, widthBits >>> 0, signed ? 1 : 0, flags >>> 0);
+        return readMulResult(exports);
       },
       shiftRotate(value, count, widthBits, mode, flags) {
         exports.shift_rotate_exec(value >>> 0, count >>> 0, widthBits >>> 0, mode >>> 0, flags >>> 0);

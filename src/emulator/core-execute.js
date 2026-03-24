@@ -24,6 +24,7 @@
       imulSignedWidth,
       x87CompareCode,
       shiftPacked64,
+      mulFullWidth,
       updateLogicFlagsWidth,
       updateAddFlags,
       updateAdcFlags,
@@ -2660,32 +2661,11 @@
             return false;
           }
           const eax = this.readReg(REG.EAX) >>> 0;
-          if (regField === 4) {
-            const prod = (eax & 0xffff) * (op & 0xffff);
-            const ax = prod & 0xffff;
-            const dx = (prod >>> 16) & 0xffff;
-            this.writeReg(REG.EAX, (eax & 0xffff0000) | ax);
-            const edx = this.readReg(REG.EDX) >>> 0;
-            this.writeReg(REG.EDX, (edx & 0xffff0000) | dx);
-            let flags = this.readReg(REG.EFLAGS);
-            const carry = dx !== 0;
-            flags = carry ? (flags | FLAG_CF | FLAG_OF) : (flags & ~(FLAG_CF | FLAG_OF));
-            this.writeReg(REG.EFLAGS, flags >>> 0);
-          } else {
-            const a = ((eax & 0xffff) << 16) >> 16;
-            const b = ((op & 0xffff) << 16) >> 16;
-            const prod = a * b;
-            const ax = prod & 0xffff;
-            const dx = (prod >> 16) & 0xffff;
-            this.writeReg(REG.EAX, (eax & 0xffff0000) | (ax & 0xffff));
-            const edx = this.readReg(REG.EDX) >>> 0;
-            this.writeReg(REG.EDX, (edx & 0xffff0000) | (dx & 0xffff));
-            let flags = this.readReg(REG.EFLAGS);
-            const signExt = (ax & 0x8000) ? 0xffff : 0x0000;
-            const carry = dx !== signExt;
-            flags = carry ? (flags | FLAG_CF | FLAG_OF) : (flags & ~(FLAG_CF | FLAG_OF));
-            this.writeReg(REG.EFLAGS, flags >>> 0);
-          }
+          const result = mulFullWidth(eax & 0xffff, op & 0xffff, 16, regField === 5, this.readReg(REG.EFLAGS));
+          this.writeReg(REG.EAX, (eax & 0xffff0000) | (result.lo & 0xffff));
+          const edx = this.readReg(REG.EDX) >>> 0;
+          this.writeReg(REG.EDX, (edx & 0xffff0000) | (result.hi & 0xffff));
+          this.writeReg(REG.EFLAGS, result.flags >>> 0);
           this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size) >>> 0);
           return true;
         }
@@ -5251,31 +5231,11 @@
         if (op === null) {
           return false;
         }
-        if (regField === 4) {
-          const eax = this.readReg(REG.EAX) >>> 0;
-          const prod = BigInt(eax) * BigInt(op >>> 0);
-          const lo = Number(prod & 0xffffffffn) >>> 0;
-          const hi = Number((prod >> 32n) & 0xffffffffn) >>> 0;
-          this.writeReg(REG.EAX, lo);
-          this.writeReg(REG.EDX, hi);
-          let flags = this.readReg(REG.EFLAGS);
-          const carry = hi !== 0;
-          flags = carry ? (flags | FLAG_CF | FLAG_OF) : (flags & ~(FLAG_CF | FLAG_OF));
-          this.writeReg(REG.EFLAGS, flags >>> 0);
-        } else {
-          const eax = (this.readReg(REG.EAX) | 0);
-          const prod = BigInt(eax) * BigInt(op | 0);
-          const lo = Number(prod & 0xffffffffn) >>> 0;
-          const hi = Number((prod >> 32n) & 0xffffffffn) >>> 0;
-          this.writeReg(REG.EAX, lo);
-          this.writeReg(REG.EDX, hi);
-          let flags = this.readReg(REG.EFLAGS);
-          const signExt = (eax >> 31) ? 0xffffffffn : 0n;
-          const expectedHi = Number(signExt & 0xffffffffn) >>> 0;
-          const carry = hi !== expectedHi;
-          flags = carry ? (flags | FLAG_CF | FLAG_OF) : (flags & ~(FLAG_CF | FLAG_OF));
-          this.writeReg(REG.EFLAGS, flags >>> 0);
-        }
+        const eax = this.readReg(REG.EAX) >>> 0;
+        const result = mulFullWidth(eax, op >>> 0, 32, regField === 5, this.readReg(REG.EFLAGS));
+        this.writeReg(REG.EAX, result.lo >>> 0);
+        this.writeReg(REG.EDX, result.hi >>> 0);
+        this.writeReg(REG.EFLAGS, result.flags >>> 0);
         this.writeReg(REG.EIP, (addr + immOffset) >>> 0);
         return true;
       }

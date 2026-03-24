@@ -57,6 +57,7 @@ try {
   assert(typeof wasmBackend.imulSignedWidth === "function", "wasm helper backend should expose IMUL helpers");
   assert(typeof wasmBackend.x87CompareCode === "function", "wasm helper backend should expose x87 compare helpers");
   assert(typeof wasmBackend.shiftPacked64 === "function", "wasm helper backend should expose 64-bit shift helpers");
+  assert(typeof wasmBackend.mulFullWidth === "function", "wasm helper backend should expose full-width multiply helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -335,6 +336,21 @@ try {
           wasmBackend.doubleShift(value, source, count, width, leftShift, flags),
           jsBackend.doubleShift(value, source, count, width, leftShift, flags),
           `doubleShift should match for width ${width}, count ${count}, left=${leftShift}`
+        );
+      }
+    }
+  }
+
+  for (const width of [16, 32]) {
+    for (const signed of [false, true]) {
+      for (let i = 0; i < 160; i += 1) {
+        const left = nextRand();
+        const right = nextRand();
+        const flags = nextRand();
+        assertDeepEq(
+          wasmBackend.mulFullWidth(left, right, width, signed, flags),
+          jsBackend.mulFullWidth(left, right, width, signed, flags),
+          `mulFullWidth should match for width=${width}, signed=${signed}`
         );
       }
     }

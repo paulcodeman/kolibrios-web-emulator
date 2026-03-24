@@ -28,6 +28,9 @@ var imul_last_flags: u32 = 0;
 var x87_compare_last_code: u32 = 0;
 var shift_packed64_last_lo: u32 = 0;
 var shift_packed64_last_hi: u32 = 0;
+var mul_last_lo: u32 = 0;
+var mul_last_hi: u32 = 0;
+var mul_last_flags: u32 = 0;
 
 fn shiftCount32(value: u32) u5 {
     return @intCast(value & 31);
@@ -515,6 +518,57 @@ pub export fn get_shift_packed64_last_lo() u32 {
 
 pub export fn get_shift_packed64_last_hi() u32 {
     return shift_packed64_last_hi;
+}
+
+pub export fn mul_full_width_exec(left: u32, right: u32, width_bits: u32, signed_mul: u32, flags: u32) void {
+    const width: u32 = if (width_bits == 16) 16 else 32;
+    var overflow = false;
+    if ((signed_mul & 1) != 0) {
+        const product: i64 = if (width == 16)
+            (@as(i64, laneSigned16(left)) * @as(i64, laneSigned16(right)))
+        else
+            (@as(i64, laneSigned32(left)) * @as(i64, laneSigned32(right)));
+        const bits: u64 = @bitCast(product);
+        if (width == 16) {
+            mul_last_lo = @as(u32, @as(u16, @truncate(bits)));
+            mul_last_hi = @as(u32, @as(u16, @truncate(bits >> 16)));
+            overflow = product < -32768 or product > 32767;
+        } else {
+            mul_last_lo = @as(u32, @truncate(bits));
+            mul_last_hi = @as(u32, @truncate(bits >> 32));
+            overflow = product < -2147483648 or product > 2147483647;
+        }
+    } else {
+        const product: u64 = if (width == 16)
+            (@as(u64, left & 0xffff) * @as(u64, right & 0xffff))
+        else
+            (@as(u64, left) * @as(u64, right));
+        if (width == 16) {
+            mul_last_lo = @as(u32, @as(u16, @truncate(product)));
+            mul_last_hi = @as(u32, @as(u16, @truncate(product >> 16)));
+            overflow = product > 0xffff;
+        } else {
+            mul_last_lo = @as(u32, @truncate(product));
+            mul_last_hi = @as(u32, @truncate(product >> 32));
+            overflow = product > 0xffffffff;
+        }
+    }
+    mul_last_flags = flags & ~(FLAG_CF | FLAG_OF);
+    if (overflow) {
+        mul_last_flags |= FLAG_CF | FLAG_OF;
+    }
+}
+
+pub export fn get_mul_last_lo() u32 {
+    return mul_last_lo;
+}
+
+pub export fn get_mul_last_hi() u32 {
+    return mul_last_hi;
+}
+
+pub export fn get_mul_last_flags() u32 {
+    return mul_last_flags;
 }
 
 pub export fn shift_rotate_exec(value: u32, count: u32, width_bits: u32, mode: u32, flags: u32) void {

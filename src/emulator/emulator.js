@@ -281,6 +281,59 @@ function shiftPacked64(lo, hi, count, leftShift) {
   return shiftPacked64Js(lo, hi, count, leftShift);
 }
 
+function mulFullWidthJs(left, right, widthBits, signed, flags) {
+  const width = (widthBits >>> 0) === 16 ? 16 : 32;
+  let low = 0;
+  let high = 0;
+  let overflow = false;
+  if (signed) {
+    const a = width === 16
+      ? BigInt.asIntN(16, BigInt(left & 0xffff))
+      : BigInt.asIntN(32, BigInt(left >>> 0));
+    const b = width === 16
+      ? BigInt.asIntN(16, BigInt(right & 0xffff))
+      : BigInt.asIntN(32, BigInt(right >>> 0));
+    const product = a * b;
+    const bits = BigInt.asUintN(width * 2, product);
+    if (width === 16) {
+      low = Number(bits & 0xffffn) & 0xffff;
+      high = Number((bits >> 16n) & 0xffffn) & 0xffff;
+      overflow = product < -32768n || product > 32767n;
+    } else {
+      low = Number(bits & 0xffffffffn) >>> 0;
+      high = Number((bits >> 32n) & 0xffffffffn) >>> 0;
+      overflow = product < -0x80000000n || product > 0x7fffffffn;
+    }
+  } else {
+    const mask = width === 16 ? 0xffffn : 0xffffffffn;
+    const a = BigInt(width === 16 ? (left & 0xffff) : (left >>> 0));
+    const b = BigInt(width === 16 ? (right & 0xffff) : (right >>> 0));
+    const product = a * b;
+    if (width === 16) {
+      low = Number(product & mask) & 0xffff;
+      high = Number((product >> 16n) & 0xffffn) & 0xffff;
+    } else {
+      low = Number(product & mask) >>> 0;
+      high = Number((product >> 32n) & 0xffffffffn) >>> 0;
+    }
+    overflow = product > mask;
+  }
+  let next = flags >>> 0;
+  next &= ~(FLAG_CF | FLAG_OF);
+  if (overflow) {
+    next |= FLAG_CF | FLAG_OF;
+  }
+  return { lo: low >>> 0, hi: high >>> 0, flags: next >>> 0 };
+}
+
+function mulFullWidth(left, right, widthBits, signed, flags) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.mulFullWidth === "function") {
+    return backend.mulFullWidth(left >>> 0, right >>> 0, widthBits >>> 0, !!signed, flags >>> 0);
+  }
+  return mulFullWidthJs(left, right, widthBits, signed, flags);
+}
+
 function widthMask(widthBits) {
   if (widthBits === 8) {
     return 0xff;
@@ -810,6 +863,9 @@ function getJsCpuHelperBackend() {
       },
       shiftPacked64(lo, hi, count, leftShift) {
         return shiftPacked64Js(lo, hi, count, leftShift);
+      },
+      mulFullWidth(left, right, widthBits, signed, flags) {
+        return mulFullWidthJs(left, right, widthBits, signed, flags);
       },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
@@ -2170,6 +2226,7 @@ class Emulator {
     imulSignedWidth,
     x87CompareCode,
     shiftPacked64,
+    mulFullWidth,
     updateLogicFlagsWidth,
     updateAddFlags,
     updateAdcFlags,
