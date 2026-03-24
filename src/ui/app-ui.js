@@ -427,7 +427,8 @@
       this.currentImage = null;
       this.currentFileBuffer = null;
       this.currentFileName = "";
-      this.cpuBackendMode = this.normalizeCpuBackendMode(this.pageConfig && this.pageConfig.cpuBackend);
+      this.cpuBackendStorageKey = "kosemu.cpuBackendMode";
+      this.cpuBackendMode = this.resolveInitialCpuBackendMode();
       if (this.cpuBackendSelect) {
         this.cpuBackendSelect.value = this.cpuBackendMode;
       }
@@ -1253,6 +1254,40 @@
       return String(mode || "").trim().toLowerCase() === "wasm" ? "wasm" : "js";
     }
 
+    resolveInitialCpuBackendMode() {
+      const persisted = this.loadPersistedCpuBackendMode();
+      if (persisted) {
+        return persisted;
+      }
+      return this.normalizeCpuBackendMode(this.pageConfig && this.pageConfig.cpuBackend);
+    }
+
+    loadPersistedCpuBackendMode() {
+      if (typeof localStorage === "undefined") {
+        return "";
+      }
+      try {
+        const raw = localStorage.getItem(this.cpuBackendStorageKey || "kosemu.cpuBackendMode");
+        if (!raw) {
+          return "";
+        }
+        return this.normalizeCpuBackendMode(raw);
+      } catch (_err) {
+        return "";
+      }
+    }
+
+    persistCpuBackendMode(mode) {
+      if (typeof localStorage === "undefined") {
+        return;
+      }
+      try {
+        localStorage.setItem(this.cpuBackendStorageKey || "kosemu.cpuBackendMode", this.normalizeCpuBackendMode(mode));
+      } catch (_err) {
+        // Ignore storage failures; runtime selection still applies for this session.
+      }
+    }
+
     getCpuBackendAvailability() {
       const EmulatorClass = KosEmu.emu && KosEmu.emu.Emulator ? KosEmu.emu.Emulator : null;
       if (EmulatorClass && typeof EmulatorClass.getCpuBackendAvailability === "function") {
@@ -1293,6 +1328,7 @@
         this.sessionManager.setCpuBackendMode(nextMode);
       }
       this.cpuBackendMode = nextMode;
+      this.persistCpuBackendMode(nextMode);
       this.updateCpuBackendControl();
       if (!opts.silent) {
         const availability = this.getCpuBackendAvailability();

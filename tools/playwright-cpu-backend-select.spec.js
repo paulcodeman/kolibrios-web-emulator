@@ -5,8 +5,7 @@ const LAUNCHER_URL = `file:///${path.resolve(__dirname, "..", "launcher.html").r
 
 test.setTimeout(60000);
 
-test("launcher CPU backend selector updates session mode and launches apps in wasm mode", async ({ page }) => {
-  await page.goto(LAUNCHER_URL);
+async function waitForLauncherReady(page) {
   await page.waitForFunction(() => !!window.__app && !!window.__app.sessionManager);
   await page.waitForFunction(() => {
     const session = window.__app && window.__app.sessionManager ? window.__app.sessionManager : null;
@@ -22,6 +21,11 @@ test("launcher CPU backend selector updates session mode and launches apps in wa
       ))
     );
   }, null, { timeout: 20000 });
+}
+
+test("launcher CPU backend selector updates session mode and launches apps in wasm mode", async ({ page }) => {
+  await page.goto(LAUNCHER_URL);
+  await waitForLauncherReady(page);
 
   const initial = await page.evaluate(() => ({
     appMode: window.__app.currentCpuBackendConfig(),
@@ -86,4 +90,55 @@ test("launcher CPU backend selector updates session mode and launches apps in wa
   expect(launched.active).toBe("wasm");
   expect(launched.requested).toBe("wasm");
   expect(launched.wasmAvailable).toBe(true);
+});
+
+test("launcher persists selected CPU backend across reloads", async ({ page }) => {
+  await page.goto(LAUNCHER_URL);
+  await waitForLauncherReady(page);
+
+  await page.evaluate(() => {
+    localStorage.removeItem("kosemu.cpuBackendMode");
+  });
+  await page.reload();
+  await waitForLauncherReady(page);
+
+  const initial = await page.evaluate(() => ({
+    selectValue: window.__app.cpuBackendSelect ? window.__app.cpuBackendSelect.value : "",
+    appMode: window.__app.currentCpuBackendConfig(),
+    sessionMode: window.__app.sessionManager.getCpuBackendMode()
+  }));
+  expect(initial.selectValue).toBe("wasm");
+  expect(initial.appMode).toBe("wasm");
+  expect(initial.sessionMode).toBe("wasm");
+
+  await page.evaluate(() => {
+    const select = window.__app.cpuBackendSelect;
+    select.value = "js";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
+  const changed = await page.evaluate(() => ({
+    stored: localStorage.getItem("kosemu.cpuBackendMode"),
+    selectValue: window.__app.cpuBackendSelect ? window.__app.cpuBackendSelect.value : "",
+    appMode: window.__app.currentCpuBackendConfig(),
+    sessionMode: window.__app.sessionManager.getCpuBackendMode()
+  }));
+  expect(changed.stored).toBe("js");
+  expect(changed.selectValue).toBe("js");
+  expect(changed.appMode).toBe("js");
+  expect(changed.sessionMode).toBe("js");
+
+  await page.reload();
+  await waitForLauncherReady(page);
+
+  const reloaded = await page.evaluate(() => ({
+    stored: localStorage.getItem("kosemu.cpuBackendMode"),
+    selectValue: window.__app.cpuBackendSelect ? window.__app.cpuBackendSelect.value : "",
+    appMode: window.__app.currentCpuBackendConfig(),
+    sessionMode: window.__app.sessionManager.getCpuBackendMode()
+  }));
+  expect(reloaded.stored).toBe("js");
+  expect(reloaded.selectValue).toBe("js");
+  expect(reloaded.appMode).toBe("js");
+  expect(reloaded.sessionMode).toBe("js");
 });
