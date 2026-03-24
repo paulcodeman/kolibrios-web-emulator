@@ -174,6 +174,9 @@
       typeof exports.get_x87_sincos_last_sin !== "function" ||
       typeof exports.get_x87_sincos_last_cos !== "function" ||
       typeof exports.x87_scale !== "function" ||
+      typeof exports.sse_sqrt !== "function" ||
+      typeof exports.sse_reciprocal !== "function" ||
+      typeof exports.sse_reciprocal_sqrt !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
@@ -284,6 +287,15 @@
       },
       x87Scale(st0, st1) {
         return Number(exports.x87_scale(Number(st0), Number(st1)));
+      },
+      sseSqrt(value) {
+        return Number(exports.sse_sqrt(Number(value)));
+      },
+      sseReciprocal(value) {
+        return Number(exports.sse_reciprocal(Number(value)));
+      },
+      sseReciprocalSqrt(value) {
+        return Number(exports.sse_reciprocal_sqrt(Number(value)));
       },
       shiftRotate(value, count, widthBits, mode, flags) {
         exports.shift_rotate_exec(value >>> 0, count >>> 0, widthBits >>> 0, mode >>> 0, flags >>> 0);

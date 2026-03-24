@@ -698,6 +698,18 @@ pub export fn x87_scale(st0: f64, st1: f64) f64 {
     return st0 * std.math.pow(f64, 2.0, @trunc(st1));
 }
 
+pub export fn sse_sqrt(value: f64) f64 {
+    return @sqrt(value);
+}
+
+pub export fn sse_reciprocal(value: f64) f64 {
+    return 1.0 / value;
+}
+
+pub export fn sse_reciprocal_sqrt(value: f64) f64 {
+    return 1.0 / @sqrt(value);
+}
+
 pub export fn shift_rotate_exec(value: u32, count: u32, width_bits: u32, mode: u32, flags: u32) void {
     const mask = widthMask(width_bits);
     const sign_bit = widthSign(width_bits);

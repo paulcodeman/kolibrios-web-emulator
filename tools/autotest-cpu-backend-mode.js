@@ -76,6 +76,7 @@ try {
   assert(typeof wasmBackend.mulFullWidth === "function", "wasm helper backend should expose full-width multiply helpers");
   assert(typeof wasmBackend.divideFullWidth === "function", "wasm helper backend should expose full-width divide helpers");
   assert(typeof wasmBackend.x87F2xm1 === "function", "wasm helper backend should expose x87 transcendental helpers");
+  assert(typeof wasmBackend.sseSqrt === "function", "wasm helper backend should expose SSE sqrt helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -140,6 +141,11 @@ try {
     assertClose(wasmBackend.x87Fyl2x(y, x), jsBackend.x87Fyl2x(y, x), 1e-12, `x87Fyl2x should match for ${y},${x}`);
     assertClose(wasmBackend.x87Atan2(y, x), jsBackend.x87Atan2(y, x), 1e-12, `x87Atan2 should match for ${y},${x}`);
     assertClose(wasmBackend.x87Scale(y, x), jsBackend.x87Scale(y, x), 1e-12, `x87Scale should match for ${y},${x}`);
+  }
+  for (const value of [-1, 0, 0.25, 1, 4, 16, Number.POSITIVE_INFINITY]) {
+    assertClose(wasmBackend.sseSqrt(value), jsBackend.sseSqrt(value), 1e-12, `sseSqrt should match for ${value}`);
+    assertClose(wasmBackend.sseReciprocal(value), jsBackend.sseReciprocal(value), 1e-12, `sseReciprocal should match for ${value}`);
+    assertClose(wasmBackend.sseReciprocalSqrt(value), jsBackend.sseReciprocalSqrt(value), 1e-12, `sseReciprocalSqrt should match for ${value}`);
   }
 
   const bcdVectors = [

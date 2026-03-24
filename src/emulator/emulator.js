@@ -500,6 +500,42 @@ function x87Scale(st0, st1) {
   return x87ScaleJs(st0, st1);
 }
 
+function sseSqrtJs(value) {
+  return Math.sqrt(Number(value));
+}
+
+function sseSqrt(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.sseSqrt === "function") {
+    return Number(backend.sseSqrt(Number(value)));
+  }
+  return sseSqrtJs(value);
+}
+
+function sseReciprocalJs(value) {
+  return 1 / Number(value);
+}
+
+function sseReciprocal(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.sseReciprocal === "function") {
+    return Number(backend.sseReciprocal(Number(value)));
+  }
+  return sseReciprocalJs(value);
+}
+
+function sseReciprocalSqrtJs(value) {
+  return 1 / Math.sqrt(Number(value));
+}
+
+function sseReciprocalSqrt(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.sseReciprocalSqrt === "function") {
+    return Number(backend.sseReciprocalSqrt(Number(value)));
+  }
+  return sseReciprocalSqrtJs(value);
+}
+
 function widthMask(widthBits) {
   if (widthBits === 8) {
     return 0xff;
@@ -1062,6 +1098,15 @@ function getJsCpuHelperBackend() {
       },
       x87Scale(st0, st1) {
         return x87ScaleJs(st0, st1);
+      },
+      sseSqrt(value) {
+        return sseSqrtJs(value);
+      },
+      sseReciprocal(value) {
+        return sseReciprocalJs(value);
+      },
+      sseReciprocalSqrt(value) {
+        return sseReciprocalSqrtJs(value);
       },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
@@ -2433,6 +2478,9 @@ class Emulator {
     x87Cos,
     x87SinCos,
     x87Scale,
+    sseSqrt,
+    sseReciprocal,
+    sseReciprocalSqrt,
     updateLogicFlagsWidth,
     updateAddFlags,
     updateAdcFlags,

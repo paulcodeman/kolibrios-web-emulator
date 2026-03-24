@@ -35,6 +35,9 @@
       x87Cos,
       x87SinCos,
       x87Scale,
+      sseSqrt,
+      sseReciprocal,
+      sseReciprocalSqrt,
       updateLogicFlagsWidth,
       updateAddFlags,
       updateAdcFlags,
@@ -5623,7 +5626,7 @@
           const srcIdx = modrmInfo.rm & 7;
           for (let i = 0; i < 4; i += 1) {
             const src = this.readXmmF32(srcIdx, i);
-            const result = op2 === 0x52 ? (1 / Math.sqrt(src)) : (1 / src);
+            const result = op2 === 0x52 ? sseReciprocalSqrt(src) : sseReciprocal(src);
             this.writeXmmF32(regIdx, i, result);
           }
         } else {
@@ -5633,7 +5636,7 @@
           }
           for (let i = 0; i < 4; i += 1) {
             const src = this.readMemFloat32((ea + i * 4) >>> 0);
-            const result = op2 === 0x52 ? (1 / Math.sqrt(src)) : (1 / src);
+            const result = op2 === 0x52 ? sseReciprocalSqrt(src) : sseReciprocal(src);
             this.writeXmmF32(regIdx, i, result);
           }
         }
@@ -6098,7 +6101,7 @@
           if (modrmInfo.mod === 3) {
             for (let i = 0; i < 4; i += 1) {
               const v = this.readXmmF32(modrmInfo.rm, i);
-              this.writeXmmF32(regIdx, i, Math.sqrt(v));
+              this.writeXmmF32(regIdx, i, sseSqrt(v));
             }
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
@@ -6107,7 +6110,7 @@
             }
             for (let i = 0; i < 4; i += 1) {
               const v = this.readMemFloat32((ea + i * 4) >>> 0);
-              this.writeXmmF32(regIdx, i, Math.sqrt(v));
+              this.writeXmmF32(regIdx, i, sseSqrt(v));
             }
           }
         } else {
