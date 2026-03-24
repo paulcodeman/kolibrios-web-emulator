@@ -1039,6 +1039,16 @@
         return Math.max(1, value | 0) >>> 0;
       },
 
+      getHostThreadCount() {
+        const value = this.callHostSession(
+          "getThreadCount",
+          [],
+          () => this.threadSlot >>> 0,
+          "getThreadCount"
+        );
+        return Math.max(1, value | 0) >>> 0;
+      },
+
       getHostActiveThreadSlot() {
         const value = this.callHostSession(
           "getActiveThreadSlot",
@@ -1690,6 +1700,18 @@
         return process && !process.removed && process.emulator ? process.emulator : null;
       },
 
+      getNamedMemoryEffectiveAccess(entry, mapping, pid) {
+        if (!entry) {
+          return 0;
+        }
+        const targetPid = pid >>> 0;
+        const mappedAccess = mapping ? (mapping.access | 0) : 0;
+        if (targetPid && targetPid === (entry.ownerPid >>> 0)) {
+          return (mappedAccess | (entry.ownerAccess | 0)) & 0x01;
+        }
+        return mappedAccess & 0x01;
+      },
+
       syncNamedMemoryAreaFromPid(entry, pid) {
         if (!entry) {
           return false;
@@ -1718,6 +1740,49 @@
         entry.data.fill(0);
         entry.data.set(bytes.subarray(0, Math.min(size, bytes.length)));
         return true;
+      },
+
+      syncNamedMemoryAreaToPid(entry, pid) {
+        if (!entry) {
+          return false;
+        }
+        const mappings = this.getNamedMemoryMappings(entry);
+        const mapping = mappings.get(pid >>> 0) || null;
+        if (!mapping || !mapping.ptr) {
+          return false;
+        }
+        const emulator = this.getNamedMemoryProcessEmulator(pid >>> 0);
+        if (!emulator || typeof emulator.writeMemBlock !== "function") {
+          mappings.delete(pid >>> 0);
+          return false;
+        }
+        const size = entry.size >>> 0;
+        if (!size || !(entry.data instanceof Uint8Array) || !entry.data.length) {
+          return false;
+        }
+        emulator.writeMemBlock(
+          mapping.ptr >>> 0,
+          entry.data.subarray(0, Math.min(entry.data.length, size))
+        );
+        return true;
+      },
+
+      syncNamedMemoryAreaToOtherMappings(entry, excludePid) {
+        if (!entry) {
+          return false;
+        }
+        const skipPid = excludePid >>> 0;
+        let synced = false;
+        const mappings = this.getNamedMemoryMappings(entry);
+        for (const [pid, mapping] of mappings.entries()) {
+          if ((pid >>> 0) === skipPid || !mapping || !mapping.ptr) {
+            continue;
+          }
+          if (this.syncNamedMemoryAreaToPid(entry, pid >>> 0)) {
+            synced = true;
+          }
+        }
+        return synced;
       },
 
       syncNamedMemoryAreaData(entry) {
@@ -1763,7 +1828,14 @@
           if (!mappings || !mappings.has(pid)) {
             continue;
           }
-          this.syncNamedMemoryAreaFromPid(entry, pid);
+          const mapping = mappings.get(pid) || null;
+          if (!this.syncNamedMemoryAreaFromPid(entry, pid)) {
+            continue;
+          }
+          if ((this.getNamedMemoryEffectiveAccess(entry, mapping, pid) & 0x01) !== 0) {
+            entry.lastWriterPid = pid >>> 0;
+          }
+          this.syncNamedMemoryAreaToOtherMappings(entry, pid);
         }
       },
 
@@ -1949,7 +2021,14 @@
         }
         const pid = this.processId >>> 0;
         if (pid) {
-          this.syncNamedMemoryAreaFromPid(entry, pid);
+          const mappings = this.getNamedMemoryMappings(entry);
+          const mapping = mappings.get(pid) || null;
+          if (this.syncNamedMemoryAreaFromPid(entry, pid)) {
+            if ((this.getNamedMemoryEffectiveAccess(entry, mapping, pid) & 0x01) !== 0) {
+              entry.lastWriterPid = pid >>> 0;
+            }
+            this.syncNamedMemoryAreaToOtherMappings(entry, pid);
+          }
         }
         const nextRefCount = Math.max(0, (entry.refCount >>> 0) - 1) >>> 0;
         entry.refCount = nextRefCount;

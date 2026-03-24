@@ -38,7 +38,6 @@ const SCRIPT_LIST = [
   "../src/emulator/core-access.js",
   "../src/emulator/host-libs/registry.js",
   "../src/emulator/host-libs/http.obj.js",
-  "../src/emulator/host-libs/proc_lib.obj.js",
   "../src/emulator/host-libs/cnv_png.obj.js",
   "../src/emulator/host-libs/libimg.obj.js",
   "../src/emulator/host-libs/libini.obj.js",
@@ -2498,10 +2497,21 @@ class HeadlessUiHarness {
     const stack = this.getWindowStack();
     for (let i = 0; i < stack.length; i += 1) {
       if ((stack[i].slot >>> 0) === target) {
-        return (i + 1) >>> 0;
+        return (stack.length - i) >>> 0;
       }
     }
     return 0;
+  }
+
+  getThreadCount() {
+    let count = 0;
+    for (let i = 0; i < this.processes.length; i += 1) {
+      const process = this.processes[i];
+      if (process && !process.removed) {
+        count += 1;
+      }
+    }
+    return Math.max(1, count) >>> 0;
   }
 
   processOwnsScreenPoint(process, screenX, screenY) {
@@ -2577,9 +2587,9 @@ class HeadlessUiHarness {
   }
 
   getWindowStackSlot(position) {
-    const index = Math.max(0, (position | 0) - 1);
     const stack = this.getWindowStack();
-    return stack[index] ? (stack[index].slot >>> 0) : 0;
+    const index = stack.length - Math.max(1, position | 0);
+    return index >= 0 && stack[index] ? (stack[index].slot >>> 0) : 0;
   }
 
   getClientBounds(process) {

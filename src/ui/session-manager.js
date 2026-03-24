@@ -3810,10 +3810,21 @@
       const stack = this.getWindowStack();
       for (let i = 0; i < stack.length; i += 1) {
         if ((stack[i].slot >>> 0) === target) {
-          return (i + 1) >>> 0;
+          return (stack.length - i) >>> 0;
         }
       }
       return 0;
+    }
+
+    getThreadCount() {
+      let count = 0;
+      for (let i = 0; i < this.processes.length; i += 1) {
+        const process = this.processes[i];
+        if (process && !process.removed) {
+          count += 1;
+        }
+      }
+      return Math.max(1, count) >>> 0;
     }
 
     processOwnsScreenPoint(process, screenX, screenY) {
@@ -3878,9 +3889,9 @@
     }
 
     getWindowStackSlot(position) {
-      const index = Math.max(0, (position | 0) - 1);
       const stack = this.getWindowStack();
-      return stack[index] ? (stack[index].slot >>> 0) : 0;
+      const index = stack.length - Math.max(1, position | 0);
+      return index >= 0 && stack[index] ? (stack[index].slot >>> 0) : 0;
     }
 
     getMaxThreadSlot() {

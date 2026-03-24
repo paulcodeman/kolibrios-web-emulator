@@ -26,7 +26,6 @@ const RUNTIME_SCRIPTS = [
   "../src/emulator/core-access.js",
   "../src/emulator/host-libs/registry.js",
   "../src/emulator/host-libs/http.obj.js",
-  "../src/emulator/host-libs/proc_lib.obj.js",
   "../src/emulator/host-libs/cnv_png.obj.js",
   "../src/emulator/host-libs/libimg.obj.js",
   "../src/emulator/host-libs/libini.obj.js",

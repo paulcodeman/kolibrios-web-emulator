@@ -519,6 +519,7 @@
     }
 
     bindDom() {
+      this.appRootEl = document.getElementById("app");
       this.fileInput = document.getElementById("fileInput");
       this.runBtn = document.getElementById("runBtn");
       this.stopBtn = document.getElementById("stopBtn");
@@ -1045,6 +1046,47 @@
       this.workspaceEl.addEventListener("dragover", (event) => this.handleWorkspaceDragOver(event));
       this.workspaceEl.addEventListener("dragleave", (event) => this.handleWorkspaceDragLeave(event));
       this.workspaceEl.addEventListener("drop", (event) => {
+        void this.handleWorkspaceDrop(event);
+      });
+      this.installLauncherDropFallbackHandlers();
+    }
+
+    isWorkspaceDropTargetEvent(event) {
+      const target = event && event.target instanceof Node ? event.target : null;
+      return !!(target && this.workspaceEl && this.workspaceEl.contains(target));
+    }
+
+    installLauncherDropFallbackHandlers() {
+      if (
+        !this.isLauncherPage() ||
+        !this.appRootEl ||
+        !this.workspaceEl ||
+        this.appRootEl === this.workspaceEl
+      ) {
+        return;
+      }
+      this.appRootEl.addEventListener("dragenter", (event) => {
+        if (event.defaultPrevented || this.isWorkspaceDropTargetEvent(event)) {
+          return;
+        }
+        this.handleWorkspaceDragEnter(event);
+      });
+      this.appRootEl.addEventListener("dragover", (event) => {
+        if (event.defaultPrevented || this.isWorkspaceDropTargetEvent(event)) {
+          return;
+        }
+        this.handleWorkspaceDragOver(event);
+      });
+      this.appRootEl.addEventListener("dragleave", (event) => {
+        if (event.defaultPrevented || this.isWorkspaceDropTargetEvent(event)) {
+          return;
+        }
+        this.handleWorkspaceDragLeave(event);
+      });
+      this.appRootEl.addEventListener("drop", (event) => {
+        if (event.defaultPrevented || this.isWorkspaceDropTargetEvent(event)) {
+          return;
+        }
         void this.handleWorkspaceDrop(event);
       });
     }

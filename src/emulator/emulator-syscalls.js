@@ -2371,13 +2371,13 @@
 
       sysThreadInfo() {
         const ptr = this.readReg(REG.EBX) >>> 0;
-        const maxSlot = this.getHostMaxThreadSlot ? (this.getHostMaxThreadSlot() >>> 0) : (this.threadSlot >>> 0);
+        const threadCount = this.getHostThreadCount ? (this.getHostThreadCount() >>> 0) : (this.threadSlot >>> 0);
         const encodeSize = (value) => {
           const size = value >>> 0;
           return size > 0 ? ((size - 1) >>> 0) : 0;
         };
         if (!ptr) {
-          this.writeReg(REG.EAX, maxSlot >>> 0);
+          this.writeReg(REG.EAX, threadCount >>> 0);
           return;
         }
         const slotReq = this.readReg(REG.ECX) | 0;
@@ -2426,7 +2426,7 @@
           buf[0x4b] = this.keyboardMode & 0xff;
         }
         this.writeMemBlock(ptr, buf);
-        this.writeReg(REG.EAX, maxSlot >>> 0);
+        this.writeReg(REG.EAX, threadCount >>> 0);
       },
 
       sysThreadControl() {
@@ -5894,9 +5894,13 @@
       },
 
       sysTerminate() {
-        this.running = false;
-        if (this.emitStopped) {
-          this.emitStopped("terminated");
+        if (typeof this.stop === "function") {
+          this.stop("terminated");
+        } else {
+          this.running = false;
+          if (this.emitStopped) {
+            this.emitStopped("terminated");
+          }
         }
         if (this.traceSyscalls) {
           this.log("syscall -1 -> terminate");
