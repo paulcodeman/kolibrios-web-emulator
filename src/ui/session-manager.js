@@ -3805,12 +3805,23 @@
         .sort((a, b) => compareProcessZOrder(b, a));
     }
 
+    getWindowStackPositionSlots() {
+      return this.getWindowStack()
+        .map((process) => (process && !process.removed ? (process.slot >>> 0) : 0))
+        .filter((slot) => slot > 0)
+        .sort((a, b) => a - b);
+    }
+
     getWindowStackPosition(slot) {
       const target = slot >>> 0;
       const stack = this.getWindowStack();
+      const positions = this.getWindowStackPositionSlots();
       for (let i = 0; i < stack.length; i += 1) {
         if ((stack[i].slot >>> 0) === target) {
-          return (stack.length - i) >>> 0;
+          const positionIndex = positions.length - 1 - i;
+          return positionIndex >= 0 && positions[positionIndex]
+            ? (positions[positionIndex] >>> 0)
+            : 0;
         }
       }
       return 0;
@@ -3890,8 +3901,14 @@
 
     getWindowStackSlot(position) {
       const stack = this.getWindowStack();
-      const index = stack.length - Math.max(1, position | 0);
-      return index >= 0 && stack[index] ? (stack[index].slot >>> 0) : 0;
+      const positions = this.getWindowStackPositionSlots();
+      const target = position >>> 0;
+      const positionIndex = positions.indexOf(target);
+      if (positionIndex < 0) {
+        return 0;
+      }
+      const stackIndex = positions.length - 1 - positionIndex;
+      return stackIndex >= 0 && stack[stackIndex] ? (stack[stackIndex].slot >>> 0) : 0;
     }
 
     getMaxThreadSlot() {
