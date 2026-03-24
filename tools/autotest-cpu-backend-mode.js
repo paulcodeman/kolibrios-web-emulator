@@ -3,6 +3,7 @@ const { loadKosRuntime } = require("./ui-harness");
 const runtime = loadKosRuntime();
 const { Emulator, createHeadlessSurface } = runtime;
 const emuApi = global.KosEmu && global.KosEmu.emu ? global.KosEmu.emu : null;
+const loaderApi = global.KosEmu && global.KosEmu.core ? global.KosEmu.core.loader : null;
 const REG_EAX = 0;
 const REG_ECX = 1;
 const REG_EDX = 2;
@@ -138,6 +139,51 @@ function runInstructionScenario(cpuBackend, bytes, setup) {
   };
 }
 
+function captureBlockState(emulator, block) {
+  return {
+    eip: emulator.readReg(REG_EIP) >>> 0,
+    eflags: emulator.readReg(REG_EFLAGS) >>> 0,
+    eax: emulator.readReg(REG_EAX) >>> 0,
+    ecx: emulator.readReg(REG_ECX) >>> 0,
+    edx: emulator.readReg(REG_EDX) >>> 0,
+    ebx: emulator.readReg(REG_EBX) >>> 0,
+    esi: emulator.readReg(REG_ESI) >>> 0,
+    edi: emulator.readReg(REG_EDI) >>> 0,
+    entries: block && block.entries ? block.entries.length >>> 0 : 0,
+    simplePlanWords: block && block.simplePlan ? block.simplePlan.wordCount >>> 0 : 0
+  };
+}
+
+function runCachedBlockScenario(cpuBackend, bytes, setup) {
+  const emulator = createInstructionEmulator(cpuBackend);
+  for (let i = 0; i < bytes.length; i += 1) {
+    emulator.writeMem8(i, bytes[i] & 0xff);
+  }
+  if (loaderApi && typeof loaderApi.scanSoftOps === "function") {
+    const scan = loaderApi.scanSoftOps(emulator.cpu.mem, 0, bytes.length);
+    emulator.softInstructionSites = scan && scan.sites instanceof Map ? scan.sites : new Map();
+  }
+  if (typeof setup === "function") {
+    setup(emulator);
+  }
+  const initialRegs = Array.from(emulator.cpu.regs);
+  emulator.writeReg(REG_EIP, 0);
+  const built = emulator.executeAndBuildBasicBlock(0, 64);
+  const block = emulator.basicBlockCache.get(0) || null;
+  const linearState = captureBlockState(emulator, block);
+  emulator.cpu.regs.set(initialRegs);
+  emulator.writeReg(REG_EIP, 0);
+  const cached = emulator.executeCachedBasicBlock(0, 64);
+  const cachedState = captureBlockState(emulator, block);
+  return {
+    built: built >>> 0,
+    cached: cached >>> 0,
+    hasSimplePlan: !!(block && block.simplePlan),
+    linearState,
+    cachedState
+  };
+}
+
 try {
   assertEq(Emulator.normalizeCpuBackendMode("js"), "js", "js mode should stay js");
   assertEq(Emulator.normalizeCpuBackendMode("WASM"), "wasm", "wasm mode should normalize case-insensitively");
@@ -187,6 +233,7 @@ try {
   assert(typeof wasmBackend.bswap32 === "function", "wasm helper backend should expose bswap helpers");
   assert(typeof wasmBackend.xaddWidth === "function", "wasm helper backend should expose xadd helpers");
   assert(typeof wasmBackend.cmpxchgWidth === "function", "wasm helper backend should expose cmpxchg helpers");
+  assert(typeof wasmBackend.executeSimpleBlock === "function", "wasm helper backend should expose simple block execution");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -1182,6 +1229,31 @@ try {
     assert(wasmState.ok, `instruction scenario should execute in wasm backend: ${scenario.name}`);
     assertDeepEq(wasmState, jsState, `instruction scenario should match between js and wasm: ${scenario.name}`);
   }
+
+  const cachedBlockBytes = [
+    0xbb, 0x78, 0x56, 0x34, 0x12,
+    0x89, 0xd9,
+    0x83, 0xc1, 0x07,
+    0x0f, 0xcb,
+    0x31, 0xd9,
+    0x3b, 0xcb,
+    0x24, 0xf0,
+    0x4b,
+    0x90,
+    0xc3
+  ];
+  const cachedBlockSetup = (emulator) => {
+    emulator.writeReg(REG_EAX, 0x0000005a);
+    emulator.writeReg(REG_EFLAGS, 0x203);
+  };
+  const jsBlock = runCachedBlockScenario("js", cachedBlockBytes, cachedBlockSetup);
+  const wasmBlock = runCachedBlockScenario("wasm", cachedBlockBytes, cachedBlockSetup);
+  assert(jsBlock.built >= 2, "cached block scenario should build a multi-entry block");
+  assertEq(jsBlock.cached, jsBlock.built, "js cached block should replay the full block");
+  assertEq(wasmBlock.cached, wasmBlock.built, "wasm cached block should replay the full block");
+  assert(wasmBlock.hasSimplePlan, "wasm cached block should compile a simple block plan");
+  assertDeepEq(wasmBlock.linearState, jsBlock.linearState, "cached block linear execution should match between js and wasm");
+  assertDeepEq(wasmBlock.cachedState, jsBlock.cachedState, "cached block replay should match between js and wasm");
 
   const jsEmulator = new Emulator(createHeadlessSurface(8, 8), () => {}, { cpuBackend: "js" });
   assertEq(jsEmulator.getCpuBackendInfo().requested, "js", "constructor should store requested js backend");

@@ -7,8 +7,15 @@
     }
     const REG = shared && shared.REG;
     const formatHex = shared && shared.formatHex;
-    if (!REG || typeof formatHex !== "function") {
-      throw new Error("installCoreRuntime requires shared REG and formatHex helpers.");
+    const SIMPLE_BLOCK_OPS = shared && shared.SIMPLE_BLOCK_OPS;
+    const SIMPLE_BLOCK_RECORD_WORDS = shared && shared.SIMPLE_BLOCK_RECORD_WORDS;
+    if (
+      !REG ||
+      typeof formatHex !== "function" ||
+      !SIMPLE_BLOCK_OPS ||
+      !(SIMPLE_BLOCK_RECORD_WORDS > 0)
+    ) {
+      throw new Error("installCoreRuntime requires shared REG, formatHex, and simple block helpers.");
     }
 
     Object.assign(Emulator.prototype, {
@@ -318,7 +325,10 @@
           return false;
         }
         if (this.softInstructions && this.softInstructionSites.has(start)) {
-          return false;
+          const site = this.softInstructionSites.get(start);
+          if (!this.canExecuteSoftInstructionInBasicBlock(site)) {
+            return false;
+          }
         }
         if (this.hostCallStubs && this.hostCallStubs.has(start)) {
           return false;
@@ -347,6 +357,40 @@
         return next;
       },
 
+      canExecuteSoftInstructionInBasicBlock(site) {
+        if (!site || !site.bytes || !site.bytes.length) {
+          return false;
+        }
+        const first = site.bytes[0] & 0xff;
+        return !(
+          first === 0x66 ||
+          first === 0x67 ||
+          first === 0xf0 ||
+          first === 0xf2 ||
+          first === 0xf3 ||
+          first === 0x2e ||
+          first === 0x36 ||
+          first === 0x3e ||
+          first === 0x26 ||
+          first === 0x64 ||
+          first === 0x65
+        );
+      },
+
+      executeBasicBlockInstruction(addr) {
+        const current = addr >>> 0;
+        if (this.softInstructions && this.softInstructionSites && this.softInstructionSites.has(current)) {
+          const site = this.softInstructionSites.get(current);
+          if (this.canExecuteSoftInstructionInBasicBlock(site) && this.handleSoftInstruction(current)) {
+            return true;
+          }
+        }
+        if (this.invokeHostCallStub && this.hostCallStubs && this.hostCallStubs.has(current)) {
+          return !!this.invokeHostCallStub(current);
+        }
+        return this.executeBasicInstruction(current);
+      },
+
       executeLinearBasicBlock(eip, budget, entryLimit, entries) {
         const start = eip >>> 0;
         if (budget <= 0 || entryLimit <= 0 || !this.canStartBasicBlockAt(start)) {
@@ -362,7 +406,7 @@
           this.canStartBasicBlockAt(current)
         ) {
           this.lastEip = current >>> 0;
-          const ok = this.executeBasicInstruction(current);
+          const ok = this.executeBasicBlockInstruction(current);
           if (!ok) {
             this.handleUnknownOpcodeAt(current);
             return executed;
@@ -397,6 +441,16 @@
           return 0;
         }
         this.basicBlockHits += 1;
+        if (
+          this.cpuBackend === "wasm" &&
+          block.simplePlan &&
+          (block.entries.length >>> 0) <= (budget >>> 0)
+        ) {
+          const fastExecuted = this.executeSimpleCachedBasicBlock(block);
+          if (fastExecuted > 0) {
+            return fastExecuted;
+          }
+        }
         let executed = 0;
         const entries = block.entries;
         for (let i = 0; i < entries.length && executed < budget && this.running && !this.yieldRequested; i += 1) {
@@ -405,7 +459,7 @@
             break;
           }
           this.lastEip = entry.addr >>> 0;
-          const ok = this.executeBasicInstruction(entry.addr);
+          const ok = this.executeBasicBlockInstruction(entry.addr);
           if (!ok) {
             this.invalidateBasicBlock(block.start);
             this.handleUnknownOpcodeAt(entry.addr);
@@ -472,7 +526,8 @@
           start,
           end,
           entries,
-          pages: []
+          pages: [],
+          simplePlan: this.buildSimpleBasicBlockPlan(entries)
         };
         const startPage = start >>> 12;
         const endPage = (Math.max(start, end - 1) >>> 12);
@@ -488,6 +543,247 @@
         this.basicBlockCache.set(start, block);
         this.basicBlockBuilds += 1;
         return true;
+      },
+
+      appendSimpleBlockRecord(target, kind, a, b, c, d) {
+        target.push(kind >>> 0, a >>> 0, b >>> 0, c >>> 0, d >>> 0);
+      },
+
+      buildSimpleBasicBlockPlan(entries) {
+        if (!entries || !entries.length) {
+          return null;
+        }
+        const words = [];
+        const push = (kind, a, b, c, d) => this.appendSimpleBlockRecord(words, kind, a, b, c, d);
+        for (let i = 0; i < entries.length; i += 1) {
+          const entry = entries[i];
+          const addr = entry.addr >>> 0;
+          const next = entry.next >>> 0;
+          if (next < addr) {
+            return null;
+          }
+          const len = (next - addr) >>> 0;
+          if (!len || len > 8) {
+            return null;
+          }
+          const bytes = this.readMemBlock(addr, len);
+          if (!bytes || bytes.length < len) {
+            return null;
+          }
+          const opcode = bytes[0] & 0xff;
+          if (opcode === 0x90 && len === 1) {
+            push(SIMPLE_BLOCK_OPS.NOP, 0, 0, 0, 0);
+            continue;
+          }
+          if (opcode >= 0x40 && opcode <= 0x47 && len === 1) {
+            push(SIMPLE_BLOCK_OPS.INC_R32, opcode & 7, 0, 0, 0);
+            continue;
+          }
+          if (opcode >= 0x48 && opcode <= 0x4f && len === 1) {
+            push(SIMPLE_BLOCK_OPS.DEC_R32, opcode & 7, 0, 0, 0);
+            continue;
+          }
+          if (opcode >= 0xb8 && opcode <= 0xbf && len === 5) {
+            const imm =
+              (bytes[1] & 0xff) |
+              ((bytes[2] & 0xff) << 8) |
+              ((bytes[3] & 0xff) << 16) |
+              ((bytes[4] & 0xff) << 24);
+            push(SIMPLE_BLOCK_OPS.MOV_R32_IMM32, opcode & 7, imm, 0, 0);
+            continue;
+          }
+          if (opcode === 0xc7 && len === 6) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const regField = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3 || regField !== 0) {
+              return null;
+            }
+            const imm =
+              (bytes[2] & 0xff) |
+              ((bytes[3] & 0xff) << 8) |
+              ((bytes[4] & 0xff) << 16) |
+              ((bytes[5] & 0xff) << 24);
+            push(SIMPLE_BLOCK_OPS.MOV_R32_IMM32, rm, imm, 0, 0);
+            continue;
+          }
+          if (opcode === 0x0f && len === 2) {
+            const op2 = bytes[1] & 0xff;
+            if (op2 >= 0xc8 && op2 <= 0xcf) {
+              push(SIMPLE_BLOCK_OPS.BSWAP_R32, op2 & 7, 0, 0, 0);
+              continue;
+            }
+            return null;
+          }
+          if (
+            (opcode === 0x04 ||
+              opcode === 0x0c ||
+              opcode === 0x14 ||
+              opcode === 0x24 ||
+              opcode === 0x2c ||
+              opcode === 0x34 ||
+              opcode === 0x3c) &&
+            len === 2
+          ) {
+            const op = opcode === 0x04 ? 0
+              : (opcode === 0x0c ? 1
+                : (opcode === 0x14 ? 2
+                  : (opcode === 0x24 ? 4
+                    : (opcode === 0x2c ? 5
+                      : (opcode === 0x34 ? 6 : 7)))));
+            push(SIMPLE_BLOCK_OPS.ALU_AL_IMM8, op, bytes[1] & 0xff, opcode === 0x3c ? 0 : 1, 0);
+            continue;
+          }
+          if (
+            (opcode === 0x05 ||
+              opcode === 0x0d ||
+              opcode === 0x15 ||
+              opcode === 0x25 ||
+              opcode === 0x2d ||
+              opcode === 0x35 ||
+              opcode === 0x3d) &&
+            len === 5
+          ) {
+            const imm =
+              (bytes[1] & 0xff) |
+              ((bytes[2] & 0xff) << 8) |
+              ((bytes[3] & 0xff) << 16) |
+              ((bytes[4] & 0xff) << 24);
+            const op = opcode === 0x05 ? 0
+              : (opcode === 0x0d ? 1
+                : (opcode === 0x15 ? 2
+                  : (opcode === 0x25 ? 4
+                    : (opcode === 0x2d ? 5
+                      : (opcode === 0x35 ? 6 : 7)))));
+            push(SIMPLE_BLOCK_OPS.ALU_R32_IMM32, REG.EAX, imm, op, opcode === 0x3d ? 0 : 1);
+            continue;
+          }
+          if ((opcode === 0x81 && len === 6) || (opcode === 0x83 && len === 3)) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const regField = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3) {
+              return null;
+            }
+            if (regField !== 0 && regField !== 1 && regField !== 4 && regField !== 5 && regField !== 7) {
+              return null;
+            }
+            const imm = opcode === 0x81
+              ? (
+                (bytes[2] & 0xff) |
+                ((bytes[3] & 0xff) << 8) |
+                ((bytes[4] & 0xff) << 16) |
+                ((bytes[5] & 0xff) << 24)
+              ) >>> 0
+              : ((bytes[2] << 24) >> 24) >>> 0;
+            push(SIMPLE_BLOCK_OPS.ALU_R32_IMM32, rm, imm, regField, regField === 7 ? 0 : 1);
+            continue;
+          }
+          if (
+            opcode === 0x89 ||
+            opcode === 0x8b ||
+            opcode === 0x01 ||
+            opcode === 0x03 ||
+            opcode === 0x09 ||
+            opcode === 0x0b ||
+            opcode === 0x21 ||
+            opcode === 0x23 ||
+            opcode === 0x29 ||
+            opcode === 0x2b ||
+            opcode === 0x31 ||
+            opcode === 0x33 ||
+            opcode === 0x39 ||
+            opcode === 0x3b ||
+            opcode === 0x85
+          ) {
+            if (len !== 2) {
+              return null;
+            }
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const reg = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3) {
+              return null;
+            }
+            if (opcode === 0x89) {
+              push(SIMPLE_BLOCK_OPS.MOV_R32_R32, rm, reg, 0, 0);
+              continue;
+            }
+            if (opcode === 0x8b) {
+              push(SIMPLE_BLOCK_OPS.MOV_R32_R32, reg, rm, 0, 0);
+              continue;
+            }
+            if (opcode === 0x85) {
+              push(SIMPLE_BLOCK_OPS.ALU_R32_R32, rm, reg, 8, 0);
+              continue;
+            }
+            if (opcode === 0x39) {
+              push(SIMPLE_BLOCK_OPS.ALU_R32_R32, rm, reg, 7, 0);
+              continue;
+            }
+            if (opcode === 0x3b) {
+              push(SIMPLE_BLOCK_OPS.ALU_R32_R32, reg, rm, 7, 0);
+              continue;
+            }
+            const op = opcode === 0x01 || opcode === 0x03 ? 0
+              : (opcode === 0x09 || opcode === 0x0b ? 1
+                : (opcode === 0x21 || opcode === 0x23 ? 4
+                  : (opcode === 0x29 || opcode === 0x2b ? 5 : 6)));
+            if (
+              opcode === 0x01 ||
+              opcode === 0x09 ||
+              opcode === 0x21 ||
+              opcode === 0x29 ||
+              opcode === 0x31
+            ) {
+              push(SIMPLE_BLOCK_OPS.ALU_R32_R32, rm, reg, op, 1);
+            } else {
+              push(SIMPLE_BLOCK_OPS.ALU_R32_R32, reg, rm, op, 1);
+            }
+            continue;
+          }
+          return null;
+        }
+        if (!words.length) {
+          return null;
+        }
+        return {
+          words: Uint32Array.from(words),
+          wordCount: words.length >>> 0
+        };
+      },
+
+      executeSimpleCachedBasicBlock(block) {
+        if (!block || !block.simplePlan || !this.cpu || !this.cpu.regs) {
+          return 0;
+        }
+        const backend = this.cpuHelperBackend;
+        if (!backend || typeof backend.executeSimpleBlock !== "function") {
+          return 0;
+        }
+        const scratch = this.simpleBlockRegsScratch || (this.simpleBlockRegsScratch = new Uint32Array(8));
+        const regs = this.cpu.regs;
+        for (let i = 0; i < 8; i += 1) {
+          scratch[i] = regs[i] >>> 0;
+        }
+        const result = backend.executeSimpleBlock(
+          block.simplePlan.words,
+          block.simplePlan.wordCount,
+          scratch,
+          regs[REG.EFLAGS] >>> 0
+        );
+        if (!result || !result.ok) {
+          return 0;
+        }
+        for (let i = 0; i < 8; i += 1) {
+          regs[i] = scratch[i] >>> 0;
+        }
+        regs[REG.EFLAGS] = (result.flags >>> 0) || 0;
+        regs[REG.EIP] = block.end >>> 0;
+        return block.entries.length >>> 0;
       },
 
       invalidateBasicBlock(start) {

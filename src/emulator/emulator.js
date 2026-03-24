@@ -32,6 +32,18 @@ const FLAG_SF = 0x00000080;
 const FLAG_DF = 0x00000400;
 const FLAG_OF = 0x00000800;
 const ALU_FLAG_MASK = FLAG_CF | FLAG_PF | FLAG_ZF | FLAG_SF | FLAG_OF;
+const SIMPLE_BLOCK_RECORD_WORDS = 5;
+const SIMPLE_BLOCK_OPS = {
+  NOP: 0,
+  INC_R32: 1,
+  DEC_R32: 2,
+  BSWAP_R32: 3,
+  MOV_R32_R32: 4,
+  MOV_R32_IMM32: 5,
+  ALU_R32_R32: 6,
+  ALU_R32_IMM32: 7,
+  ALU_AL_IMM8: 8
+};
 
 let activeCpuHelperBackend = null;
 let jsCpuHelperBackend = null;
@@ -1310,6 +1322,90 @@ function doubleShift(value, source, count, widthBits, leftShift, flags) {
   return doubleShiftJs(value, source, count, widthBits, leftShift, flags);
 }
 
+function executeSimpleBlockJs(planWords, wordCount, regs, flags) {
+  const words = planWords instanceof Uint32Array ? planWords : new Uint32Array(planWords || 0);
+  if (!regs || typeof regs.length !== "number" || regs.length < 8) {
+    return { ok: false, flags: flags >>> 0 };
+  }
+  const totalWords = Math.min(words.length >>> 0, wordCount >>> 0);
+  if (!totalWords || (totalWords % SIMPLE_BLOCK_RECORD_WORDS) !== 0) {
+    return { ok: false, flags: flags >>> 0 };
+  }
+  let nextFlags = flags >>> 0;
+  for (let offset = 0; offset < totalWords; offset += SIMPLE_BLOCK_RECORD_WORDS) {
+    const kind = words[offset] >>> 0;
+    const a = words[offset + 1] >>> 0;
+    const b = words[offset + 2] >>> 0;
+    const c = words[offset + 3] >>> 0;
+    const d = words[offset + 4] >>> 0;
+    switch (kind) {
+      case SIMPLE_BLOCK_OPS.NOP:
+        break;
+      case SIMPLE_BLOCK_OPS.INC_R32: {
+        const reg = a & 7;
+        const value = regs[reg] >>> 0;
+        const alu = aluBinaryWidthJs(0, value, 1, 32, nextFlags);
+        regs[reg] = alu.result >>> 0;
+        nextFlags = ((alu.flags & ~FLAG_CF) | (nextFlags & FLAG_CF)) >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.DEC_R32: {
+        const reg = a & 7;
+        const value = regs[reg] >>> 0;
+        const alu = aluBinaryWidthJs(5, value, 1, 32, nextFlags);
+        regs[reg] = alu.result >>> 0;
+        nextFlags = ((alu.flags & ~FLAG_CF) | (nextFlags & FLAG_CF)) >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.BSWAP_R32: {
+        const reg = a & 7;
+        regs[reg] = bswap32Js(regs[reg] >>> 0) >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.MOV_R32_R32:
+        regs[a & 7] = regs[b & 7] >>> 0;
+        break;
+      case SIMPLE_BLOCK_OPS.MOV_R32_IMM32:
+        regs[a & 7] = b >>> 0;
+        break;
+      case SIMPLE_BLOCK_OPS.ALU_R32_R32: {
+        const lhsReg = a & 7;
+        const rhsReg = b & 7;
+        const writeResult = (d & 1) !== 0;
+        const alu = aluBinaryWidthJs(c >>> 0, regs[lhsReg] >>> 0, regs[rhsReg] >>> 0, 32, nextFlags);
+        if (writeResult) {
+          regs[lhsReg] = alu.result >>> 0;
+        }
+        nextFlags = alu.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.ALU_R32_IMM32: {
+        const reg = a & 7;
+        const writeResult = (d & 1) !== 0;
+        const alu = aluBinaryWidthJs(c >>> 0, regs[reg] >>> 0, b >>> 0, 32, nextFlags);
+        if (writeResult) {
+          regs[reg] = alu.result >>> 0;
+        }
+        nextFlags = alu.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.ALU_AL_IMM8: {
+        const eax = regs[REG.EAX] >>> 0;
+        const writeResult = (c & 1) !== 0;
+        const alu = aluBinaryWidthJs(a >>> 0, eax & 0xff, b & 0xff, 8, nextFlags);
+        if (writeResult) {
+          regs[REG.EAX] = ((eax & 0xffffff00) | (alu.result & 0xff)) >>> 0;
+        }
+        nextFlags = alu.flags >>> 0;
+        break;
+      }
+      default:
+        return { ok: false, flags: flags >>> 0 };
+    }
+  }
+  return { ok: true, flags: nextFlags >>> 0 };
+}
+
 function getJsCpuHelperBackend() {
   if (!jsCpuHelperBackend) {
     jsCpuHelperBackend = {
@@ -1523,6 +1619,9 @@ function getJsCpuHelperBackend() {
       },
       cmpxchgWidth(accumulator, source, replacement, widthBits, flags) {
         return cmpxchgWidthJs(accumulator, source, replacement, widthBits, flags);
+      },
+      executeSimpleBlock(planWords, wordCount, regs, flags) {
+        return executeSimpleBlockJs(planWords, wordCount, regs, flags);
       },
       evalJccCondition(cc, flags) {
         return evalJccConditionJs(cc, flags);
@@ -3108,7 +3207,12 @@ class Emulator {
       align4k
     });
   }
-  installCoreRuntime(Emulator, { REG, formatHex });
+  installCoreRuntime(Emulator, {
+    REG,
+    formatHex,
+    SIMPLE_BLOCK_OPS,
+    SIMPLE_BLOCK_RECORD_WORDS
+  });
   installCoreExecute(Emulator, {
     REG,
     FLAG_CF,

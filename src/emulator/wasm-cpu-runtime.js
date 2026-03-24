@@ -197,6 +197,12 @@
       typeof exports.get_cmpxchg_last_accumulator !== "function" ||
       typeof exports.get_cmpxchg_last_flags !== "function" ||
       typeof exports.get_cmpxchg_last_exchanged !== "function" ||
+      !exports.memory ||
+      typeof exports.simple_block_max_words !== "function" ||
+      typeof exports.get_simple_block_plan_ptr !== "function" ||
+      typeof exports.get_simple_block_regs_ptr !== "function" ||
+      typeof exports.get_simple_block_last_flags !== "function" ||
+      typeof exports.execute_simple_block_exec !== "function" ||
       typeof exports.x87_compare_code !== "function" ||
       typeof exports.shift_packed64_exec !== "function" ||
       typeof exports.get_shift_packed64_last_lo !== "function" ||
@@ -247,6 +253,11 @@
     ) {
       throw new Error("WASM CPU backend exports are incomplete.");
     }
+    const memory = exports.memory;
+    let memoryU32 = new Uint32Array(memory.buffer);
+    const simpleBlockMaxWords = exports.simple_block_max_words() >>> 0;
+    const simpleBlockPlanIndex = (exports.get_simple_block_plan_ptr() >>> 0) >>> 2;
+    const simpleBlockRegsIndex = (exports.get_simple_block_regs_ptr() >>> 0) >>> 2;
     cache.backend = {
       kind: "wasm",
       apiVersion: typeof exports.api_version === "function" ? (exports.api_version() >>> 0) : 0,
@@ -320,6 +331,40 @@
           flags >>> 0
         );
         return readCmpxchgResult(exports);
+      },
+      executeSimpleBlock(planWords, wordCount, regs, flags) {
+        const words = planWords instanceof Uint32Array ? planWords : new Uint32Array(planWords || 0);
+        const totalWords = Math.min(words.length >>> 0, wordCount >>> 0);
+        if (
+          !regs ||
+          typeof regs.length !== "number" ||
+          regs.length < 8 ||
+          !totalWords ||
+          totalWords > simpleBlockMaxWords
+        ) {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        if (memoryU32.buffer !== memory.buffer) {
+          memoryU32 = new Uint32Array(memory.buffer);
+        }
+        memoryU32.set(words.subarray(0, totalWords), simpleBlockPlanIndex);
+        for (let i = 0; i < 8; i += 1) {
+          memoryU32[simpleBlockRegsIndex + i] = regs[i] >>> 0;
+        }
+        const ok = !!exports.execute_simple_block_exec(totalWords >>> 0, flags >>> 0);
+        if (!ok) {
+          return {
+            ok: false,
+            flags: (exports.get_simple_block_last_flags?.() || flags || 0) >>> 0
+          };
+        }
+        for (let i = 0; i < 8; i += 1) {
+          regs[i] = memoryU32[simpleBlockRegsIndex + i] >>> 0;
+        }
+        return {
+          ok: true,
+          flags: (exports.get_simple_block_last_flags?.() || 0) >>> 0
+        };
       },
       imulSignedWidth(left, right, widthBits, flags) {
         exports.imul_signed_width_exec(left >>> 0, right >>> 0, widthBits >>> 0, flags >>> 0);
