@@ -34,6 +34,8 @@ var mul_last_flags: u32 = 0;
 var div_last_ok: u32 = 0;
 var div_last_quotient: u32 = 0;
 var div_last_remainder: u32 = 0;
+var x87_sincos_last_sin: f64 = 0;
+var x87_sincos_last_cos: f64 = 1;
 
 fn shiftCount32(value: u32) u5 {
     return @intCast(value & 31);
@@ -649,6 +651,51 @@ pub export fn get_div_last_quotient() u32 {
 
 pub export fn get_div_last_remainder() u32 {
     return div_last_remainder;
+}
+
+pub export fn x87_f2xm1(value: f64) f64 {
+    return std.math.pow(f64, 2.0, value) - 1.0;
+}
+
+pub export fn x87_fyl2x(y: f64, x: f64) f64 {
+    return y * std.math.log2(x);
+}
+
+pub export fn x87_tan(value: f64) f64 {
+    return @tan(value);
+}
+
+pub export fn x87_atan2(y: f64, x: f64) f64 {
+    return std.math.atan2(y, x);
+}
+
+pub export fn x87_sqrt(value: f64) f64 {
+    return @sqrt(value);
+}
+
+pub export fn x87_sin(value: f64) f64 {
+    return @sin(value);
+}
+
+pub export fn x87_cos(value: f64) f64 {
+    return @cos(value);
+}
+
+pub export fn x87_sincos_exec(value: f64) void {
+    x87_sincos_last_sin = @sin(value);
+    x87_sincos_last_cos = @cos(value);
+}
+
+pub export fn get_x87_sincos_last_sin() f64 {
+    return x87_sincos_last_sin;
+}
+
+pub export fn get_x87_sincos_last_cos() f64 {
+    return x87_sincos_last_cos;
+}
+
+pub export fn x87_scale(st0: f64, st1: f64) f64 {
+    return st0 * std.math.pow(f64, 2.0, @trunc(st1));
 }
 
 pub export fn shift_rotate_exec(value: u32, count: u32, width_bits: u32, mode: u32, flags: u32) void {

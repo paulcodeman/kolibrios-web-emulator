@@ -26,6 +26,15 @@
       shiftPacked64,
       mulFullWidth,
       divideFullWidth,
+      x87F2xm1,
+      x87Fyl2x,
+      x87Tan,
+      x87Atan2,
+      x87Sqrt,
+      x87Sin,
+      x87Cos,
+      x87SinCos,
+      x87Scale,
       updateLogicFlagsWidth,
       updateAddFlags,
       updateAdcFlags,
@@ -276,17 +285,17 @@
         } else if (reg === 6) {
           const st0 = this.fpuPeek();
           if (stIndex === 0) {
-            this.fpuSet(0, Math.pow(2, st0) - 1);
+            this.fpuSet(0, x87F2xm1(st0));
           } else if (stIndex === 1) {
             const st1 = this.fpuGet(1);
-            this.fpuSet(1, st1 * Math.log2(st0));
+            this.fpuSet(1, x87Fyl2x(st1, st0));
             this.fpuPop();
           } else if (stIndex === 2) {
-            this.fpuSet(0, Math.tan(st0));
+            this.fpuSet(0, x87Tan(st0));
             this.fpuPush(1.0);
           } else if (stIndex === 3) {
             const st1 = this.fpuGet(1);
-            this.fpuSet(1, Math.atan2(st1, st0));
+            this.fpuSet(1, x87Atan2(st1, st0));
             this.fpuPop();
           } else if (stIndex === 6) {
             if ((this.cpu && (this.cpu.fpuSize | 0) < 8)) {
@@ -298,21 +307,20 @@
         } else if (reg === 7) {
           const st0 = this.fpuPeek();
           if (stIndex === 2) {
-            this.fpuSet(0, Math.sqrt(st0));
+            this.fpuSet(0, x87Sqrt(st0));
           } else if (stIndex === 3) {
-            const sin = Math.sin(st0);
-            const cos = Math.cos(st0);
-            this.fpuSet(0, sin);
-            this.fpuPush(cos);
+            const sincos = x87SinCos(st0);
+            this.fpuSet(0, sincos.sin);
+            this.fpuPush(sincos.cos);
           } else if (stIndex === 4) {
             this.fpuSet(0, roundTiesToEven(st0));
           } else if (stIndex === 5) {
             const st1 = this.fpuGet(1);
-            this.fpuSet(0, st0 * Math.pow(2, Math.trunc(st1)));
+            this.fpuSet(0, x87Scale(st0, st1));
           } else if (stIndex === 6) {
-            this.fpuSet(0, Math.sin(st0));
+            this.fpuSet(0, x87Sin(st0));
           } else if (stIndex === 7) {
-            this.fpuSet(0, Math.cos(st0));
+            this.fpuSet(0, x87Cos(st0));
           }
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);

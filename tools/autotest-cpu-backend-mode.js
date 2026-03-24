@@ -24,6 +24,22 @@ function assertDeepEq(actual, expected, message) {
   }
 }
 
+function assertClose(actual, expected, epsilon, message) {
+  if (Number.isNaN(actual) && Number.isNaN(expected)) {
+    return;
+  }
+  if (!Number.isFinite(actual) || !Number.isFinite(expected)) {
+    if (Object.is(actual, expected) || actual === expected) {
+      return;
+    }
+    throw new Error(`${message}: expected ${expected}, got ${actual}`);
+  }
+  const scale = Math.max(1, Math.abs(actual), Math.abs(expected));
+  if (Math.abs(actual - expected) > epsilon * scale) {
+    throw new Error(`${message}: expected ${expected}, got ${actual}`);
+  }
+}
+
 function createLcg(seed) {
   let state = seed >>> 0;
   return function next() {
@@ -59,6 +75,7 @@ try {
   assert(typeof wasmBackend.shiftPacked64 === "function", "wasm helper backend should expose 64-bit shift helpers");
   assert(typeof wasmBackend.mulFullWidth === "function", "wasm helper backend should expose full-width multiply helpers");
   assert(typeof wasmBackend.divideFullWidth === "function", "wasm helper backend should expose full-width divide helpers");
+  assert(typeof wasmBackend.x87F2xm1 === "function", "wasm helper backend should expose x87 transcendental helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -106,6 +123,23 @@ try {
       jsBackend.x87CompareCode(left, right),
       `x87CompareCode should match for ${String(left)} vs ${String(right)}`
     );
+  }
+
+  for (const value of [-2, -1, -0.5, 0, 0.25, 0.5, 1, 2, Math.PI / 6, Math.PI / 3]) {
+    assertClose(wasmBackend.x87F2xm1(value), jsBackend.x87F2xm1(value), 1e-12, `x87F2xm1 should match for ${value}`);
+    assertClose(wasmBackend.x87Tan(value), jsBackend.x87Tan(value), 1e-12, `x87Tan should match for ${value}`);
+    assertClose(wasmBackend.x87Sqrt(Math.abs(value)), jsBackend.x87Sqrt(Math.abs(value)), 1e-12, `x87Sqrt should match for ${value}`);
+    assertClose(wasmBackend.x87Sin(value), jsBackend.x87Sin(value), 1e-12, `x87Sin should match for ${value}`);
+    assertClose(wasmBackend.x87Cos(value), jsBackend.x87Cos(value), 1e-12, `x87Cos should match for ${value}`);
+    const wasmSinCos = wasmBackend.x87SinCos(value);
+    const jsSinCos = jsBackend.x87SinCos(value);
+    assertClose(wasmSinCos.sin, jsSinCos.sin, 1e-12, `x87SinCos.sin should match for ${value}`);
+    assertClose(wasmSinCos.cos, jsSinCos.cos, 1e-12, `x87SinCos.cos should match for ${value}`);
+  }
+  for (const [y, x] of [[1, 2], [2, 1], [-1, 3], [3, -1], [0.5, 0.25]]) {
+    assertClose(wasmBackend.x87Fyl2x(y, x), jsBackend.x87Fyl2x(y, x), 1e-12, `x87Fyl2x should match for ${y},${x}`);
+    assertClose(wasmBackend.x87Atan2(y, x), jsBackend.x87Atan2(y, x), 1e-12, `x87Atan2 should match for ${y},${x}`);
+    assertClose(wasmBackend.x87Scale(y, x), jsBackend.x87Scale(y, x), 1e-12, `x87Scale should match for ${y},${x}`);
   }
 
   const bcdVectors = [

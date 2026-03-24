@@ -389,6 +389,117 @@ function divideFullWidth(high, low, divisor, widthBits, signed) {
   return divideFullWidthJs(high, low, divisor, widthBits, signed);
 }
 
+function x87F2xm1Js(value) {
+  return Math.pow(2, Number(value)) - 1;
+}
+
+function x87F2xm1(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87F2xm1 === "function") {
+    return Number(backend.x87F2xm1(Number(value)));
+  }
+  return x87F2xm1Js(value);
+}
+
+function x87Fyl2xJs(y, x) {
+  return Number(y) * Math.log2(Number(x));
+}
+
+function x87Fyl2x(y, x) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87Fyl2x === "function") {
+    return Number(backend.x87Fyl2x(Number(y), Number(x)));
+  }
+  return x87Fyl2xJs(y, x);
+}
+
+function x87TanJs(value) {
+  return Math.tan(Number(value));
+}
+
+function x87Tan(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87Tan === "function") {
+    return Number(backend.x87Tan(Number(value)));
+  }
+  return x87TanJs(value);
+}
+
+function x87Atan2Js(y, x) {
+  return Math.atan2(Number(y), Number(x));
+}
+
+function x87Atan2(y, x) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87Atan2 === "function") {
+    return Number(backend.x87Atan2(Number(y), Number(x)));
+  }
+  return x87Atan2Js(y, x);
+}
+
+function x87SqrtJs(value) {
+  return Math.sqrt(Number(value));
+}
+
+function x87Sqrt(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87Sqrt === "function") {
+    return Number(backend.x87Sqrt(Number(value)));
+  }
+  return x87SqrtJs(value);
+}
+
+function x87SinJs(value) {
+  return Math.sin(Number(value));
+}
+
+function x87Sin(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87Sin === "function") {
+    return Number(backend.x87Sin(Number(value)));
+  }
+  return x87SinJs(value);
+}
+
+function x87CosJs(value) {
+  return Math.cos(Number(value));
+}
+
+function x87Cos(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87Cos === "function") {
+    return Number(backend.x87Cos(Number(value)));
+  }
+  return x87CosJs(value);
+}
+
+function x87SinCosJs(value) {
+  return {
+    sin: Math.sin(Number(value)),
+    cos: Math.cos(Number(value))
+  };
+}
+
+function x87SinCos(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87SinCos === "function") {
+    return backend.x87SinCos(Number(value));
+  }
+  return x87SinCosJs(value);
+}
+
+function x87ScaleJs(st0, st1) {
+  return Number(st0) * Math.pow(2, Math.trunc(Number(st1)));
+}
+
+function x87Scale(st0, st1) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87Scale === "function") {
+    return Number(backend.x87Scale(Number(st0), Number(st1)));
+  }
+  return x87ScaleJs(st0, st1);
+}
+
 function widthMask(widthBits) {
   if (widthBits === 8) {
     return 0xff;
@@ -924,6 +1035,33 @@ function getJsCpuHelperBackend() {
       },
       divideFullWidth(high, low, divisor, widthBits, signed) {
         return divideFullWidthJs(high, low, divisor, widthBits, signed);
+      },
+      x87F2xm1(value) {
+        return x87F2xm1Js(value);
+      },
+      x87Fyl2x(y, x) {
+        return x87Fyl2xJs(y, x);
+      },
+      x87Tan(value) {
+        return x87TanJs(value);
+      },
+      x87Atan2(y, x) {
+        return x87Atan2Js(y, x);
+      },
+      x87Sqrt(value) {
+        return x87SqrtJs(value);
+      },
+      x87Sin(value) {
+        return x87SinJs(value);
+      },
+      x87Cos(value) {
+        return x87CosJs(value);
+      },
+      x87SinCos(value) {
+        return x87SinCosJs(value);
+      },
+      x87Scale(st0, st1) {
+        return x87ScaleJs(st0, st1);
       },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
@@ -2286,6 +2424,15 @@ class Emulator {
     shiftPacked64,
     mulFullWidth,
     divideFullWidth,
+    x87F2xm1,
+    x87Fyl2x,
+    x87Tan,
+    x87Atan2,
+    x87Sqrt,
+    x87Sin,
+    x87Cos,
+    x87SinCos,
+    x87Scale,
     updateLogicFlagsWidth,
     updateAddFlags,
     updateAdcFlags,

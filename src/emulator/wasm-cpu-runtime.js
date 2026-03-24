@@ -118,6 +118,13 @@
     };
   }
 
+  function readX87SinCosResult(exports) {
+    return {
+      sin: Number(exports.get_x87_sincos_last_sin?.() || 0),
+      cos: Number(exports.get_x87_sincos_last_cos?.() || 0)
+    };
+  }
+
   function createWasmCpuBackend() {
     if (cache.backend) {
       return cache.backend;
@@ -156,6 +163,17 @@
       typeof exports.get_div_last_ok !== "function" ||
       typeof exports.get_div_last_quotient !== "function" ||
       typeof exports.get_div_last_remainder !== "function" ||
+      typeof exports.x87_f2xm1 !== "function" ||
+      typeof exports.x87_fyl2x !== "function" ||
+      typeof exports.x87_tan !== "function" ||
+      typeof exports.x87_atan2 !== "function" ||
+      typeof exports.x87_sqrt !== "function" ||
+      typeof exports.x87_sin !== "function" ||
+      typeof exports.x87_cos !== "function" ||
+      typeof exports.x87_sincos_exec !== "function" ||
+      typeof exports.get_x87_sincos_last_sin !== "function" ||
+      typeof exports.get_x87_sincos_last_cos !== "function" ||
+      typeof exports.x87_scale !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
@@ -238,6 +256,34 @@
       divideFullWidth(high, low, divisor, widthBits, signed) {
         exports.divide_full_width_exec(high >>> 0, low >>> 0, divisor >>> 0, widthBits >>> 0, signed ? 1 : 0);
         return readDivResult(exports);
+      },
+      x87F2xm1(value) {
+        return Number(exports.x87_f2xm1(Number(value)));
+      },
+      x87Fyl2x(y, x) {
+        return Number(exports.x87_fyl2x(Number(y), Number(x)));
+      },
+      x87Tan(value) {
+        return Number(exports.x87_tan(Number(value)));
+      },
+      x87Atan2(y, x) {
+        return Number(exports.x87_atan2(Number(y), Number(x)));
+      },
+      x87Sqrt(value) {
+        return Number(exports.x87_sqrt(Number(value)));
+      },
+      x87Sin(value) {
+        return Number(exports.x87_sin(Number(value)));
+      },
+      x87Cos(value) {
+        return Number(exports.x87_cos(Number(value)));
+      },
+      x87SinCos(value) {
+        exports.x87_sincos_exec(Number(value));
+        return readX87SinCosResult(exports);
+      },
+      x87Scale(st0, st1) {
+        return Number(exports.x87_scale(Number(st0), Number(st1)));
       },
       shiftRotate(value, count, widthBits, mode, flags) {
         exports.shift_rotate_exec(value >>> 0, count >>> 0, widthBits >>> 0, mode >>> 0, flags >>> 0);
