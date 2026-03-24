@@ -47,6 +47,8 @@ const SCRIPT_LIST = [
   "../src/emulator/core-runtime.js",
   "../src/emulator/core-execute.js",
   "../src/emulator/emulator-syscalls.js",
+  "../src/emulator/wasm-cpu.generated.js",
+  "../src/emulator/wasm-cpu-runtime.js",
   "../src/emulator/emulator.js",
   "../src/ui/app-ui.js",
   "../src/app.js"
@@ -159,6 +161,10 @@ function parseNumberish(value) {
 function clampCodePoint(value) {
   const cp = value >>> 0;
   return cp > 0x10ffff ? 0xfffd : cp;
+}
+
+function normalizeCpuBackendMode(value) {
+  return String(value || "").trim().toLowerCase() === "wasm" ? "wasm" : "js";
 }
 
 function unpackSignedHigh16(value) {
@@ -365,6 +371,7 @@ class HeadlessUiHarness {
     this.launchDelayMs = Math.max(0, opts.launchDelayMs | 0 || 80);
     this.actionDelayMs = Math.max(0, opts.actionDelayMs | 0 || 12);
     this.defaultTimeoutMs = Math.max(50, opts.defaultTimeoutMs | 0 || 2000);
+    this.cpuBackendMode = normalizeCpuBackendMode(opts.cpuBackend || process.env.KOS_CPU_BACKEND);
     this.nextPid = 1;
     this.nextSlot = 1;
     this.zCounter = 1;
@@ -1437,7 +1444,9 @@ class HeadlessUiHarness {
     const { Emulator, createHeadlessSurface } = loadKosRuntime();
     const process = this.createProcessState(launch);
     process.surface = createHeadlessSurface(this.baseWidth, this.baseHeight);
-    process.emulator = new Emulator(process.surface, (msg) => this.logForProcess(process, msg));
+    process.emulator = new Emulator(process.surface, (msg) => this.logForProcess(process, msg), {
+      cpuBackend: this.cpuBackendMode
+    });
     process.emulator.autoFitWindow = true;
     process.emulator.threadSlot = process.slot >>> 0;
     process.emulator.processId = process.pid >>> 0;

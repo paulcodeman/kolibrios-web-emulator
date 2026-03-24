@@ -17,7 +17,9 @@ const maxMs = Number(process.argv[3] || 2000);
   const image = readTargetImage(target);
 
   const surface = createHeadlessSurface(800, 600);
-  const emulator = new Emulator(surface, (msg) => console.log(msg));
+  const emulator = new Emulator(surface, (msg) => console.log(msg), {
+    cpuBackend: process.env.KOS_CPU_BACKEND
+  });
   const rootDir = process.env.KOS_ROOT || "C:\\Users\\Paul\\Desktop\\Kem\\kolibri_root";
   const providers = createDefaultFileProviders(target, rootDir);
   emulator.processPathOverride = buildExternalAppProcessPath(target);

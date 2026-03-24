@@ -33,11 +33,30 @@ const FLAG_DF = 0x00000400;
 const FLAG_OF = 0x00000800;
 const ALU_FLAG_MASK = FLAG_CF | FLAG_PF | FLAG_ZF | FLAG_SF | FLAG_OF;
 
-function parityEven8(value) {
+let activeCpuHelperBackend = null;
+let jsCpuHelperBackend = null;
+
+function setActiveCpuHelperBackend(backend) {
+  activeCpuHelperBackend = backend || null;
+}
+
+function getActiveCpuHelperBackend() {
+  return activeCpuHelperBackend;
+}
+
+function parityEven8Js(value) {
   let v = value & 0xff;
   v ^= v >> 4;
   v &= 0xf;
   return ((0x6996 >> v) & 1) === 0;
+}
+
+function parityEven8(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.parityEven8 === "function") {
+    return !!backend.parityEven8(value >>> 0);
+  }
+  return parityEven8Js(value);
 }
 
 function roundTiesToEven(value) {
@@ -118,7 +137,7 @@ function updateLogicFlags(flags, result) {
   return next >>> 0;
 }
 
-function updateLogicFlagsWidth(flags, result, widthBits) {
+function updateLogicFlagsWidthJs(flags, result, widthBits) {
   let next = flags & ~ALU_FLAG_MASK;
   const mask = widthMask(widthBits);
   const sign = widthSign(widthBits);
@@ -135,7 +154,15 @@ function updateLogicFlagsWidth(flags, result, widthBits) {
   return next >>> 0;
 }
 
-function updateAddFlags(flags, op1, op2, result, widthBits) {
+function updateLogicFlagsWidth(flags, result, widthBits) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.updateLogicFlagsWidth === "function") {
+    return backend.updateLogicFlagsWidth(flags >>> 0, result >>> 0, widthBits >>> 0) >>> 0;
+  }
+  return updateLogicFlagsWidthJs(flags, result, widthBits);
+}
+
+function updateAddFlagsJs(flags, op1, op2, result, widthBits) {
   const mask = widthBits === 32 ? 0xffffffff : widthMask(widthBits);
   const sign = widthSign(widthBits);
   const a = widthValueUnsigned(op1, widthBits);
@@ -164,7 +191,15 @@ function updateAddFlags(flags, op1, op2, result, widthBits) {
   return next >>> 0;
 }
 
-function updateAdcFlags(flags, op1, op2, carry, result, widthBits) {
+function updateAddFlags(flags, op1, op2, result, widthBits) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.updateAddFlags === "function") {
+    return backend.updateAddFlags(flags >>> 0, op1 >>> 0, op2 >>> 0, result >>> 0, widthBits >>> 0) >>> 0;
+  }
+  return updateAddFlagsJs(flags, op1, op2, result, widthBits);
+}
+
+function updateAdcFlagsJs(flags, op1, op2, carry, result, widthBits) {
   const mask = widthBits === 32 ? 0xffffffff : widthMask(widthBits);
   const sign = widthSign(widthBits);
   const a = widthValueUnsigned(op1, widthBits);
@@ -194,7 +229,15 @@ function updateAdcFlags(flags, op1, op2, carry, result, widthBits) {
   return next >>> 0;
 }
 
-function updateSbbFlags(flags, op1, op2, carry, result, widthBits) {
+function updateAdcFlags(flags, op1, op2, carry, result, widthBits) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.updateAdcFlags === "function") {
+    return backend.updateAdcFlags(flags >>> 0, op1 >>> 0, op2 >>> 0, carry >>> 0, result >>> 0, widthBits >>> 0) >>> 0;
+  }
+  return updateAdcFlagsJs(flags, op1, op2, carry, result, widthBits);
+}
+
+function updateSbbFlagsJs(flags, op1, op2, carry, result, widthBits) {
   const mask = widthBits === 32 ? 0xffffffff : widthMask(widthBits);
   const sign = widthSign(widthBits);
   const a = widthValueUnsigned(op1, widthBits);
@@ -223,7 +266,15 @@ function updateSbbFlags(flags, op1, op2, carry, result, widthBits) {
   return next >>> 0;
 }
 
-function updateSubFlags(flags, op1, op2, result, widthBits) {
+function updateSbbFlags(flags, op1, op2, carry, result, widthBits) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.updateSbbFlags === "function") {
+    return backend.updateSbbFlags(flags >>> 0, op1 >>> 0, op2 >>> 0, carry >>> 0, result >>> 0, widthBits >>> 0) >>> 0;
+  }
+  return updateSbbFlagsJs(flags, op1, op2, carry, result, widthBits);
+}
+
+function updateSubFlagsJs(flags, op1, op2, result, widthBits) {
   const mask = widthBits === 32 ? 0xffffffff : widthMask(widthBits);
   const sign = widthSign(widthBits);
   const a = widthValueUnsigned(op1, widthBits);
@@ -251,7 +302,15 @@ function updateSubFlags(flags, op1, op2, result, widthBits) {
   return next >>> 0;
 }
 
-function shiftRotate(value, count, widthBits, mode, flags) {
+function updateSubFlags(flags, op1, op2, result, widthBits) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.updateSubFlags === "function") {
+    return backend.updateSubFlags(flags >>> 0, op1 >>> 0, op2 >>> 0, result >>> 0, widthBits >>> 0) >>> 0;
+  }
+  return updateSubFlagsJs(flags, op1, op2, result, widthBits);
+}
+
+function shiftRotateJs(value, count, widthBits, mode, flags) {
   const mask = widthMask(widthBits);
   const signBit = widthSign(widthBits);
   let v = value & mask;
@@ -441,7 +500,15 @@ function shiftRotate(value, count, widthBits, mode, flags) {
   }
 }
 
-function doubleShift(value, source, count, widthBits, leftShift, flags) {
+function shiftRotate(value, count, widthBits, mode, flags) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.shiftRotate === "function") {
+    return backend.shiftRotate(value >>> 0, count >>> 0, widthBits >>> 0, mode >>> 0, flags >>> 0);
+  }
+  return shiftRotateJs(value, count, widthBits, mode, flags);
+}
+
+function doubleShiftJs(value, source, count, widthBits, leftShift, flags) {
   const mask = widthMask(widthBits);
   const signBit = widthSign(widthBits);
   let c = count & 0x1f;
@@ -502,6 +569,47 @@ function doubleShift(value, source, count, widthBits, leftShift, flags) {
     }
   }
   return { ok: true, result: (result & mask) >>> 0, flags: next >>> 0 };
+}
+
+function doubleShift(value, source, count, widthBits, leftShift, flags) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.doubleShift === "function") {
+    return backend.doubleShift(value >>> 0, source >>> 0, count >>> 0, widthBits >>> 0, !!leftShift, flags >>> 0);
+  }
+  return doubleShiftJs(value, source, count, widthBits, leftShift, flags);
+}
+
+function getJsCpuHelperBackend() {
+  if (!jsCpuHelperBackend) {
+    jsCpuHelperBackend = {
+      kind: "js",
+      parityEven8(value) {
+        return parityEven8Js(value);
+      },
+      updateLogicFlagsWidth(flags, result, widthBits) {
+        return updateLogicFlagsWidthJs(flags, result, widthBits);
+      },
+      updateAddFlags(flags, op1, op2, result, widthBits) {
+        return updateAddFlagsJs(flags, op1, op2, result, widthBits);
+      },
+      updateAdcFlags(flags, op1, op2, carry, result, widthBits) {
+        return updateAdcFlagsJs(flags, op1, op2, carry, result, widthBits);
+      },
+      updateSubFlags(flags, op1, op2, result, widthBits) {
+        return updateSubFlagsJs(flags, op1, op2, result, widthBits);
+      },
+      updateSbbFlags(flags, op1, op2, carry, result, widthBits) {
+        return updateSbbFlagsJs(flags, op1, op2, carry, result, widthBits);
+      },
+      shiftRotate(value, count, widthBits, mode, flags) {
+        return shiftRotateJs(value, count, widthBits, mode, flags);
+      },
+      doubleShift(value, source, count, widthBits, leftShift, flags) {
+        return doubleShiftJs(value, source, count, widthBits, leftShift, flags);
+      }
+    };
+  }
+  return jsCpuHelperBackend;
 }
 
 function psubusb32(a, b) {
@@ -811,11 +919,27 @@ function evalJccCondition(cc, flags) {
   }
 }
 
+function normalizeCpuBackendMode(mode) {
+  return String(mode || "").trim().toLowerCase() === "wasm" ? "wasm" : "js";
+}
+
+function getCpuBackendAvailability() {
+  const emu = KosEmu && KosEmu.emu ? KosEmu.emu : null;
+  return {
+    js: true,
+    wasm: !!(emu && typeof emu.createWasmCpuBackend === "function")
+  };
+}
+
 
 class Emulator {
-  constructor(surface, log) {
+  constructor(surface, log, options) {
+    const opts = options || {};
     this.surface = surface;
     this.log = log;
+    this.requestedCpuBackend = normalizeCpuBackendMode(opts.cpuBackend);
+    this.cpuBackend = this.requestedCpuBackend;
+    this.cpuHelperBackend = null;
     this.image = null;
     this.imageData = null;
     this.imageDataRaw = null;
@@ -1015,6 +1139,45 @@ class Emulator {
     this.lastStopReason = "";
     this.stopEventEmitted = false;
     this.resetSkinTheme();
+  }
+
+  setCpuBackend(mode) {
+    if (this.running || this.cpu) {
+      throw new Error("Cannot change CPU backend while the emulator is running.");
+    }
+    const next = normalizeCpuBackendMode(mode);
+    this.requestedCpuBackend = next;
+    this.cpuBackend = next;
+    this.cpuHelperBackend = null;
+    return next;
+  }
+
+  getCpuBackendInfo() {
+    const availability = Emulator.getCpuBackendAvailability();
+    return {
+      requested: this.requestedCpuBackend,
+      active: this.cpuBackend,
+      wasmAvailable: !!availability.wasm
+    };
+  }
+
+  ensureCpuBackendReady() {
+    const next = normalizeCpuBackendMode(this.requestedCpuBackend);
+    const availability = Emulator.getCpuBackendAvailability();
+    if (next === "wasm" && !availability.wasm) {
+      throw new Error("WASM CPU backend is not available in this build.");
+    }
+    if (next === "wasm") {
+      const emu = KosEmu && KosEmu.emu ? KosEmu.emu : null;
+      if (!emu || typeof emu.createWasmCpuBackend !== "function") {
+        throw new Error("WASM CPU backend is not available in this build.");
+      }
+      this.cpuHelperBackend = emu.createWasmCpuBackend();
+    } else {
+      this.cpuHelperBackend = null;
+    }
+    this.cpuBackend = next;
+    return this.cpuBackend;
   }
 
   resetImageAnalysisState() {
@@ -1347,10 +1510,15 @@ class Emulator {
     }
     this.lastStopReason = "";
     this.stopEventEmitted = false;
+    this.ensureCpuBackendReady();
     this.setupInterpreter();
     this.running = true;
     this.scheduleStep(0);
-    this.log("Emulation started (interpreter).");
+    this.log(
+      this.cpuBackend === "wasm"
+        ? "Emulation started (JS interpreter with WASM CPU helpers)."
+        : "Emulation started (JS interpreter)."
+    );
   }
 
   emitStopped(reason) {
@@ -1659,6 +1827,18 @@ class Emulator {
     FAST_LOOP_BLUR_RIGHT,
     evalJccCondition
   });
+  if (typeof Emulator.prototype.executeBasicInstruction === "function") {
+    const executeBasicInstructionImpl = Emulator.prototype.executeBasicInstruction;
+    Emulator.prototype.executeBasicInstruction = function executeBasicInstructionWithBackend(addr) {
+      const prevBackend = getActiveCpuHelperBackend();
+      setActiveCpuHelperBackend(this && this.cpuBackend === "wasm" ? this.cpuHelperBackend : null);
+      try {
+        return executeBasicInstructionImpl.call(this, addr >>> 0);
+      } finally {
+        setActiveCpuHelperBackend(prevBackend);
+      }
+    };
+  }
   installEmulatorSyscalls(Emulator, {
     REG,
     drawText,
@@ -1670,5 +1850,8 @@ class Emulator {
     toBcd,
     align4k
   });
+  Emulator.normalizeCpuBackendMode = normalizeCpuBackendMode;
+  Emulator.getCpuBackendAvailability = getCpuBackendAvailability;
+  KosEmu.emu.createJsCpuHelperBackend = getJsCpuHelperBackend;
   KosEmu.emu.Emulator = Emulator;
 })();

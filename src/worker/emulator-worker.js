@@ -6,6 +6,7 @@
 
   let surface = null;
   let emulator = null;
+  let cpuBackendMode = "js";
 
   function post(type, payload) {
     root.postMessage({ type, ...payload });
@@ -22,7 +23,7 @@
     if (emulator) {
       return emulator;
     }
-    emulator = new Emulator(surface, log);
+    emulator = new Emulator(surface, log, { cpuBackend: cpuBackendMode });
     emulator.autoFitWindow = true;
     emulator.onWindowResize = (width, height) => {
       const w = Math.max(1, width | 0);
@@ -82,6 +83,9 @@
     try {
       switch (data.type) {
         case "init": {
+          cpuBackendMode = typeof Emulator.normalizeCpuBackendMode === "function"
+            ? Emulator.normalizeCpuBackendMode(data.cpuBackend)
+            : (String(data.cpuBackend || "").trim().toLowerCase() === "wasm" ? "wasm" : "js");
           surface = createSurface(data.canvas, data.width | 0, data.height | 0, log);
           ensureEmulator();
           post("ready", {});
@@ -113,6 +117,12 @@
         }
         case "run": {
           const cpu = ensureEmulator();
+          if (data.cpuBackend && typeof cpu.setCpuBackend === "function") {
+            cpuBackendMode = typeof Emulator.normalizeCpuBackendMode === "function"
+              ? Emulator.normalizeCpuBackendMode(data.cpuBackend)
+              : (String(data.cpuBackend || "").trim().toLowerCase() === "wasm" ? "wasm" : "js");
+            cpu.setCpuBackend(cpuBackendMode);
+          }
           applyTraceConfig(cpu, data);
           if (data.mouse) {
             applyMouseState(cpu, data.mouse);

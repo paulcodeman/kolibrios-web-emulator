@@ -422,10 +422,15 @@
   class App {
     start() {
       this.bindDom();
+      this.pageConfig = window.KosEmuPageConfig || null;
       this.logLines = [];
       this.currentImage = null;
       this.currentFileBuffer = null;
       this.currentFileName = "";
+      this.cpuBackendMode = this.normalizeCpuBackendMode(this.pageConfig && this.pageConfig.cpuBackend);
+      if (this.cpuBackendSelect) {
+        this.cpuBackendSelect.value = this.cpuBackendMode;
+      }
       this.workspaceDragDepth = 0;
       this.browserFsRoot = null;
       this.fsRootBusy = false;
@@ -492,6 +497,9 @@
       if (this.traceOpcodesInput) {
         this.traceOpcodesInput.addEventListener("change", () => this.applyTraceConfig());
       }
+      if (this.cpuBackendSelect) {
+        this.cpuBackendSelect.addEventListener("change", () => this.applyCpuBackendConfig());
+      }
       this.installWorkspaceDropHandlers();
       this.installLauncherOverlayControls();
       document.addEventListener("fullscreenchange", this.boundFullscreenChange);
@@ -516,6 +524,8 @@
         this.logEl.textContent = "Ready.";
       }
       this.updateFsRootStatus();
+      this.updateCpuBackendControl();
+      this.applyCpuBackendConfig({ silent: true });
       this.updateFullscreenButton();
       this.updateSessionState();
       this.setStatus("Session ready");
@@ -533,6 +543,7 @@
       this.fullscreenBtn = document.getElementById("fullscreenBtn");
       this.restoreDefaultsBtn = document.getElementById("restoreDefaultsBtn");
       this.mountFolderBtn = document.getElementById("mountFolderBtn");
+      this.cpuBackendSelect = document.getElementById("cpuBackendSelect");
       this.traceSyscallsInput = document.getElementById("traceSyscalls");
       this.traceOpcodesInput = document.getElementById("traceOpcodes");
       this.traceImagesInput = document.getElementById("traceImages");
@@ -1232,6 +1243,68 @@
         traceImages: !!(this.traceImagesInput && this.traceImagesInput.checked),
         traceOpcodes: !!(this.traceOpcodesInput && this.traceOpcodesInput.checked)
       };
+    }
+
+    normalizeCpuBackendMode(mode) {
+      const EmulatorClass = KosEmu.emu && KosEmu.emu.Emulator ? KosEmu.emu.Emulator : null;
+      if (EmulatorClass && typeof EmulatorClass.normalizeCpuBackendMode === "function") {
+        return EmulatorClass.normalizeCpuBackendMode(mode);
+      }
+      return String(mode || "").trim().toLowerCase() === "wasm" ? "wasm" : "js";
+    }
+
+    getCpuBackendAvailability() {
+      const EmulatorClass = KosEmu.emu && KosEmu.emu.Emulator ? KosEmu.emu.Emulator : null;
+      if (EmulatorClass && typeof EmulatorClass.getCpuBackendAvailability === "function") {
+        return EmulatorClass.getCpuBackendAvailability();
+      }
+      return { js: true, wasm: false };
+    }
+
+    currentCpuBackendConfig() {
+      const raw = this.cpuBackendSelect ? this.cpuBackendSelect.value : this.cpuBackendMode;
+      const next = this.normalizeCpuBackendMode(raw);
+      this.cpuBackendMode = next;
+      return next;
+    }
+
+    updateCpuBackendControl() {
+      if (!this.cpuBackendSelect) {
+        return;
+      }
+      const mode = this.currentCpuBackendConfig();
+      if (this.cpuBackendSelect.value !== mode) {
+        this.cpuBackendSelect.value = mode;
+      }
+      const availability = this.getCpuBackendAvailability();
+      const wasmOption = this.cpuBackendSelect.querySelector('option[value="wasm"]');
+      if (wasmOption) {
+        wasmOption.textContent = availability.wasm ? "WASM CPU" : "WASM CPU (not built)";
+      }
+      this.cpuBackendSelect.title = availability.wasm
+        ? "Select the CPU backend for new launches."
+        : "WASM CPU backend is not available in this build yet.";
+    }
+
+    applyCpuBackendConfig(options) {
+      const opts = options || {};
+      const nextMode = this.currentCpuBackendConfig();
+      if (this.sessionManager && typeof this.sessionManager.setCpuBackendMode === "function") {
+        this.sessionManager.setCpuBackendMode(nextMode);
+      }
+      this.cpuBackendMode = nextMode;
+      this.updateCpuBackendControl();
+      if (!opts.silent) {
+        const availability = this.getCpuBackendAvailability();
+        this.log(`CPU backend set to ${nextMode}.`);
+        if (nextMode === "wasm" && !availability.wasm) {
+          this.log("WASM CPU backend is not available in this build. New launches in WASM mode will fail until a WASM core is connected.");
+        }
+        if (this.sessionManager && typeof this.sessionManager.hasProcesses === "function" && this.sessionManager.hasProcesses()) {
+          this.log("Running processes keep their current CPU backend; the new mode applies to future launches.");
+        }
+      }
+      return this.cpuBackendMode;
     }
 
     applyTraceConfig() {

@@ -720,7 +720,9 @@
     }
 
     attachEmulator() {
-      const emulator = new Emulator(this.surface, (msg) => this.log(msg));
+      const emulator = new Emulator(this.surface, (msg) => this.log(msg), {
+        cpuBackend: this.manager.getCpuBackendMode()
+      });
       this.emulator = emulator;
       emulator.autoFitWindow = true;
       emulator.threadSlot = this.slot >>> 0;
@@ -2415,6 +2417,9 @@
       this.screenWorkArea = null;
       this.activeProcess = null;
       this.traceConfig = typeof app.currentTraceConfig === "function" ? app.currentTraceConfig() : {};
+      this.cpuBackendMode = typeof app.currentCpuBackendConfig === "function"
+        ? app.currentCpuBackendConfig()
+        : "js";
       this.nextPid = 1;
       this.nextSlot = 1;
       this.nextCascadeIndex = 0;
@@ -4260,6 +4265,26 @@
       for (let i = 0; i < this.processes.length; i += 1) {
         this.processes[i].applyTraceConfig(this.traceConfig);
       }
+    }
+
+    getCpuBackendMode() {
+      this.cpuBackendMode = typeof Emulator.normalizeCpuBackendMode === "function"
+        ? Emulator.normalizeCpuBackendMode(this.cpuBackendMode)
+        : (String(this.cpuBackendMode || "").trim().toLowerCase() === "wasm" ? "wasm" : "js");
+      return this.cpuBackendMode;
+    }
+
+    setCpuBackendMode(mode) {
+      const previous = this.getCpuBackendMode();
+      const next = typeof Emulator.normalizeCpuBackendMode === "function"
+        ? Emulator.normalizeCpuBackendMode(mode)
+        : (String(mode || "").trim().toLowerCase() === "wasm" ? "wasm" : "js");
+      this.cpuBackendMode = next;
+      return {
+        mode: next,
+        changed: next !== previous,
+        hasRunningProcesses: this.hasProcesses()
+      };
     }
 
     refreshSkinThemes() {

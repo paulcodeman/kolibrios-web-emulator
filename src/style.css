@@ -229,6 +229,37 @@ body.launcher-page.launcher-overlays-visible .launcher-session-info {
   accent-color: var(--accent);
 }
 
+.cpu-backend-control {
+  cursor: default;
+}
+
+.cpu-backend-control select,
+.launcher-select select {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  min-width: 88px;
+  padding: 0;
+  cursor: pointer;
+  outline: none;
+}
+
+.cpu-backend-control select {
+  color: var(--ink);
+}
+
+.launcher-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.launcher-select select {
+  color: #f3f3f3;
+}
+
 .fs-root-status {
   font-family: var(--mono);
   font-size: 12px;
@@ -267,6 +298,11 @@ button.primary {
 }
 
 button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

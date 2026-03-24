@@ -27,6 +27,13 @@
         <div id="fsRootStatus" class="fs-root-status">FS root: not mounted</div>
         <button id="runBtn" class="primary" disabled>Run</button>
         <button id="stopBtn" disabled>Stop</button>
+        <label class="toggle cpu-backend-control">
+          <span>CPU</span>
+          <select id="cpuBackendSelect">
+            <option value="js">JS CPU</option>
+            <option value="wasm">WASM CPU</option>
+          </select>
+        </label>
         <label class="toggle">
           <input id="traceSyscalls" type="checkbox" />
           <span>Trace syscalls</span>
@@ -88,6 +95,8 @@
     <script src="src/emulator/core-runtime.js"></script>
     <script src="src/emulator/core-execute.js"></script>
     <script src="src/emulator/emulator-syscalls.js"></script>
+    <script src="src/emulator/wasm-cpu.generated.js"></script>
+    <script src="src/emulator/wasm-cpu-runtime.js"></script>
     <script src="src/emulator/emulator.js"></script>
     <script src="src/ui/browser-fs.js"></script>
     <script src="src/ui/app-ui.js"></script>

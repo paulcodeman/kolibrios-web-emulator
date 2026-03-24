@@ -17,4 +17,5 @@ temp/
 *.log
 tmp-*
 *.tmp
-
+test-results/
+.tools/
