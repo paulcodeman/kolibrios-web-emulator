@@ -90,6 +90,8 @@ test("launcher CPU backend selector updates session mode and launches apps in wa
   expect(launched.active).toBe("wasm");
   expect(launched.requested).toBe("wasm");
   expect(launched.wasmAvailable).toBe(true);
+  expect(launched.maxSliceMs).toBe(16);
+  expect(launched.backgroundMaxSliceMs).toBe(20);
 });
 
 test("launcher persists selected CPU backend across reloads", async ({ page }) => {

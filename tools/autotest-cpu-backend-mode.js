@@ -955,6 +955,20 @@ try {
       }
     },
     {
+      name: "0f 58 addps xmm0, [mem]",
+      bytes: [0x0f, 0x58, 0x05, 0x00, 0x02, 0x00, 0x00],
+      setup(emulator) {
+        emulator.writeXmmU32(0, 0, numberToF32Bits(1));
+        emulator.writeXmmU32(0, 1, numberToF32Bits(2));
+        emulator.writeXmmU32(0, 2, numberToF32Bits(3));
+        emulator.writeXmmU32(0, 3, numberToF32Bits(4));
+        emulator.writeMem32(0x200, numberToF32Bits(5));
+        emulator.writeMem32(0x204, numberToF32Bits(6));
+        emulator.writeMem32(0x208, numberToF32Bits(7));
+        emulator.writeMem32(0x20c, numberToF32Bits(8));
+      }
+    },
+    {
       name: "0f 51 sqrtps xmm0, xmm1",
       bytes: [0x0f, 0x51, 0xc1],
       setup(emulator) {
@@ -989,12 +1003,70 @@ try {
       }
     },
     {
+      name: "0f 10 movups xmm0, [mem]",
+      bytes: [0x0f, 0x10, 0x05, 0x00, 0x02, 0x00, 0x00],
+      setup(emulator) {
+        emulator.writeMem32(0x200, 0x11223344);
+        emulator.writeMem32(0x204, 0x55667788);
+        emulator.writeMem32(0x208, 0x99aabbcc);
+        emulator.writeMem32(0x20c, 0xddeeff00);
+      }
+    },
+    {
+      name: "0f 11 movups [mem], xmm0",
+      bytes: [0x0f, 0x11, 0x05, 0x00, 0x02, 0x00, 0x00],
+      setup(emulator) {
+        emulator.writeXmmU32(0, 0, 0x11223344);
+        emulator.writeXmmU32(0, 1, 0x55667788);
+        emulator.writeXmmU32(0, 2, 0x99aabbcc);
+        emulator.writeXmmU32(0, 3, 0xddeeff00);
+      }
+    },
+    {
+      name: "66 0f 28 movaps xmm0, [mem]",
+      bytes: [0x66, 0x0f, 0x28, 0x05, 0x00, 0x02, 0x00, 0x00],
+      setup(emulator) {
+        emulator.writeMem32(0x200, 0x11223344);
+        emulator.writeMem32(0x204, 0x55667788);
+        emulator.writeMem32(0x208, 0x99aabbcc);
+        emulator.writeMem32(0x20c, 0xddeeff00);
+      }
+    },
+    {
       name: "f3 0f 58 addss xmm0, xmm1",
       bytes: [0xf3, 0x0f, 0x58, 0xc1],
       setup(emulator) {
         emulator.writeXmmU32(0, 0, numberToF32Bits(1.5));
         emulator.writeXmmU32(0, 1, numberToF32Bits(100));
         emulator.writeXmmU32(1, 0, numberToF32Bits(2.25));
+      }
+    },
+    {
+      name: "f3 0f 58 addss xmm0, [mem]",
+      bytes: [0xf3, 0x0f, 0x58, 0x05, 0x00, 0x02, 0x00, 0x00],
+      setup(emulator) {
+        emulator.writeXmmU32(0, 0, numberToF32Bits(1.5));
+        emulator.writeXmmU32(0, 1, numberToF32Bits(100));
+        emulator.writeMem32(0x200, numberToF32Bits(2.25));
+      }
+    },
+    {
+      name: "66 0f 6e movd xmm0, [mem]",
+      bytes: [0x66, 0x0f, 0x6e, 0x05, 0x00, 0x02, 0x00, 0x00],
+      setup(emulator) {
+        emulator.writeXmmU32(0, 0, 0xffffffff);
+        emulator.writeXmmU32(0, 1, 0xffffffff);
+        emulator.writeXmmU32(0, 2, 0xffffffff);
+        emulator.writeXmmU32(0, 3, 0xffffffff);
+        emulator.writeMem32(0x200, 0x11223344);
+      }
+    },
+    {
+      name: "0f 13 movlps [mem], xmm0",
+      bytes: [0x0f, 0x13, 0x05, 0x00, 0x02, 0x00, 0x00],
+      setup(emulator) {
+        emulator.writeXmmU32(0, 0, 0x11223344);
+        emulator.writeXmmU32(0, 1, 0x55667788);
       }
     },
     {
@@ -1009,6 +1081,20 @@ try {
         emulator.writeXmmU32(1, 1, numberToF32Bits(6));
         emulator.writeXmmU32(1, 2, numberToF32Bits(7));
         emulator.writeXmmU32(1, 3, numberToF32Bits(8));
+      }
+    },
+    {
+      name: "f2 0f 7c haddps xmm0, [mem]",
+      bytes: [0xf2, 0x0f, 0x7c, 0x05, 0x00, 0x02, 0x00, 0x00],
+      setup(emulator) {
+        emulator.writeXmmU32(0, 0, numberToF32Bits(1));
+        emulator.writeXmmU32(0, 1, numberToF32Bits(2));
+        emulator.writeXmmU32(0, 2, numberToF32Bits(3));
+        emulator.writeXmmU32(0, 3, numberToF32Bits(4));
+        emulator.writeMem32(0x200, numberToF32Bits(5));
+        emulator.writeMem32(0x204, numberToF32Bits(6));
+        emulator.writeMem32(0x208, numberToF32Bits(7));
+        emulator.writeMem32(0x20c, numberToF32Bits(8));
       }
     },
     {
@@ -1059,6 +1145,34 @@ try {
         emulator.writeMem8(0x100, 0x33);
         emulator.writeMem8(0x120, 0x34);
       }
+    },
+    {
+      name: "repe cmpsb fast path stops on mismatch",
+      bytes: [0xf3, 0xa6],
+      setup(emulator) {
+        emulator.writeReg(REG_ECX, 6);
+        emulator.writeReg(REG_ESI, 0x100);
+        emulator.writeReg(REG_EDI, 0x120);
+        const left = [1, 2, 3, 9, 5, 6];
+        const right = [1, 2, 3, 8, 5, 6];
+        for (let i = 0; i < left.length; i += 1) {
+          emulator.writeMem8(0x100 + i, left[i]);
+          emulator.writeMem8(0x120 + i, right[i]);
+        }
+      }
+    },
+    {
+      name: "repne scasb fast path stops on match",
+      bytes: [0xf2, 0xae],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x00000044);
+        emulator.writeReg(REG_ECX, 6);
+        emulator.writeReg(REG_EDI, 0x140);
+        const values = [0x10, 0x20, 0x30, 0x44, 0x50, 0x60];
+        for (let i = 0; i < values.length; i += 1) {
+          emulator.writeMem8(0x140 + i, values[i]);
+        }
+      }
     }
   ];
   for (const scenario of instructionScenarios) {
@@ -1075,6 +1189,15 @@ try {
   assertEq(jsEmulator.ensureCpuBackendReady(), "wasm", "wasm backend should become active");
   assert(jsEmulator.cpuHelperBackend && jsEmulator.cpuHelperBackend.kind === "wasm", "emulator should bind wasm helper backend");
   assertEq(jsEmulator.setCpuBackend("js"), "js", "backend should switch back to js before launch");
+
+  const startCacheEmulator = createInstructionEmulator("wasm");
+  startCacheEmulator.writeMem8(0, 0x40); // inc eax
+  startCacheEmulator.writeMem8(1, 0xc3); // ret
+  assertEq(startCacheEmulator.canStartBasicBlockAt(0), true, "basic block start cache should allow non-terminator start");
+  assertEq(startCacheEmulator.canStartBasicBlockAt(0), true, "basic block start cache should return the same result on repeated lookup");
+  assert(startCacheEmulator.basicBlockStartHits > 0, "basic block start cache should record hits on repeated lookup");
+  startCacheEmulator.writeMem8(0, 0xc3);
+  assertEq(startCacheEmulator.canStartBasicBlockAt(0), false, "basic block start cache should invalidate after code writes");
 
   console.log("Autotest OK: CPU backend mode exposes working JS/WASM helper backends and matches JS semantics.");
 } catch (err) {

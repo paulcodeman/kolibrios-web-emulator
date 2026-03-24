@@ -281,6 +281,34 @@
         return false;
       },
 
+      getCachedBasicBlockStartState(addr) {
+        if (!this.cpu || !this.basicBlockStartCache) {
+          return null;
+        }
+        const start = addr >>> 0;
+        const bytes = this.readMemBlock(start, 8);
+        if (!bytes) {
+          return null;
+        }
+        const sig = this.getDecodeSignature(bytes);
+        const cached = this.basicBlockStartCache.get(start);
+        if (cached && cached.sig0 === sig.sig0 && cached.sig1 === sig.sig1) {
+          this.basicBlockStartHits = ((this.basicBlockStartHits | 0) + 1) | 0;
+          return cached;
+        }
+        const state = {
+          sig0: sig.sig0 >>> 0,
+          sig1: sig.sig1 >>> 0,
+          canStart: !this.isBasicBlockTerminatorAt(start, 0)
+        };
+        if (this.basicBlockStartCache.size >= (this.basicBlockStartCacheMax | 0)) {
+          this.basicBlockStartCache.clear();
+        }
+        this.basicBlockStartCache.set(start, state);
+        this.basicBlockStartMisses = ((this.basicBlockStartMisses | 0) + 1) | 0;
+        return state;
+      },
+
       canStartBasicBlockAt(addr) {
         const start = addr >>> 0;
         if (!this.cpu || !this.running) {
@@ -298,7 +326,8 @@
         if (this.isDirectSyscallInstruction(start)) {
           return false;
         }
-        return !this.isBasicBlockTerminatorAt(start, 0);
+        const state = this.getCachedBasicBlockStartState(start);
+        return !!(state && state.canStart);
       },
 
       noteBasicBlockHotness(start) {
@@ -523,6 +552,27 @@
       },
 
       invalidateBasicBlocksForWrite(addr, size) {
+        if (this.basicBlockStartCache && this.basicBlockStartCache.size) {
+          const start = addr >>> 0;
+          const byteCount = size >>> 0;
+          if (!byteCount) {
+            return;
+          }
+          const extra = 16;
+          if (byteCount > 512) {
+            this.basicBlockStartCache.clear();
+          } else {
+            const invalidateStart = start > extra ? (start - extra) >>> 0 : 0;
+            const invalidateEnd = (start + byteCount + extra) >>> 0;
+            if (invalidateEnd < invalidateStart) {
+              this.basicBlockStartCache.clear();
+            } else {
+              for (let cursor = invalidateStart; cursor <= invalidateEnd; cursor += 1) {
+                this.basicBlockStartCache.delete(cursor >>> 0);
+              }
+            }
+          }
+        }
         if (!this.basicBlockCache.size) {
           return;
         }

@@ -2184,6 +2184,25 @@ function normalizeCpuBackendMode(mode) {
   return String(mode || "").trim().toLowerCase() === "wasm" ? "wasm" : "js";
 }
 
+function getCpuSliceProfile(isBrowserMainThread, backend) {
+  if (!isBrowserMainThread) {
+    return {
+      maxSliceMs: 0,
+      backgroundMaxSliceMs: 0
+    };
+  }
+  if (normalizeCpuBackendMode(backend) === "wasm") {
+    return {
+      maxSliceMs: 16,
+      backgroundMaxSliceMs: 20
+    };
+  }
+  return {
+    maxSliceMs: 8,
+    backgroundMaxSliceMs: 12
+  };
+}
+
 function getCpuBackendAvailability() {
   const emu = KosEmu && KosEmu.emu ? KosEmu.emu : null;
   return {
@@ -2213,6 +2232,13 @@ class Emulator {
     this.traceFaultBytes = false;
     this.opcodeCounts = new Map();
     this.traceRegs = false;
+    this.scratchXmmWordsA = new Uint32Array(4);
+    this.scratchXmmWordsB = new Uint32Array(4);
+    this.scratchQwordA = new Uint32Array(2);
+    this.scratchQwordB = new Uint32Array(2);
+    this.scratchBytes16A = new Uint8Array(16);
+    this.scratchBytes16B = new Uint8Array(16);
+    this.scratchBytes16C = new Uint8Array(16);
     this.strictMem = false;
     this.memLimit = 0;
     this.memGrowMax = 64 * 1024 * 1024;
@@ -2231,6 +2257,7 @@ class Emulator {
       typeof WorkerGlobalScope !== "undefined" &&
       typeof self !== "undefined" &&
       self instanceof WorkerGlobalScope;
+    this.isBrowserMainThread = !isNodeLike && !isWorkerContext;
     this.useImmediateScheduler =
       typeof MessageChannel !== "undefined" &&
       !isNodeLike;
@@ -2242,9 +2269,8 @@ class Emulator {
     this.waitEventDeadlineAt = 0;
     this.maxInstructions = isWorkerContext ? 1000000 : 800000;
     this.backgroundMaxInstructions = isWorkerContext ? 8000000 : 6000000;
-    const isBrowserMainThread = !isNodeLike && !isWorkerContext;
-    this.maxSliceMs = isBrowserMainThread ? 8 : 0;
-    this.backgroundMaxSliceMs = isBrowserMainThread ? 12 : 0;
+    this.maxSliceMs = 0;
+    this.backgroundMaxSliceMs = 0;
     this.sliceDeadlineAt = 0;
     this.sliceTimeCheckInterval = 2048;
     this.sliceTimeCheckCounter = 2048;
@@ -2342,6 +2368,10 @@ class Emulator {
     this.decodeCacheMax = 50000;
     this.decodeCacheHits = 0;
     this.decodeCacheMisses = 0;
+    this.basicBlockStartCache = new Map();
+    this.basicBlockStartCacheMax = 20000;
+    this.basicBlockStartHits = 0;
+    this.basicBlockStartMisses = 0;
     this.fastLoopCache = new Map();
     this.fastLoopHits = 0;
     this.fastLoopMisses = 0;
@@ -2399,7 +2429,14 @@ class Emulator {
     this.segOverride = 0;
     this.lastStopReason = "";
     this.stopEventEmitted = false;
+    this.applyCpuBackendSliceProfile(this.cpuBackend);
     this.resetSkinTheme();
+  }
+
+  applyCpuBackendSliceProfile(mode) {
+    const profile = getCpuSliceProfile(this.isBrowserMainThread, mode);
+    this.maxSliceMs = profile.maxSliceMs | 0;
+    this.backgroundMaxSliceMs = profile.backgroundMaxSliceMs | 0;
   }
 
   setCpuBackend(mode) {
@@ -2410,6 +2447,7 @@ class Emulator {
     this.requestedCpuBackend = next;
     this.cpuBackend = next;
     this.cpuHelperBackend = null;
+    this.applyCpuBackendSliceProfile(next);
     return next;
   }
 
@@ -2418,7 +2456,9 @@ class Emulator {
     return {
       requested: this.requestedCpuBackend,
       active: this.cpuBackend,
-      wasmAvailable: !!availability.wasm
+      wasmAvailable: !!availability.wasm,
+      maxSliceMs: this.maxSliceMs | 0,
+      backgroundMaxSliceMs: this.backgroundMaxSliceMs | 0
     };
   }
 
@@ -2438,6 +2478,7 @@ class Emulator {
       this.cpuHelperBackend = null;
     }
     this.cpuBackend = next;
+    this.applyCpuBackendSliceProfile(next);
     return this.cpuBackend;
   }
 
@@ -2582,6 +2623,9 @@ class Emulator {
     this.decodeCache.clear();
     this.decodeCacheHits = 0;
     this.decodeCacheMisses = 0;
+    this.basicBlockStartCache.clear();
+    this.basicBlockStartHits = 0;
+    this.basicBlockStartMisses = 0;
     this.fastLoopCache.clear();
     this.fastLoopHits = 0;
     this.fastLoopMisses = 0;

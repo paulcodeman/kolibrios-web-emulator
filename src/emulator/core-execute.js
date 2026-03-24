@@ -900,13 +900,13 @@
         let eax = this.readReg(REG.EAX) >>> 0;
         let flags = this.readReg(REG.EFLAGS) >>> 0;
         if (checkRep) {
-          const fast = this.tryFastRepStringInstruction(opcode, operandSize, addrSize, df, count, esi, edi, eax);
+          const fast = this.tryFastRepStringInstruction(opcode, operandSize, addrSize, df, count, esi, edi, eax, repPrefix, flags);
           if (fast) {
             this.writeAddrSizedReg(REG.ESI, fast.esi >>> 0, addrSize);
             this.writeAddrSizedReg(REG.EDI, fast.edi >>> 0, addrSize);
             this.writeReg(REG.EAX, eax >>> 0);
-            this.writeReg(REG.EFLAGS, flags >>> 0);
-            this.writeCountReg(addrSize, 0);
+            this.writeReg(REG.EFLAGS, ((fast.flags >>> 0) || 0) >>> 0);
+            this.writeCountReg(addrSize, fast.ecx >>> 0);
             this.writeReg(REG.EIP, (addr + 1) >>> 0);
             return true;
           }
@@ -1228,19 +1228,18 @@
           }
           const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
           const regIdx = modrmInfo.reg & 7;
-          const lo = this.readXmmU32(regIdx, 0) >>> 0;
-          const hi = this.readXmmU32(regIdx, 1) >>> 0;
+          const value = this.readXmm64U32(regIdx, 0, this.scratchQwordA);
           if (modrmInfo.mod === 3) {
             const dstIdx = modrmInfo.rm & 7;
-            this.writeXmmU32(dstIdx, 0, lo);
-            this.writeXmmU32(dstIdx, 1, hi);
+            this.writeXmm64U32(dstIdx, 0, value);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea === null) {
               return false;
             }
-            this.writeMem32(ea >>> 0, lo);
-            this.writeMem32((ea + 4) >>> 0, hi);
+            if (!this.writeMem64U32(ea, value)) {
+              return false;
+            }
           }
           this.writeReg(REG.EIP, (addr + 3 + modrmInfo.size) >>> 0);
           return true;
@@ -1252,28 +1251,18 @@
           }
           const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
           const regIdx = modrmInfo.reg & 7;
-          let src0 = 0;
-          let src1 = 0;
-          if (modrmInfo.mod === 3) {
-            src0 = this.readXmmU32(modrmInfo.rm, 0) >>> 0;
-            src1 = this.readXmmU32(modrmInfo.rm, 1) >>> 0;
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            src0 = this.readMem32(ea >>> 0) >>> 0;
-            src1 = this.readMem32((ea + 4) >>> 0) >>> 0;
+          const src = this.readModrmXmmLow64SourceU32(modrmInfo, this.scratchQwordA);
+          if (!src) {
+            return false;
           }
+          const dst = this.readXmm64U32(regIdx, 0, this.scratchQwordB);
           const out = punpckldq32x4(
-            this.readXmmU32(regIdx, 0),
-            this.readXmmU32(regIdx, 1),
-            src0,
-            src1
+            dst[0],
+            dst[1],
+            src[0],
+            src[1]
           );
-          for (let i = 0; i < 4; i += 1) {
-            this.writeXmmU32(regIdx, i, out[i] >>> 0);
-          }
+          this.writeXmm128U32(regIdx, out);
           this.writeReg(REG.EIP, (addr + 3 + modrmInfo.size) >>> 0);
           return true;
         }
@@ -1284,35 +1273,23 @@
           }
           const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
           const regIdx = modrmInfo.reg & 7;
-          const src = [0, 0, 0, 0];
-          if (modrmInfo.mod === 3) {
-            const srcIdx = modrmInfo.rm & 7;
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readXmmU32(srcIdx, i) >>> 0;
-            }
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-            }
+          const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsA);
+          if (!src) {
+            return false;
           }
+          const dst = this.readXmm128U32(regIdx, this.scratchXmmWordsB);
           const out = packedOp32x4(
-            this.readXmmU32(regIdx, 0),
-            this.readXmmU32(regIdx, 1),
-            this.readXmmU32(regIdx, 2),
-            this.readXmmU32(regIdx, 3),
+            dst[0],
+            dst[1],
+            dst[2],
+            dst[3],
             src[0],
             src[1],
             src[2],
             src[3],
             4
           );
-          for (let i = 0; i < 4; i += 1) {
-            this.writeXmmU32(regIdx, i, out[i] >>> 0);
-          }
+          this.writeXmm128U32(regIdx, out);
           this.writeReg(REG.EIP, (addr + 3 + modrmInfo.size) >>> 0);
           return true;
         }
@@ -1326,22 +1303,23 @@
           let mask = 0;
           if (modrmInfo.mod === 3) {
             const srcIdx = modrmInfo.rm & 7;
+            const src = this.readXmm128U32(srcIdx, this.scratchXmmWordsA);
             mask = movmskBytes128(
-              this.readXmmU32(srcIdx, 0),
-              this.readXmmU32(srcIdx, 1),
-              this.readXmmU32(srcIdx, 2),
-              this.readXmmU32(srcIdx, 3)
+              src[0],
+              src[1],
+              src[2],
+              src[3]
             ) >>> 0;
           } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
+            const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsA);
+            if (!src) {
               return false;
             }
             mask = movmskBytes128(
-              this.readMem32(ea >>> 0),
-              this.readMem32((ea + 4) >>> 0),
-              this.readMem32((ea + 8) >>> 0),
-              this.readMem32((ea + 12) >>> 0)
+              src[0],
+              src[1],
+              src[2],
+              src[3]
             ) >>> 0;
           }
           this.writeReg32ByIndex(dstIdx, mask >>> 0);
@@ -1793,9 +1771,10 @@
           const regField = modrmInfo.reg & 7;
           const regIdx = modrmInfo.rm & 7;
           const count = imm & 0xff;
+          const xmmWords = this.readXmm128U32(regIdx, this.scratchXmmWordsA);
           if (op3 === 0x71) {
             for (let i = 0; i < 4; i += 1) {
-              const value = this.readXmmU32(regIdx, i) >>> 0;
+              const value = xmmWords[i] >>> 0;
               let nextVal = value >>> 0;
               if (regField === 2) {
                 nextVal = psrlw32(value, count) >>> 0;
@@ -1806,11 +1785,12 @@
               } else {
                 return false;
               }
-              this.writeXmmU32(regIdx, i, nextVal >>> 0);
+              xmmWords[i] = nextVal >>> 0;
             }
+            this.writeXmm128U32(regIdx, xmmWords);
           } else if (op3 === 0x72) {
             for (let i = 0; i < 4; i += 1) {
-              const value = this.readXmmU32(regIdx, i) >>> 0;
+              const value = xmmWords[i] >>> 0;
               let nextVal = value >>> 0;
               if (regField === 2) {
                 nextVal = psrld32(value, count) >>> 0;
@@ -1821,19 +1801,21 @@
               } else {
                 return false;
               }
-              this.writeXmmU32(regIdx, i, nextVal >>> 0);
+              xmmWords[i] = nextVal >>> 0;
             }
+            this.writeXmm128U32(regIdx, xmmWords);
           } else if (regField === 3 || regField === 7) {
             const shift = Math.min(16, count);
-            const bytesArr = new Uint8Array(16);
+            const bytesArr = this.scratchBytes16A;
             for (let i = 0; i < 4; i += 1) {
-              const v = this.readXmmU32(regIdx, i) >>> 0;
+              const v = xmmWords[i] >>> 0;
               bytesArr[i * 4] = v & 0xff;
               bytesArr[i * 4 + 1] = (v >>> 8) & 0xff;
               bytesArr[i * 4 + 2] = (v >>> 16) & 0xff;
               bytesArr[i * 4 + 3] = (v >>> 24) & 0xff;
             }
-            const out = new Uint8Array(16);
+            const out = this.scratchBytes16B;
+            out.fill(0);
             if (shift < 16) {
               if (regField === 3) {
                 for (let i = shift; i < 16; i += 1) {
@@ -1851,17 +1833,19 @@
                 (out[i * 4 + 1] << 8) |
                 (out[i * 4 + 2] << 16) |
                 (out[i * 4 + 3] << 24);
-              this.writeXmmU32(regIdx, i, v >>> 0);
+              xmmWords[i] = v >>> 0;
             }
+            this.writeXmm128U32(regIdx, xmmWords);
           } else if (regField === 2 || regField === 6) {
             const shift = Math.min(63, count) & 0x3f;
             for (let lane = 0; lane < 2; lane += 1) {
-              const lo = this.readXmmU32(regIdx, lane * 2) >>> 0;
-              const hi = this.readXmmU32(regIdx, lane * 2 + 1) >>> 0;
+              const lo = xmmWords[lane * 2] >>> 0;
+              const hi = xmmWords[lane * 2 + 1] >>> 0;
               const shifted = shiftPacked64(lo, hi, shift, regField === 6);
-              this.writeXmmU32(regIdx, lane * 2, shifted.lo >>> 0);
-              this.writeXmmU32(regIdx, lane * 2 + 1, shifted.hi >>> 0);
+              xmmWords[lane * 2] = shifted.lo >>> 0;
+              xmmWords[lane * 2 + 1] = shifted.hi >>> 0;
             }
+            this.writeXmm128U32(regIdx, xmmWords);
           } else {
             return false;
           }
@@ -1918,76 +1902,27 @@
           const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
           const len = 3 + modrmInfo.size;
           const regIdx = modrmInfo.reg & 7;
-          let src = [0, 0, 0, 0];
-          if (modrmInfo.mod === 3) {
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-            }
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-            }
+          const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsA);
+          if (!src) {
+            return false;
           }
+          const dst = this.readXmm128U32(regIdx, this.scratchXmmWordsB);
           if (op3 === 0x6b) { // packssdw xmm, xmm/m128
-            const dst = [
-              this.readXmmU32(regIdx, 0),
-              this.readXmmU32(regIdx, 1),
-              this.readXmmU32(regIdx, 2),
-              this.readXmmU32(regIdx, 3)
-            ];
-            const out16 = new Uint16Array(8);
-            for (let i = 0; i < 4; i += 1) {
-              let v = dst[i] | 0;
-              if (v > 0x7fff) v = 0x7fff;
-              if (v < -0x8000) v = -0x8000;
-              out16[i] = v & 0xffff;
-            }
-            for (let i = 0; i < 4; i += 1) {
-              let v = src[i] | 0;
-              if (v > 0x7fff) v = 0x7fff;
-              if (v < -0x8000) v = -0x8000;
-              out16[i + 4] = v & 0xffff;
-            }
-            for (let i = 0; i < 4; i += 1) {
-              const v = (out16[i * 2] | (out16[i * 2 + 1] << 16)) >>> 0;
-              this.writeXmmU32(regIdx, i, v);
-            }
+            const low = packssdw64(dst[0], dst[1], dst[2], dst[3]);
+            const high = packssdw64(src[0], src[1], src[2], src[3]);
+            this.scratchXmmWordsB[0] = low.lo >>> 0;
+            this.scratchXmmWordsB[1] = low.hi >>> 0;
+            this.scratchXmmWordsB[2] = high.lo >>> 0;
+            this.scratchXmmWordsB[3] = high.hi >>> 0;
+            this.writeXmm128U32(regIdx, this.scratchXmmWordsB);
           } else { // packuswb xmm, xmm/m128
-            const dst = [
-              this.readXmmU32(regIdx, 0),
-              this.readXmmU32(regIdx, 1),
-              this.readXmmU32(regIdx, 2),
-              this.readXmmU32(regIdx, 3)
-            ];
-            const out8 = new Uint8Array(16);
-            const push16 = (val, offset) => {
-              let v = (val << 16) >> 16;
-              if (v < 0) v = 0;
-              if (v > 255) v = 255;
-              out8[offset] = v & 0xff;
-            };
-            for (let i = 0; i < 4; i += 1) {
-              const v = dst[i] >>> 0;
-              push16(v & 0xffff, i * 2);
-              push16((v >>> 16) & 0xffff, i * 2 + 1);
-            }
-            for (let i = 0; i < 4; i += 1) {
-              const v = src[i] >>> 0;
-              push16(v & 0xffff, 8 + i * 2);
-              push16((v >>> 16) & 0xffff, 8 + i * 2 + 1);
-            }
-            for (let i = 0; i < 4; i += 1) {
-              const v =
-                out8[i * 4] |
-                (out8[i * 4 + 1] << 8) |
-                (out8[i * 4 + 2] << 16) |
-                (out8[i * 4 + 3] << 24);
-              this.writeXmmU32(regIdx, i, v >>> 0);
-            }
+            const low = packuswb64(dst[0], dst[1], dst[2], dst[3]);
+            const high = packuswb64(src[0], src[1], src[2], src[3]);
+            this.scratchXmmWordsB[0] = low.lo >>> 0;
+            this.scratchXmmWordsB[1] = low.hi >>> 0;
+            this.scratchXmmWordsB[2] = high.lo >>> 0;
+            this.scratchXmmWordsB[3] = high.hi >>> 0;
+            this.writeXmm128U32(regIdx, this.scratchXmmWordsB);
           }
           this.writeReg(REG.EIP, (addr + len) >>> 0);
           return true;
@@ -5106,73 +5041,52 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const regIdx = modrmInfo.reg & 7;
         const len = 2 + modrmInfo.size;
-        const loadMem128 = (ea, dstIdx) => {
-          for (let i = 0; i < 4; i += 1) {
-            const v = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-            this.writeXmmU32(dstIdx, i, v >>> 0);
-          }
-        };
-        const storeMem128 = (ea, srcIdx) => {
-          for (let i = 0; i < 4; i += 1) {
-            const v = this.readXmmU32(srcIdx, i) >>> 0;
-            this.writeMem32((ea + i * 4) >>> 0, v >>> 0);
-          }
-        };
+        const scratchA = this.scratchXmmWordsA;
+        const scratchB = this.scratchXmmWordsB;
         if (op2 === 0x10) { // movups xmm, xmm/m128
           if (modrmInfo.mod === 3) {
-            for (let i = 0; i < 4; i += 1) {
-              const v = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-              this.writeXmmU32(regIdx, i, v >>> 0);
-            }
+            this.copyXmm(regIdx, modrmInfo.rm);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea === null) {
               return false;
             }
-            loadMem128(ea, regIdx);
+            if (!this.readMem128U32(ea, scratchA)) {
+              return false;
+            }
+            this.writeXmm128U32(regIdx, scratchA);
           }
         } else if (op2 === 0x11) { // movups xmm/m128, xmm
           if (modrmInfo.mod === 3) {
-            for (let i = 0; i < 4; i += 1) {
-              const v = this.readXmmU32(regIdx, i) >>> 0;
-              this.writeXmmU32(modrmInfo.rm, i, v >>> 0);
-            }
+            this.copyXmm(modrmInfo.rm, regIdx);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea === null) {
               return false;
             }
-            storeMem128(ea, regIdx);
+            this.readXmm128U32(regIdx, scratchA);
+            if (!this.writeMem128U32(ea, scratchA)) {
+              return false;
+            }
           }
         } else { // andps xmm, xmm/m128
-          const src = [0, 0, 0, 0];
-          if (modrmInfo.mod === 3) {
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-            }
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-            }
+          const src = this.readModrmXmmSourceU32(modrmInfo, scratchA);
+          if (!src) {
+            return false;
           }
+          const dst = this.readXmm128U32(regIdx, scratchB);
           const out = packedOp32x4(
-            this.readXmmU32(regIdx, 0),
-            this.readXmmU32(regIdx, 1),
-            this.readXmmU32(regIdx, 2),
-            this.readXmmU32(regIdx, 3),
+            dst[0],
+            dst[1],
+            dst[2],
+            dst[3],
             src[0],
             src[1],
             src[2],
             src[3],
             0
           );
-          for (let i = 0; i < 4; i += 1) {
-            this.writeXmmU32(regIdx, i, out[i] >>> 0);
-          }
+          this.writeXmm128U32(regIdx, out);
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5185,20 +5099,9 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const regIdx = modrmInfo.reg & 7;
         const len = 2 + modrmInfo.size;
-        let src = [0, 0, 0, 0];
-        if (modrmInfo.mod === 3) {
-          const srcIdx = modrmInfo.rm & 7;
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readXmmU32(srcIdx, i) >>> 0;
-          }
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-          }
+        const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsA);
+        if (!src) {
+          return false;
         }
         const out = sseUnaryFloat32x4(
           src[0],
@@ -5207,9 +5110,7 @@
           src[3],
           op2 === 0x52 ? 2 : 1
         );
-        for (let i = 0; i < 4; i += 1) {
-          this.writeXmmU32(regIdx, i, out[i] >>> 0);
-        }
+        this.writeXmm128U32(regIdx, out);
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
       }
@@ -5220,22 +5121,14 @@
         }
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const imm = bytes[2 + modrmInfo.size] & 0xff;
-        let lo = 0;
-        let hi = 0;
-        if (modrmInfo.mod === 3) {
-          const src = this.readMmx(modrmInfo.rm);
-          lo = src.lo >>> 0;
-          hi = src.hi >>> 0;
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          lo = this.readMem32(ea >>> 0) >>> 0;
-          hi = this.readMem32((ea + 4) >>> 0) >>> 0;
+        const src = this.readModrmMmxSourceU32(modrmInfo, this.scratchQwordA);
+        if (!src) {
+          return false;
         }
-        const out = pshufw64(lo, hi, imm);
-        this.writeMmx(modrmInfo.reg, out.lo >>> 0, out.hi >>> 0);
+        const out = pshufw64(src[0], src[1], imm);
+        this.scratchQwordB[0] = out.lo >>> 0;
+        this.scratchQwordB[1] = out.hi >>> 0;
+        this.writeMmx64U32(modrmInfo.reg, this.scratchQwordB);
         const len = 3 + modrmInfo.size;
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5247,43 +5140,35 @@
         }
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const dstIdx = modrmInfo.reg & 7;
-        let srcLo = 0;
-        let srcHi = 0;
-        if (modrmInfo.mod === 3) {
-          const src = this.readMmx(modrmInfo.rm);
-          srcLo = src.lo >>> 0;
-          srcHi = src.hi >>> 0;
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          srcLo = this.readMem32(ea >>> 0) >>> 0;
-          srcHi = this.readMem32((ea + 4) >>> 0) >>> 0;
+        const src = this.readModrmMmxSourceU32(modrmInfo, this.scratchQwordA);
+        if (!src) {
+          return false;
         }
-        const dst = this.readMmx(dstIdx);
+        const dst = this.readMmx64U32(dstIdx, this.scratchQwordB);
         let result = null;
         if (op2 === 0x60) {
-          result = punpcklbw64(dst.lo >>> 0, srcLo >>> 0);
+          result = punpcklbw64(dst[0] >>> 0, src[0] >>> 0);
         } else if (op2 === 0x61) {
-          result = punpcklwd64(dst.lo >>> 0, srcLo >>> 0);
+          result = punpcklwd64(dst[0] >>> 0, src[0] >>> 0);
         } else if (op2 === 0x62) {
-          result = { lo: dst.lo >>> 0, hi: srcLo >>> 0 };
+          result = { lo: dst[0] >>> 0, hi: src[0] >>> 0 };
         } else if (op2 === 0x63) {
-          result = packsswb64(dst.lo >>> 0, dst.hi >>> 0, srcLo >>> 0, srcHi >>> 0);
+          result = packsswb64(dst[0] >>> 0, dst[1] >>> 0, src[0] >>> 0, src[1] >>> 0);
         } else if (op2 === 0x67) {
-          result = packuswb64(dst.lo >>> 0, dst.hi >>> 0, srcLo >>> 0, srcHi >>> 0);
+          result = packuswb64(dst[0] >>> 0, dst[1] >>> 0, src[0] >>> 0, src[1] >>> 0);
         } else if (op2 === 0x68) {
-          result = punpckhbw64(dst.hi >>> 0, srcHi >>> 0);
+          result = punpckhbw64(dst[1] >>> 0, src[1] >>> 0);
         } else if (op2 === 0x69) {
-          result = punpckhwd64(dst.hi >>> 0, srcHi >>> 0);
+          result = punpckhwd64(dst[1] >>> 0, src[1] >>> 0);
         } else if (op2 === 0x6b) {
-          result = packssdw64(dst.lo >>> 0, dst.hi >>> 0, srcLo >>> 0, srcHi >>> 0);
+          result = packssdw64(dst[0] >>> 0, dst[1] >>> 0, src[0] >>> 0, src[1] >>> 0);
         }
         if (!result) {
           return false;
         }
-        this.writeMmx(dstIdx, result.lo >>> 0, result.hi >>> 0);
+        this.scratchQwordB[0] = result.lo >>> 0;
+        this.scratchQwordB[1] = result.hi >>> 0;
+        this.writeMmx64U32(dstIdx, this.scratchQwordB);
         const len = 2 + modrmInfo.size;
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5295,23 +5180,15 @@
         }
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const dstIdx = modrmInfo.reg & 7;
-        let srcLo = 0;
-        let srcHi = 0;
-        if (modrmInfo.mod === 3) {
-          const src = this.readMmx(modrmInfo.rm);
-          srcLo = src.lo >>> 0;
-          srcHi = src.hi >>> 0;
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          srcLo = this.readMem32(ea >>> 0) >>> 0;
-          srcHi = this.readMem32((ea + 4) >>> 0) >>> 0;
+        const src = this.readModrmMmxSourceU32(modrmInfo, this.scratchQwordA);
+        if (!src) {
+          return false;
         }
-        const dst = this.readMmx(dstIdx);
-        const out = packedOp32x2(dst.lo, dst.hi, srcLo, srcHi, 4);
-        this.writeMmx(dstIdx, out.lo >>> 0, out.hi >>> 0);
+        const dst = this.readMmx64U32(dstIdx, this.scratchQwordB);
+        const out = packedOp32x2(dst[0], dst[1], src[0], src[1], 4);
+        this.scratchQwordB[0] = out.lo >>> 0;
+        this.scratchQwordB[1] = out.hi >>> 0;
+        this.writeMmx64U32(dstIdx, this.scratchQwordB);
         const len = 2 + modrmInfo.size;
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5327,21 +5204,11 @@
         }
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const dstIdx = modrmInfo.reg & 7;
-        let lo = 0;
-        let hi = 0;
-        if (modrmInfo.mod === 3) {
-          const src = this.readMmx(modrmInfo.rm);
-          lo = src.lo >>> 0;
-          hi = src.hi >>> 0;
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          lo = this.readMem32(ea >>> 0) >>> 0;
-          hi = this.readMem32((ea + 4) >>> 0) >>> 0;
+        const src = this.readModrmMmxSourceU32(modrmInfo, this.scratchQwordA);
+        if (!src) {
+          return false;
         }
-        const mask = movmskBytes64(lo, hi);
+        const mask = movmskBytes64(src[0], src[1]);
         this.writeReg32ByIndex(dstIdx, mask >>> 0);
         const len = 2 + modrmInfo.size;
         this.writeReg(REG.EIP, (addr + len) >>> 0);
@@ -5354,24 +5221,16 @@
         }
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const dstIdx = modrmInfo.reg & 7;
-        let srcLo = 0;
-        let srcHi = 0;
-        if (modrmInfo.mod === 3) {
-          const src = this.readMmx(modrmInfo.rm);
-          srcLo = src.lo >>> 0;
-          srcHi = src.hi >>> 0;
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          srcLo = this.readMem32(ea >>> 0) >>> 0;
-          srcHi = this.readMem32((ea + 4) >>> 0) >>> 0;
+        const src = this.readModrmMmxSourceU32(modrmInfo, this.scratchQwordA);
+        if (!src) {
+          return false;
         }
-        const dst = this.readMmx(dstIdx);
+        const dst = this.readMmx64U32(dstIdx, this.scratchQwordB);
         const op = op2 === 0xdb ? 0 : (op2 === 0xdf ? 1 : (op2 === 0xeb ? 2 : 3));
-        const out = packedOp32x2(dst.lo, dst.hi, srcLo, srcHi, op);
-        this.writeMmx(dstIdx, out.lo >>> 0, out.hi >>> 0);
+        const out = packedOp32x2(dst[0], dst[1], src[0], src[1], op);
+        this.scratchQwordB[0] = out.lo >>> 0;
+        this.scratchQwordB[1] = out.hi >>> 0;
+        this.writeMmx64U32(dstIdx, this.scratchQwordB);
         const len = 2 + modrmInfo.size;
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5384,19 +5243,18 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const regIdx = modrmInfo.reg & 7;
         const len = 2 + modrmInfo.size;
-        const lo = this.readXmmU32(regIdx, 0) >>> 0;
-        const hi = this.readXmmU32(regIdx, 1) >>> 0;
+        const src = this.readXmm64U32(regIdx, 0, this.scratchQwordA);
         if (modrmInfo.mod === 3) {
           const dstIdx = modrmInfo.rm & 7;
-          this.writeXmmU32(dstIdx, 0, lo);
-          this.writeXmmU32(dstIdx, 1, hi);
+          this.writeXmm64U32(dstIdx, 0, src);
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
           if (ea === null) {
             return false;
           }
-          this.writeMem32(ea >>> 0, lo);
-          this.writeMem32((ea + 4) >>> 0, hi);
+          if (!this.writeMem64U32(ea, src)) {
+            return false;
+          }
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5563,38 +5421,28 @@
         const regIdx = modrmInfo.reg & 7;
         if (op2 === 0x12) { // movlps xmm, m64 | movhlps xmm, xmm
           if (modrmInfo.mod === 3) {
-            const src0 = this.readXmmU32(modrmInfo.rm, 2);
-            const src1 = this.readXmmU32(modrmInfo.rm, 3);
-            this.writeXmmU32(regIdx, 0, src0);
-            this.writeXmmU32(regIdx, 1, src1);
+            const src = this.readXmm64U32(modrmInfo.rm, 2, this.scratchQwordA);
+            this.writeXmm64U32(regIdx, 0, src);
           } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
+            const src = this.readModrmXmmLow64SourceU32(modrmInfo, this.scratchQwordA);
+            if (!src) {
               return false;
             }
-            const lo = this.readMem32(ea);
-            const hi = this.readMem32((ea + 4) >>> 0);
-            this.writeXmmU32(regIdx, 0, lo);
-            this.writeXmmU32(regIdx, 1, hi);
+            this.writeXmm64U32(regIdx, 0, src);
           }
           this.writeReg(REG.EIP, (addr + len) >>> 0);
           return true;
         }
         // op2 === 0x16: movhps xmm, m64 | movlhps xmm, xmm
         if (modrmInfo.mod === 3) {
-          const src0 = this.readXmmU32(modrmInfo.rm, 0);
-          const src1 = this.readXmmU32(modrmInfo.rm, 1);
-          this.writeXmmU32(regIdx, 2, src0);
-          this.writeXmmU32(regIdx, 3, src1);
+          const src = this.readXmm64U32(modrmInfo.rm, 0, this.scratchQwordA);
+          this.writeXmm64U32(regIdx, 2, src);
         } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
+          const src = this.readModrmXmmLow64SourceU32(modrmInfo, this.scratchQwordA);
+          if (!src) {
             return false;
           }
-          const lo = this.readMem32(ea);
-          const hi = this.readMem32((ea + 4) >>> 0);
-          this.writeXmmU32(regIdx, 2, lo);
-          this.writeXmmU32(regIdx, 3, hi);
+          this.writeXmm64U32(regIdx, 2, src);
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5607,34 +5455,17 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const len = 2 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
-        const dst = [
-          this.readXmmU32(regIdx, 0) >>> 0,
-          this.readXmmU32(regIdx, 1) >>> 0,
-          this.readXmmU32(regIdx, 2) >>> 0,
-          this.readXmmU32(regIdx, 3) >>> 0
-        ];
-        let src = [0, 0, 0, 0];
-        if (modrmInfo.mod === 3) {
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-          }
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-          }
+        const dst = this.readXmm128U32(regIdx, this.scratchXmmWordsA);
+        const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsB);
+        if (!src) {
+          return false;
         }
         const out = sseBinaryFloat32x4(
           dst[0], dst[1], dst[2], dst[3],
           src[0], src[1], src[2], src[3],
           2
         );
-        for (let i = 0; i < 4; i += 1) {
-          this.writeXmmU32(regIdx, i, out[i] >>> 0);
-        }
+        this.writeXmm128U32(regIdx, out);
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
       }
@@ -5647,44 +5478,17 @@
         const len = 2 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
         if (op2 === 0x51) {
-          let src = [0, 0, 0, 0];
-          if (modrmInfo.mod === 3) {
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-            }
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-            }
+          const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsA);
+          if (!src) {
+            return false;
           }
           const out = sseUnaryFloat32x4(src[0], src[1], src[2], src[3], 0);
-          for (let i = 0; i < 4; i += 1) {
-            this.writeXmmU32(regIdx, i, out[i] >>> 0);
-          }
+          this.writeXmm128U32(regIdx, out);
         } else {
-          const dst = [
-            this.readXmmU32(regIdx, 0) >>> 0,
-            this.readXmmU32(regIdx, 1) >>> 0,
-            this.readXmmU32(regIdx, 2) >>> 0,
-            this.readXmmU32(regIdx, 3) >>> 0
-          ];
-          let src = [0, 0, 0, 0];
-          if (modrmInfo.mod === 3) {
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-            }
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-            }
+          const dst = this.readXmm128U32(regIdx, this.scratchXmmWordsA);
+          const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsB);
+          if (!src) {
+            return false;
           }
           const op = op2 === 0x58 ? 0 : (op2 === 0x5c ? 1 : 3);
           const out = sseBinaryFloat32x4(
@@ -5692,9 +5496,7 @@
             src[0], src[1], src[2], src[3],
             op
           );
-          for (let i = 0; i < 4; i += 1) {
-            this.writeXmmU32(regIdx, i, out[i] >>> 0);
-          }
+          this.writeXmm128U32(regIdx, out);
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5707,34 +5509,17 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const len = 2 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
-        const dst = [
-          this.readXmmU32(regIdx, 0) >>> 0,
-          this.readXmmU32(regIdx, 1) >>> 0,
-          this.readXmmU32(regIdx, 2) >>> 0,
-          this.readXmmU32(regIdx, 3) >>> 0
-        ];
-        let src = [0, 0, 0, 0];
-        if (modrmInfo.mod === 3) {
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-          }
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-          }
+        const dst = this.readXmm128U32(regIdx, this.scratchXmmWordsA);
+        const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsB);
+        if (!src) {
+          return false;
         }
         const out = sseBinaryFloat32x4(
           dst[0], dst[1], dst[2], dst[3],
           src[0], src[1], src[2], src[3],
           op2 === 0x5d ? 4 : 5
         );
-        for (let i = 0; i < 4; i += 1) {
-          this.writeXmmU32(regIdx, i, out[i] >>> 0);
-        }
+        this.writeXmm128U32(regIdx, out);
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
       }
@@ -5746,24 +5531,12 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const len = 2 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
-        let src = [0, 0, 0, 0];
-        if (modrmInfo.mod === 3) {
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-          }
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-          }
+        const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsA);
+        if (!src) {
+          return false;
         }
         const out = cvtdq2ps32x4(src[0], src[1], src[2], src[3]);
-        for (let i = 0; i < 4; i += 1) {
-          this.writeXmmU32(regIdx, i, out[i] >>> 0);
-        }
+        this.writeXmm128U32(regIdx, out);
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
       }
@@ -5775,47 +5548,40 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const len = 2 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
-        const dstBytes = new Uint8Array(16);
+        const dstWords = this.readXmm128U32(regIdx, this.scratchXmmWordsA);
+        const srcWords = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsB);
+        if (!srcWords) {
+          return false;
+        }
+        const dstBytes = this.scratchBytes16A;
         for (let i = 0; i < 4; i += 1) {
-          const v = this.readXmmU32(regIdx, i) >>> 0;
+          const v = dstWords[i] >>> 0;
           dstBytes[i * 4] = v & 0xff;
           dstBytes[i * 4 + 1] = (v >>> 8) & 0xff;
           dstBytes[i * 4 + 2] = (v >>> 16) & 0xff;
           dstBytes[i * 4 + 3] = (v >>> 24) & 0xff;
         }
-        const srcBytes = new Uint8Array(16);
-        if (modrmInfo.mod === 3) {
-          for (let i = 0; i < 4; i += 1) {
-            const v = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-            srcBytes[i * 4] = v & 0xff;
-            srcBytes[i * 4 + 1] = (v >>> 8) & 0xff;
-            srcBytes[i * 4 + 2] = (v >>> 16) & 0xff;
-            srcBytes[i * 4 + 3] = (v >>> 24) & 0xff;
-          }
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          const block = this.readMemBlock(ea, 16);
-          if (!block) {
-            return false;
-          }
-          srcBytes.set(block);
+        const srcBytes = this.scratchBytes16B;
+        for (let i = 0; i < 4; i += 1) {
+          const v = srcWords[i] >>> 0;
+          srcBytes[i * 4] = v & 0xff;
+          srcBytes[i * 4 + 1] = (v >>> 8) & 0xff;
+          srcBytes[i * 4 + 2] = (v >>> 16) & 0xff;
+          srcBytes[i * 4 + 3] = (v >>> 24) & 0xff;
         }
-        const out = new Uint8Array(16);
+        const out = this.scratchBytes16C;
         for (let i = 0; i < 16; i += 1) {
           const sum = dstBytes[i] + srcBytes[i];
           out[i] = sum > 255 ? 255 : sum;
         }
         for (let i = 0; i < 4; i += 1) {
-          const v =
-            out[i * 4] |
+          dstWords[i] =
+            (out[i * 4] |
             (out[i * 4 + 1] << 8) |
             (out[i * 4 + 2] << 16) |
-            (out[i * 4 + 3] << 24);
-          this.writeXmmU32(regIdx, i, v >>> 0);
+            (out[i * 4 + 3] << 24)) >>> 0;
         }
+        this.writeXmm128U32(regIdx, dstWords);
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
       }
@@ -5828,25 +5594,10 @@
         const imm = bytes[2 + modrmInfo.size] & 0xff;
         const len = 3 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
-        const dst = [
-          this.readXmmU32(regIdx, 0),
-          this.readXmmU32(regIdx, 1),
-          this.readXmmU32(regIdx, 2),
-          this.readXmmU32(regIdx, 3)
-        ];
-        let src = [0, 0, 0, 0];
-        if (modrmInfo.mod === 3) {
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-          }
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-          }
+        const dst = this.readXmm128U32(regIdx, this.scratchXmmWordsA);
+        const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsB);
+        if (!src) {
+          return false;
         }
         const out = shufps32x4(
           dst[0],
@@ -5859,9 +5610,7 @@
           src[3],
           imm
         );
-        for (let i = 0; i < 4; i += 1) {
-          this.writeXmmU32(regIdx, i, out[i] >>> 0);
-        }
+        this.writeXmm128U32(regIdx, out);
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
       }
@@ -5874,34 +5623,17 @@
         const imm = bytes[2 + modrmInfo.size] & 0xff;
         const len = 3 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
-        const dst = [
-          this.readXmmU32(regIdx, 0) >>> 0,
-          this.readXmmU32(regIdx, 1) >>> 0,
-          this.readXmmU32(regIdx, 2) >>> 0,
-          this.readXmmU32(regIdx, 3) >>> 0
-        ];
-        let src = [0, 0, 0, 0];
-        if (modrmInfo.mod === 3) {
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-          }
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-          }
+        const dst = this.readXmm128U32(regIdx, this.scratchXmmWordsA);
+        const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsB);
+        if (!src) {
+          return false;
         }
         const out = sseCompare32x4(
           dst[0], dst[1], dst[2], dst[3],
           src[0], src[1], src[2], src[3],
           imm
         );
-        for (let i = 0; i < 4; i += 1) {
-          this.writeXmmU32(regIdx, i, out[i] >>> 0);
-        }
+        this.writeXmm128U32(regIdx, out);
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
       }
@@ -5915,11 +5647,12 @@
           return false;
         }
         const srcIdx = modrmInfo.rm & 7;
+        const src = this.readXmm128U32(srcIdx, this.scratchXmmWordsA);
         const mask = movmskFloat32x4(
-          this.readXmmU32(srcIdx, 0),
-          this.readXmmU32(srcIdx, 1),
-          this.readXmmU32(srcIdx, 2),
-          this.readXmmU32(srcIdx, 3)
+          src[0],
+          src[1],
+          src[2],
+          src[3]
         );
         this.writeReg32ByIndex(modrmInfo.reg, mask >>> 0);
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size) >>> 0);
@@ -5933,20 +5666,12 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const len = 2 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
-        let v0 = 0;
-        let v1 = 0;
-        if (modrmInfo.mod === 3) {
-          const mm = this.readMmx(modrmInfo.rm);
-          v0 = mm.lo | 0;
-          v1 = mm.hi | 0;
-        } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
-          v0 = this.readMem32(ea) | 0;
-          v1 = this.readMem32((ea + 4) >>> 0) | 0;
+        const src = this.readModrmMmxSourceU32(modrmInfo, this.scratchQwordA);
+        if (!src) {
+          return false;
         }
+        const v0 = src[0] | 0;
+        const v1 = src[1] | 0;
         this.writeXmmF32(regIdx, 0, v0);
         this.writeXmmF32(regIdx, 1, v1);
         this.writeReg(REG.EIP, (addr + len) >>> 0);
@@ -5964,14 +5689,20 @@
         const regField = modrmInfo.reg & 7;
         const imm = bytes[2 + modrmInfo.size] & 0xff;
         const idx = modrmInfo.rm & 7;
-        const mm = this.readMmx(idx);
+        const mm = this.readMmx64U32(idx, this.scratchQwordA);
         if (op2 === 0x71) {
           if (regField === 2) {
-            this.writeMmx(idx, psrlw32(mm.lo >>> 0, imm), psrlw32(mm.hi >>> 0, imm));
+            this.scratchQwordB[0] = psrlw32(mm[0] >>> 0, imm) >>> 0;
+            this.scratchQwordB[1] = psrlw32(mm[1] >>> 0, imm) >>> 0;
+            this.writeMmx64U32(idx, this.scratchQwordB);
           } else if (regField === 4) {
-            this.writeMmx(idx, psraw32(mm.lo >>> 0, imm), psraw32(mm.hi >>> 0, imm));
+            this.scratchQwordB[0] = psraw32(mm[0] >>> 0, imm) >>> 0;
+            this.scratchQwordB[1] = psraw32(mm[1] >>> 0, imm) >>> 0;
+            this.writeMmx64U32(idx, this.scratchQwordB);
           } else if (regField === 6) {
-            this.writeMmx(idx, psllw32(mm.lo >>> 0, imm), psllw32(mm.hi >>> 0, imm));
+            this.scratchQwordB[0] = psllw32(mm[0] >>> 0, imm) >>> 0;
+            this.scratchQwordB[1] = psllw32(mm[1] >>> 0, imm) >>> 0;
+            this.writeMmx64U32(idx, this.scratchQwordB);
           } else {
             return false;
           }
@@ -5980,11 +5711,17 @@
         }
         if (op2 === 0x72) {
           if (regField === 2) {
-            this.writeMmx(idx, psrld32(mm.lo >>> 0, imm), psrld32(mm.hi >>> 0, imm));
+            this.scratchQwordB[0] = psrld32(mm[0] >>> 0, imm) >>> 0;
+            this.scratchQwordB[1] = psrld32(mm[1] >>> 0, imm) >>> 0;
+            this.writeMmx64U32(idx, this.scratchQwordB);
           } else if (regField === 4) {
-            this.writeMmx(idx, psrad32(mm.lo >>> 0, imm), psrad32(mm.hi >>> 0, imm));
+            this.scratchQwordB[0] = psrad32(mm[0] >>> 0, imm) >>> 0;
+            this.scratchQwordB[1] = psrad32(mm[1] >>> 0, imm) >>> 0;
+            this.writeMmx64U32(idx, this.scratchQwordB);
           } else if (regField === 6) {
-            this.writeMmx(idx, pslld32(mm.lo >>> 0, imm), pslld32(mm.hi >>> 0, imm));
+            this.scratchQwordB[0] = pslld32(mm[0] >>> 0, imm) >>> 0;
+            this.scratchQwordB[1] = pslld32(mm[1] >>> 0, imm) >>> 0;
+            this.writeMmx64U32(idx, this.scratchQwordB);
           } else {
             return false;
           }
@@ -5995,8 +5732,10 @@
         if (regField !== 2 && regField !== 6 && regField !== 7) {
           return false;
         }
-        const shifted = shiftPacked64(mm.lo >>> 0, mm.hi >>> 0, count, regField !== 2);
-        this.writeMmx(idx, shifted.lo >>> 0, shifted.hi >>> 0);
+        const shifted = shiftPacked64(mm[0] >>> 0, mm[1] >>> 0, count, regField !== 2);
+        this.scratchQwordB[0] = shifted.lo >>> 0;
+        this.scratchQwordB[1] = shifted.hi >>> 0;
+        this.writeMmx64U32(idx, this.scratchQwordB);
         this.writeReg(REG.EIP, (addr + 3 + modrmInfo.size) >>> 0);
         return true;
       }
@@ -6016,43 +5755,32 @@
             if (ea === null) {
               return false;
             }
-            for (let i = 0; i < 4; i += 1) {
-              const val = this.readMem32((ea + i * 4) >>> 0);
-              this.writeXmmU32(regIdx, i, val >>> 0);
+            if (!this.readMem128U32(ea, this.scratchXmmWordsA)) {
+              return false;
             }
+            this.writeXmm128U32(regIdx, this.scratchXmmWordsA);
           }
           this.writeReg(REG.EIP, (addr + len) >>> 0);
           return true;
         }
         if (op2 === 0x57) { // xorps xmm, xmm/m128
-          const src = [0, 0, 0, 0];
-          if (modrmInfo.mod === 3) {
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-            }
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            for (let i = 0; i < 4; i += 1) {
-              src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-            }
+          const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsA);
+          if (!src) {
+            return false;
           }
+          const dst = this.readXmm128U32(regIdx, this.scratchXmmWordsB);
           const out = packedOp32x4(
-            this.readXmmU32(regIdx, 0),
-            this.readXmmU32(regIdx, 1),
-            this.readXmmU32(regIdx, 2),
-            this.readXmmU32(regIdx, 3),
+            dst[0],
+            dst[1],
+            dst[2],
+            dst[3],
             src[0],
             src[1],
             src[2],
             src[3],
             3
           );
-          for (let i = 0; i < 4; i += 1) {
-            this.writeXmmU32(regIdx, i, out[i] >>> 0);
-          }
+          this.writeXmm128U32(regIdx, out);
           this.writeReg(REG.EIP, (addr + len) >>> 0);
           return true;
         }
@@ -6067,15 +5795,16 @@
             }
             value = this.readMem32(ea) >>> 0;
           }
-          this.writeXmmU32(regIdx, 0, value >>> 0);
-          this.writeXmmU32(regIdx, 1, 0);
-          this.writeXmmU32(regIdx, 2, 0);
-          this.writeXmmU32(regIdx, 3, 0);
+          this.scratchXmmWordsA[0] = value >>> 0;
+          this.scratchXmmWordsA[1] = 0;
+          this.scratchXmmWordsA[2] = 0;
+          this.scratchXmmWordsA[3] = 0;
+          this.writeXmm128U32(regIdx, this.scratchXmmWordsA);
           this.writeReg(REG.EIP, (addr + len) >>> 0);
           return true;
         }
         if (op2 === 0x7e) { // movd r/m32, xmm
-          const value = this.readXmmU32(regIdx, 0) >>> 0;
+          const value = this.readXmmScalar32Bits(regIdx) >>> 0;
           if (modrmInfo.mod === 3) {
             this.writeReg32ByIndex(modrmInfo.rm, value >>> 0);
           } else {
@@ -6130,9 +5859,9 @@
             if (ea === null) {
               return false;
             }
-            for (let i = 0; i < 4; i += 1) {
-              const val = this.readXmmU32(regIdx, i);
-              this.writeMem32((ea + i * 4) >>> 0, val >>> 0);
+            this.readXmm128U32(regIdx, this.scratchXmmWordsA);
+            if (!this.writeMem128U32(ea, this.scratchXmmWordsA)) {
+              return false;
             }
           }
           this.writeReg(REG.EIP, (addr + len) >>> 0);
@@ -6144,10 +5873,10 @@
           if (ea === null) {
             return false;
           }
-          const lo = this.readXmmU32(regIdx, 0);
-          const hi = this.readXmmU32(regIdx, 1);
-          this.writeMem32(ea, lo >>> 0);
-          this.writeMem32((ea + 4) >>> 0, hi >>> 0);
+          this.readXmm64U32(regIdx, 0, this.scratchQwordA);
+          if (!this.writeMem64U32(ea, this.scratchQwordA)) {
+            return false;
+          }
           this.writeReg(REG.EIP, (addr + len) >>> 0);
           return true;
         }
@@ -6162,77 +5891,60 @@
         const len = 2 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
         if (op2 === 0x6f) { // movq mm, mm/m64
-          let srcLo = 0;
-          let srcHi = 0;
-          if (modrmInfo.mod === 3) {
-            const src = this.readMmx(modrmInfo.rm);
-            srcLo = src.lo;
-            srcHi = src.hi;
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            srcLo = this.readMem32(ea);
-            srcHi = this.readMem32((ea + 4) >>> 0);
+          const src = this.readModrmMmxSourceU32(modrmInfo, this.scratchQwordA);
+          if (!src) {
+            return false;
           }
-          this.writeMmx(regIdx, srcLo, srcHi);
+          this.writeMmx64U32(regIdx, src);
           this.writeReg(REG.EIP, (addr + len) >>> 0);
           return true;
         }
         if (op2 === 0x7f) { // movq mm/m64, mm
-          const src = this.readMmx(regIdx);
+          const src = this.readMmx64U32(regIdx, this.scratchQwordA);
           if (modrmInfo.mod === 3) {
-            this.writeMmx(modrmInfo.rm, src.lo, src.hi);
+            this.writeMmx64U32(modrmInfo.rm, src);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea === null) {
               return false;
             }
-            this.writeMem32(ea, src.lo);
-            this.writeMem32((ea + 4) >>> 0, src.hi);
+            if (!this.writeMem64U32(ea, src)) {
+              return false;
+            }
           }
           this.writeReg(REG.EIP, (addr + len) >>> 0);
           return true;
         }
         if (op2 === 0xd5 || op2 === 0xd8 || op2 === 0xd9 || op2 === 0xe0 || op2 === 0xe9 || op2 === 0xfd) { // pmullw / psubusb / psubusw / pavgb / psubsw / paddw
-          let srcLo = 0;
-          let srcHi = 0;
-          if (modrmInfo.mod === 3) {
-            const src = this.readMmx(modrmInfo.rm);
-            srcLo = src.lo;
-            srcHi = src.hi;
-          } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            srcLo = this.readMem32(ea);
-            srcHi = this.readMem32((ea + 4) >>> 0);
+          const src = this.readModrmMmxSourceU32(modrmInfo, this.scratchQwordA);
+          if (!src) {
+            return false;
           }
-          const dst = this.readMmx(regIdx);
+          const dst = this.readMmx64U32(regIdx, this.scratchQwordB);
           let resLo = 0;
           let resHi = 0;
           if (op2 === 0xd5) {
-            resLo = pmullw32(dst.lo, srcLo);
-            resHi = pmullw32(dst.hi, srcHi);
+            resLo = pmullw32(dst[0], src[0]);
+            resHi = pmullw32(dst[1], src[1]);
           } else if (op2 === 0xd8) {
-            resLo = psubusb32(dst.lo, srcLo);
-            resHi = psubusb32(dst.hi, srcHi);
+            resLo = psubusb32(dst[0], src[0]);
+            resHi = psubusb32(dst[1], src[1]);
           } else if (op2 === 0xd9) {
-            resLo = psubusw32(dst.lo, srcLo);
-            resHi = psubusw32(dst.hi, srcHi);
+            resLo = psubusw32(dst[0], src[0]);
+            resHi = psubusw32(dst[1], src[1]);
           } else if (op2 === 0xe0) {
-            resLo = pavgb32(dst.lo, srcLo);
-            resHi = pavgb32(dst.hi, srcHi);
+            resLo = pavgb32(dst[0], src[0]);
+            resHi = pavgb32(dst[1], src[1]);
           } else if (op2 === 0xe9) {
-            resLo = psubsw32(dst.lo, srcLo);
-            resHi = psubsw32(dst.hi, srcHi);
+            resLo = psubsw32(dst[0], src[0]);
+            resHi = psubsw32(dst[1], src[1]);
           } else {
-            resLo = paddw32(dst.lo, srcLo);
-            resHi = paddw32(dst.hi, srcHi);
+            resLo = paddw32(dst[0], src[0]);
+            resHi = paddw32(dst[1], src[1]);
           }
-          this.writeMmx(regIdx, resLo, resHi);
+          this.scratchQwordB[0] = resLo >>> 0;
+          this.scratchQwordB[1] = resHi >>> 0;
+          this.writeMmx64U32(regIdx, this.scratchQwordB);
           this.writeReg(REG.EIP, (addr + len) >>> 0);
           return true;
         }
@@ -6448,37 +6160,27 @@
           }
           if (op === 0x6f) { // movdqu xmm, xmm/m128
             if (modrmInfo.mod === 3) {
-              for (let i = 0; i < 4; i += 1) {
-                const v = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-                this.writeXmmU32(regIdx, i, v >>> 0);
-              }
+              this.copyXmm(regIdx, modrmInfo.rm);
             } else {
-              const ea = this.calcEffectiveAddress(modrmInfo);
-              if (ea === null) {
+              if (!this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsA)) {
                 return false;
               }
-              for (let i = 0; i < 4; i += 1) {
-                const v = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-                this.writeXmmU32(regIdx, i, v >>> 0);
-              }
+              this.writeXmm128U32(regIdx, this.scratchXmmWordsA);
             }
             this.writeReg(REG.EIP, (addr + len) >>> 0);
             return true;
           }
           if (op === 0x7f) { // movdqu xmm/m128, xmm
             if (modrmInfo.mod === 3) {
-              for (let i = 0; i < 4; i += 1) {
-                const v = this.readXmmU32(regIdx, i) >>> 0;
-                this.writeXmmU32(modrmInfo.rm, i, v >>> 0);
-              }
+              this.copyXmm(modrmInfo.rm, regIdx);
             } else {
               const ea = this.calcEffectiveAddress(modrmInfo);
               if (ea === null) {
                 return false;
               }
-              for (let i = 0; i < 4; i += 1) {
-                const v = this.readXmmU32(regIdx, i) >>> 0;
-                this.writeMem32((ea + i * 4) >>> 0, v >>> 0);
+              this.readXmm128U32(regIdx, this.scratchXmmWordsA);
+              if (!this.writeMem128U32(ea, this.scratchXmmWordsA)) {
+                return false;
               }
             }
             this.writeReg(REG.EIP, (addr + len) >>> 0);
@@ -6513,17 +6215,11 @@
             return true;
           }
           if (op === 0x58 || op === 0x59 || op === 0x5c || op === 0x5e || op === 0x5d || op === 0x5f) {
-            let srcBits = 0;
-            if (modrmInfo.mod === 3) {
-              srcBits = this.readXmmU32(modrmInfo.rm, 0) >>> 0;
-            } else {
-              const ea = this.calcEffectiveAddress(modrmInfo);
-              if (ea === null) {
-                return false;
-              }
-              srcBits = this.readMem32(ea >>> 0) >>> 0;
+            const srcBits = this.readModrmXmmScalar32Bits(modrmInfo);
+            if (srcBits === null) {
+              return false;
             }
-            const dstBits = this.readXmmU32(regIdx, 0) >>> 0;
+            const dstBits = this.readXmmScalar32Bits(regIdx) >>> 0;
             let resultBits = dstBits >>> 0;
             if (op === 0x58) { // addss
               resultBits = sseBinaryFloat32Bits(dstBits, srcBits, 0);
@@ -6538,37 +6234,26 @@
             } else if (op === 0x5f) { // maxss
               resultBits = sseBinaryFloat32Bits(dstBits, srcBits, 5);
             }
-            this.writeXmmU32(regIdx, 0, resultBits >>> 0);
+            this.writeXmmScalar32Bits(regIdx, resultBits >>> 0);
             this.writeReg(REG.EIP, (addr + len) >>> 0);
             return true;
           }
         }
         if (prefix === 0xf2) {
           if (op === 0x7c) { // haddps xmm, xmm/m128 (SSE3)
-            let src = [0, 0, 0, 0];
-            if (modrmInfo.mod === 3) {
-              for (let i = 0; i < 4; i += 1) {
-                src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-              }
-            } else {
-              const ea = this.calcEffectiveAddress(modrmInfo);
-              if (ea === null) {
-                return false;
-              }
-              for (let i = 0; i < 4; i += 1) {
-                src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-              }
+            const src = this.readModrmXmmSourceU32(modrmInfo, this.scratchXmmWordsA);
+            if (!src) {
+              return false;
             }
+            const dst = this.readXmm128U32(regIdx, this.scratchXmmWordsB);
             const out = haddps32x4(
-              this.readXmmU32(regIdx, 0) >>> 0,
-              this.readXmmU32(regIdx, 1) >>> 0,
-              this.readXmmU32(regIdx, 2) >>> 0,
-              this.readXmmU32(regIdx, 3) >>> 0,
+              dst[0],
+              dst[1],
+              dst[2],
+              dst[3],
               src[0], src[1], src[2], src[3]
             );
-            for (let i = 0; i < 4; i += 1) {
-              this.writeXmmU32(regIdx, i, out[i] >>> 0);
-            }
+            this.writeXmm128U32(regIdx, out);
             this.writeReg(REG.EIP, (addr + len) >>> 0);
             return true;
           }
@@ -6576,11 +6261,12 @@
         return false;
       },
 
-      tryFastRepStringInstruction(opcode, operandSize, addrSize, df, count, esi, edi, eax) {
+      tryFastRepStringInstruction(opcode, operandSize, addrSize, df, count, esi, edi, eax, repPrefix, flags) {
         if (!this.cpu || df || addrSize !== 32 || count <= 1) {
           return null;
         }
         const mem = this.cpu.mem;
+        const view = this.cpu.view;
         if (opcode === 0xa4 || opcode === 0xa5) {
           const unit = opcode === 0xa4 ? 1 : operandSize;
           const byteCount = count * unit;
@@ -6599,7 +6285,9 @@
           mem.set(mem.subarray(src, src + byteCount), dst);
           return {
             esi: (src + byteCount) >>> 0,
-            edi: (dst + byteCount) >>> 0
+            edi: (dst + byteCount) >>> 0,
+            ecx: 0,
+            flags: flags >>> 0
           };
         }
         if (opcode === 0xaa) {
@@ -6612,7 +6300,9 @@
           mem.fill(eax & 0xff, dst, dst + byteCount);
           return {
             esi: esi >>> 0,
-            edi: (dst + byteCount) >>> 0
+            edi: (dst + byteCount) >>> 0,
+            ecx: 0,
+            flags: flags >>> 0
           };
         }
         if (opcode === 0xab) {
@@ -6637,7 +6327,92 @@
           }
           return {
             esi: esi >>> 0,
-            edi: ((edi >>> 0) + byteCount) >>> 0
+            edi: ((edi >>> 0) + byteCount) >>> 0,
+            ecx: 0,
+            flags: flags >>> 0
+          };
+        }
+        if (opcode === 0xa6 || opcode === 0xa7) {
+          const unit = opcode === 0xa6 ? 1 : operandSize;
+          const byteCount = count * unit;
+          if (
+            !this.canUseFlatBulkMemory(esi, byteCount, addrSize) ||
+            !this.canUseFlatBulkMemory(edi, byteCount, addrSize)
+          ) {
+            return null;
+          }
+          const srcBase = esi >>> 0;
+          const dstBase = edi >>> 0;
+          const stopOnEqual = repPrefix === 0xf2;
+          let iterations = 0;
+          let left = 0;
+          let right = 0;
+          while (iterations < count) {
+            const offset = iterations * unit;
+            if (unit === 1) {
+              left = mem[srcBase + offset] >>> 0;
+              right = mem[dstBase + offset] >>> 0;
+            } else if (unit === 2) {
+              left = view.getUint16(srcBase + offset, true) & 0xffff;
+              right = view.getUint16(dstBase + offset, true) & 0xffff;
+            } else {
+              left = view.getUint32(srcBase + offset, true) >>> 0;
+              right = view.getUint32(dstBase + offset, true) >>> 0;
+            }
+            iterations += 1;
+            const equal = left === right;
+            if ((stopOnEqual && equal) || (!stopOnEqual && !equal)) {
+              break;
+            }
+          }
+          if (iterations <= 0) {
+            return null;
+          }
+          const nextFlags = aluBinaryWidth(7, left, right, unit === 1 ? 8 : (unit === 2 ? 16 : 32), flags).flags >>> 0;
+          const advance = iterations * unit;
+          return {
+            esi: (srcBase + advance) >>> 0,
+            edi: (dstBase + advance) >>> 0,
+            ecx: (count - iterations) >>> 0,
+            flags: nextFlags
+          };
+        }
+        if (opcode === 0xae || opcode === 0xaf) {
+          const unit = opcode === 0xae ? 1 : operandSize;
+          const byteCount = count * unit;
+          if (!this.canUseFlatBulkMemory(edi, byteCount, addrSize)) {
+            return null;
+          }
+          const dstBase = edi >>> 0;
+          const stopOnEqual = repPrefix === 0xf2;
+          const needle = unit === 1 ? (eax & 0xff) : (unit === 2 ? (eax & 0xffff) : (eax >>> 0));
+          let iterations = 0;
+          let value = 0;
+          while (iterations < count) {
+            const offset = iterations * unit;
+            if (unit === 1) {
+              value = mem[dstBase + offset] >>> 0;
+            } else if (unit === 2) {
+              value = view.getUint16(dstBase + offset, true) & 0xffff;
+            } else {
+              value = view.getUint32(dstBase + offset, true) >>> 0;
+            }
+            iterations += 1;
+            const equal = needle === value;
+            if ((stopOnEqual && equal) || (!stopOnEqual && !equal)) {
+              break;
+            }
+          }
+          if (iterations <= 0) {
+            return null;
+          }
+          const nextFlags = aluBinaryWidth(7, needle, value, unit === 1 ? 8 : (unit === 2 ? 16 : 32), flags).flags >>> 0;
+          const advance = iterations * unit;
+          return {
+            esi: esi >>> 0,
+            edi: (dstBase + advance) >>> 0,
+            ecx: (count - iterations) >>> 0,
+            flags: nextFlags
           };
         }
         return null;
@@ -6784,21 +6559,23 @@
     
         let addrCursor = edi0;
         if (info.kind === "shade") {
-          const mm1 = this.readMmx(1);
+          const mm1 = this.readMmx64U32(1, this.scratchQwordA);
           let lastLo = 0;
           let lastHi = 0;
           for (let i = 0; i < iterations; i += 1) {
             const lo = view.getUint32(addrCursor, true);
             const hi = view.getUint32(addrCursor + 4, true);
-            const outLo = psubusb32(lo, mm1.lo);
-            const outHi = psubusb32(hi, mm1.hi);
+            const outLo = psubusb32(lo, mm1[0]);
+            const outHi = psubusb32(hi, mm1[1]);
             view.setUint32(addrCursor, outLo, true);
             view.setUint32(addrCursor + 4, outHi, true);
             lastLo = outLo;
             lastHi = outHi;
             addrCursor += 8;
           }
-          this.writeMmx(0, lastLo, lastHi);
+          this.scratchQwordB[0] = lastLo >>> 0;
+          this.scratchQwordB[1] = lastHi >>> 0;
+          this.writeMmx64U32(0, this.scratchQwordB);
         } else if (info.kind === "blur") {
           const stride = this.readReg(REG.EAX) | 0;
           let lastMm0Lo = 0;
@@ -6853,12 +6630,24 @@
             lastMm5Hi = m5Hi;
             addrCursor += 8;
           }
-          this.writeMmx(0, lastMm0Lo, lastMm0Hi);
-          this.writeMmx(1, lastMm1Lo, lastMm1Hi);
-          this.writeMmx(2, lastMm2Lo, lastMm2Hi);
-          this.writeMmx(3, lastMm3Lo, lastMm3Hi);
-          this.writeMmx(4, lastMm4Lo, lastMm4Hi);
-          this.writeMmx(5, lastMm5Lo, lastMm5Hi);
+          this.scratchQwordA[0] = lastMm0Lo >>> 0;
+          this.scratchQwordA[1] = lastMm0Hi >>> 0;
+          this.writeMmx64U32(0, this.scratchQwordA);
+          this.scratchQwordA[0] = lastMm1Lo >>> 0;
+          this.scratchQwordA[1] = lastMm1Hi >>> 0;
+          this.writeMmx64U32(1, this.scratchQwordA);
+          this.scratchQwordA[0] = lastMm2Lo >>> 0;
+          this.scratchQwordA[1] = lastMm2Hi >>> 0;
+          this.writeMmx64U32(2, this.scratchQwordA);
+          this.scratchQwordA[0] = lastMm3Lo >>> 0;
+          this.scratchQwordA[1] = lastMm3Hi >>> 0;
+          this.writeMmx64U32(3, this.scratchQwordA);
+          this.scratchQwordA[0] = lastMm4Lo >>> 0;
+          this.scratchQwordA[1] = lastMm4Hi >>> 0;
+          this.writeMmx64U32(4, this.scratchQwordA);
+          this.scratchQwordA[0] = lastMm5Lo >>> 0;
+          this.scratchQwordA[1] = lastMm5Hi >>> 0;
+          this.writeMmx64U32(5, this.scratchQwordA);
         } else if (info.kind === "blur-right") {
           const stride = this.readReg(REG.EAX) | 0;
           let lastMm0Lo = 0;
@@ -6899,10 +6688,18 @@
             lastMm3Hi = m3Hi;
             addrCursor += 8;
           }
-          this.writeMmx(0, lastMm0Lo, lastMm0Hi);
-          this.writeMmx(1, lastMm1Lo, lastMm1Hi);
-          this.writeMmx(2, lastMm2Lo, lastMm2Hi);
-          this.writeMmx(3, lastMm3Lo, lastMm3Hi);
+          this.scratchQwordA[0] = lastMm0Lo >>> 0;
+          this.scratchQwordA[1] = lastMm0Hi >>> 0;
+          this.writeMmx64U32(0, this.scratchQwordA);
+          this.scratchQwordA[0] = lastMm1Lo >>> 0;
+          this.scratchQwordA[1] = lastMm1Hi >>> 0;
+          this.writeMmx64U32(1, this.scratchQwordA);
+          this.scratchQwordA[0] = lastMm2Lo >>> 0;
+          this.scratchQwordA[1] = lastMm2Hi >>> 0;
+          this.writeMmx64U32(2, this.scratchQwordA);
+          this.scratchQwordA[0] = lastMm3Lo >>> 0;
+          this.scratchQwordA[1] = lastMm3Hi >>> 0;
+          this.writeMmx64U32(3, this.scratchQwordA);
         }
     
         const lastBeforeAdd = (edi0 + (iterations - 1) * 8) >>> 0;

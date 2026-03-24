@@ -343,6 +343,31 @@
         mmx[base + 1] = hi >>> 0;
       },
 
+      readMmx64U32(index, out) {
+        const target = out || new Uint32Array(2);
+        if (!this.cpu) {
+          target[0] = 0;
+          target[1] = 0;
+          return target;
+        }
+        const mmx = this.cpu.mmx;
+        const base = (index & 7) * 2;
+        target[0] = mmx[base] >>> 0;
+        target[1] = mmx[base + 1] >>> 0;
+        return target;
+      },
+
+      writeMmx64U32(index, words) {
+        if (!this.cpu || !words) {
+          return false;
+        }
+        const mmx = this.cpu.mmx;
+        const base = (index & 7) * 2;
+        mmx[base] = words[0] >>> 0;
+        mmx[base + 1] = words[1] >>> 0;
+        return true;
+      },
+
       readXmmU32(reg, lane) {
         if (!this.cpu) {
           return 0;
@@ -357,6 +382,45 @@
         }
         const base = (reg & 7) * 4 + (lane & 3);
         this.cpu.xmm[base] = value >>> 0;
+      },
+
+      readXmmScalar32Bits(reg) {
+        if (!this.cpu) {
+          return 0;
+        }
+        return this.cpu.xmm[(reg & 7) * 4] >>> 0;
+      },
+
+      writeXmmScalar32Bits(reg, value) {
+        if (!this.cpu) {
+          return;
+        }
+        this.cpu.xmm[(reg & 7) * 4] = value >>> 0;
+      },
+
+      readXmm64U32(reg, laneBase, out) {
+        const target = out || new Uint32Array(2);
+        if (!this.cpu) {
+          target[0] = 0;
+          target[1] = 0;
+          return target;
+        }
+        const base = (reg & 7) * 4 + ((laneBase | 0) & 2);
+        const xmm = this.cpu.xmm;
+        target[0] = xmm[base] >>> 0;
+        target[1] = xmm[base + 1] >>> 0;
+        return target;
+      },
+
+      writeXmm64U32(reg, laneBase, words) {
+        if (!this.cpu || !words) {
+          return false;
+        }
+        const base = (reg & 7) * 4 + ((laneBase | 0) & 2);
+        const xmm = this.cpu.xmm;
+        xmm[base] = words[0] >>> 0;
+        xmm[base + 1] = words[1] >>> 0;
+        return true;
       },
 
       readXmmF32(reg, lane) {
@@ -386,6 +450,37 @@
         xmm[d + 1] = xmm[s + 1];
         xmm[d + 2] = xmm[s + 2];
         xmm[d + 3] = xmm[s + 3];
+      },
+
+      readXmm128U32(reg, out) {
+        const target = out || new Uint32Array(4);
+        if (!this.cpu) {
+          target[0] = 0;
+          target[1] = 0;
+          target[2] = 0;
+          target[3] = 0;
+          return target;
+        }
+        const base = (reg & 7) * 4;
+        const xmm = this.cpu.xmm;
+        target[0] = xmm[base] >>> 0;
+        target[1] = xmm[base + 1] >>> 0;
+        target[2] = xmm[base + 2] >>> 0;
+        target[3] = xmm[base + 3] >>> 0;
+        return target;
+      },
+
+      writeXmm128U32(reg, words) {
+        if (!this.cpu || !words) {
+          return false;
+        }
+        const base = (reg & 7) * 4;
+        const xmm = this.cpu.xmm;
+        xmm[base] = words[0] >>> 0;
+        xmm[base + 1] = words[1] >>> 0;
+        xmm[base + 2] = words[2] >>> 0;
+        xmm[base + 3] = words[3] >>> 0;
+        return true;
       },
 
       readMem8(addr) {
@@ -531,6 +626,132 @@
           return null;
         }
         return this.cpu.mem.subarray(start, start + size);
+      },
+
+      readMem64U32(addr, out) {
+        const target = out || new Uint32Array(2);
+        if (!this.cpu) {
+          target[0] = 0;
+          target[1] = 0;
+          return null;
+        }
+        const start = addr >>> 0;
+        if (!this.checkInterpreterMem(start, 8)) {
+          return null;
+        }
+        const view = this.cpu.view;
+        target[0] = view.getUint32(start, true) >>> 0;
+        target[1] = view.getUint32((start + 4) >>> 0, true) >>> 0;
+        return target;
+      },
+
+      writeMem64U32(addr, words) {
+        if (!this.cpu || !words) {
+          return false;
+        }
+        const start = addr >>> 0;
+        if (!this.checkInterpreterMem(start, 8)) {
+          return false;
+        }
+        this.invalidateBasicBlocksForWrite(start, 8);
+        const view = this.cpu.view;
+        view.setUint32(start, words[0] >>> 0, true);
+        view.setUint32((start + 4) >>> 0, words[1] >>> 0, true);
+        return true;
+      },
+
+      readMem128U32(addr, out) {
+        const target = out || new Uint32Array(4);
+        if (!this.cpu) {
+          target[0] = 0;
+          target[1] = 0;
+          target[2] = 0;
+          target[3] = 0;
+          return null;
+        }
+        const start = addr >>> 0;
+        if (!this.checkInterpreterMem(start, 16)) {
+          return null;
+        }
+        const view = this.cpu.view;
+        target[0] = view.getUint32(start, true) >>> 0;
+        target[1] = view.getUint32((start + 4) >>> 0, true) >>> 0;
+        target[2] = view.getUint32((start + 8) >>> 0, true) >>> 0;
+        target[3] = view.getUint32((start + 12) >>> 0, true) >>> 0;
+        return target;
+      },
+
+      writeMem128U32(addr, words) {
+        if (!this.cpu || !words) {
+          return false;
+        }
+        const start = addr >>> 0;
+        if (!this.checkInterpreterMem(start, 16)) {
+          return false;
+        }
+        this.invalidateBasicBlocksForWrite(start, 16);
+        const view = this.cpu.view;
+        view.setUint32(start, words[0] >>> 0, true);
+        view.setUint32((start + 4) >>> 0, words[1] >>> 0, true);
+        view.setUint32((start + 8) >>> 0, words[2] >>> 0, true);
+        view.setUint32((start + 12) >>> 0, words[3] >>> 0, true);
+        return true;
+      },
+
+      readModrmXmmSourceU32(modrmInfo, out) {
+        if (!modrmInfo) {
+          return null;
+        }
+        if ((modrmInfo.mod | 0) === 3) {
+          return this.readXmm128U32(modrmInfo.rm & 7, out);
+        }
+        const ea = this.calcEffectiveAddress(modrmInfo);
+        if (ea === null) {
+          return null;
+        }
+        return this.readMem128U32(ea, out);
+      },
+
+      readModrmMmxSourceU32(modrmInfo, out) {
+        if (!modrmInfo) {
+          return null;
+        }
+        if ((modrmInfo.mod | 0) === 3) {
+          return this.readMmx64U32(modrmInfo.rm & 7, out);
+        }
+        const ea = this.calcEffectiveAddress(modrmInfo);
+        if (ea === null) {
+          return null;
+        }
+        return this.readMem64U32(ea, out);
+      },
+
+      readModrmXmmLow64SourceU32(modrmInfo, out) {
+        if (!modrmInfo) {
+          return null;
+        }
+        if ((modrmInfo.mod | 0) === 3) {
+          return this.readXmm64U32(modrmInfo.rm & 7, 0, out);
+        }
+        const ea = this.calcEffectiveAddress(modrmInfo);
+        if (ea === null) {
+          return null;
+        }
+        return this.readMem64U32(ea, out);
+      },
+
+      readModrmXmmScalar32Bits(modrmInfo) {
+        if (!modrmInfo) {
+          return null;
+        }
+        if ((modrmInfo.mod | 0) === 3) {
+          return this.readXmmU32(modrmInfo.rm & 7, 0) >>> 0;
+        }
+        const ea = this.calcEffectiveAddress(modrmInfo);
+        if (ea === null) {
+          return null;
+        }
+        return this.readMem32(ea) >>> 0;
       },
 
       writeMemBlock(addr, bytes) {
