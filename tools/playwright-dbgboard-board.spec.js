@@ -29,7 +29,7 @@ test("dbgboard renders messages from the debug board queue", async ({ page }, te
       let hash = 2166136261 >>> 0;
       let nonBlack = 0;
       let total = 0;
-      for (let i = 0; i < buffer.length; i += 131) {
+      for (let i = 0; i < buffer.length; i += 1) {
         const pixel = buffer[i] & 0x00ffffff;
         hash ^= buffer[i] >>> 0;
         hash = Math.imul(hash, 16777619) >>> 0;
