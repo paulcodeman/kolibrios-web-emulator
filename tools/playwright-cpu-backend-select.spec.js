@@ -31,8 +31,8 @@ test("launcher CPU backend selector updates session mode and launches apps in wa
       : ""
   }));
 
-  expect(initial.appMode).toBe("js");
-  expect(initial.sessionMode).toBe("js");
+  expect(initial.appMode).toBe("wasm");
+  expect(initial.sessionMode).toBe("wasm");
   expect(initial.wasmLabel).toContain("WASM CPU");
   expect(initial.wasmLabel).not.toContain("not built");
 

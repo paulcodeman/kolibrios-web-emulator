@@ -16,7 +16,7 @@
           <span>CPU</span>
           <select id="cpuBackendSelect">
             <option value="js">JS CPU</option>
-            <option value="wasm">WASM CPU</option>
+            <option value="wasm" selected>WASM CPU</option>
           </select>
         </label>
         <button id="fullscreenBtn" class="screen-action launcher-action" type="button">Fullscreen</button>
@@ -49,6 +49,7 @@
         autoBootBundledDesktop: true,
         assetKey: "builtinKolibriRoot",
         launchPath: "/sys/LAUNCHER",
+        cpuBackend: "wasm",
         skipPersistedRootRestore: true
       };
     </script>
