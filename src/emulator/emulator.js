@@ -205,6 +205,37 @@ function bitTestModify(value, bitIndex, widthBits, op, flags) {
   return bitTestModifyJs(value, bitIndex, widthBits, op, flags);
 }
 
+function imulSignedWidthJs(left, right, widthBits, flags) {
+  const width = (widthBits >>> 0) === 16 ? 16 : 32;
+  const leftValue = width === 16
+    ? BigInt.asIntN(16, BigInt(left & 0xffff))
+    : BigInt.asIntN(32, BigInt(left >>> 0));
+  const rightValue = width === 16
+    ? BigInt.asIntN(16, BigInt(right & 0xffff))
+    : BigInt.asIntN(32, BigInt(right >>> 0));
+  const product = leftValue * rightValue;
+  const result = width === 16
+    ? (Number(BigInt.asUintN(16, product)) & 0xffff)
+    : (Number(BigInt.asUintN(32, product)) >>> 0);
+  const fits = width === 16
+    ? (product === BigInt.asIntN(16, product))
+    : (product === BigInt.asIntN(32, product));
+  let next = flags >>> 0;
+  next &= ~(FLAG_CF | FLAG_OF);
+  if (!fits) {
+    next |= FLAG_CF | FLAG_OF;
+  }
+  return { result: result >>> 0, flags: next >>> 0 };
+}
+
+function imulSignedWidth(left, right, widthBits, flags) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.imulSignedWidth === "function") {
+    return backend.imulSignedWidth(left >>> 0, right >>> 0, widthBits >>> 0, flags >>> 0);
+  }
+  return imulSignedWidthJs(left, right, widthBits, flags);
+}
+
 function widthMask(widthBits) {
   if (widthBits === 8) {
     return 0xff;
@@ -725,6 +756,9 @@ function getJsCpuHelperBackend() {
       },
       bitTestModify(value, bitIndex, widthBits, op, flags) {
         return bitTestModifyJs(value, bitIndex, widthBits, op, flags);
+      },
+      imulSignedWidth(left, right, widthBits, flags) {
+        return imulSignedWidthJs(left, right, widthBits, flags);
       },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
@@ -2082,6 +2116,7 @@ class Emulator {
     x87NumberToPackedBcd,
     bitScan,
     bitTestModify,
+    imulSignedWidth,
     updateLogicFlagsWidth,
     updateAddFlags,
     updateAdcFlags,

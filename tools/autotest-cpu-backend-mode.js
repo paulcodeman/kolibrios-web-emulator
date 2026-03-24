@@ -54,6 +54,7 @@ try {
   assert(typeof wasmBackend.x87PackedBcdToNumber === "function", "wasm helper backend should expose packed BCD helpers");
   assert(typeof wasmBackend.bitScan === "function", "wasm helper backend should expose bit scan helpers");
   assert(typeof wasmBackend.bitTestModify === "function", "wasm helper backend should expose bit test helpers");
+  assert(typeof wasmBackend.imulSignedWidth === "function", "wasm helper backend should expose IMUL helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -203,6 +204,19 @@ try {
           `bitTestModify should match for width=${width}, op=${op}`
         );
       }
+    }
+  }
+
+  for (const width of [16, 32]) {
+    for (let i = 0; i < 200; i += 1) {
+      const left = nextRand();
+      const right = nextRand();
+      const flags = nextRand();
+      assertDeepEq(
+        wasmBackend.imulSignedWidth(left, right, width, flags),
+        jsBackend.imulSignedWidth(left, right, width, flags),
+        `imulSignedWidth should match for width=${width}`
+      );
     }
   }
 

@@ -21,6 +21,7 @@
       x87NumberToPackedBcd,
       bitScan,
       bitTestModify,
+      imulSignedWidth,
       updateLogicFlagsWidth,
       updateAddFlags,
       updateAdcFlags,
@@ -1706,18 +1707,9 @@
         } else {
           imm = ((bytes[1 + modrmInfo.size] << 24) >> 24) & 0xffff;
         }
-        const srcSigned = BigInt.asIntN(16, BigInt(src));
-        const immSigned = BigInt.asIntN(16, BigInt(imm));
-        const product = srcSigned * immSigned;
-        const low = Number(BigInt.asUintN(16, product)) & 0xffff;
-        this.writeReg16ByIndex(modrmInfo.reg, low);
-        const fits = product === BigInt.asIntN(16, product);
-        let flags = this.readReg(REG.EFLAGS);
-        flags &= ~(FLAG_CF | FLAG_OF);
-        if (!fits) {
-          flags |= FLAG_CF | FLAG_OF;
-        }
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const result = imulSignedWidth(src, imm, 16, this.readReg(REG.EFLAGS));
+        this.writeReg16ByIndex(modrmInfo.reg, result.result & 0xffff);
+        this.writeReg(REG.EFLAGS, result.flags >>> 0);
         const immSize = op2 === 0x69 ? 2 : 1;
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size + immSize) >>> 0);
         return true;
@@ -3557,18 +3549,9 @@
       } else {
         imm = (bytes[1 + modrmInfo.size] << 24) >> 24;
       }
-      const srcSigned = BigInt.asIntN(32, BigInt(src));
-      const immSigned = BigInt.asIntN(32, BigInt(imm));
-      const product = srcSigned * immSigned;
-      const low = Number(BigInt.asUintN(32, product)) >>> 0;
-      this.writeReg32ByIndex(modrmInfo.reg, low);
-      const fits = product === BigInt.asIntN(32, product);
-      let flags = this.readReg(REG.EFLAGS);
-      flags &= ~(FLAG_CF | FLAG_OF);
-      if (!fits) {
-        flags |= FLAG_CF | FLAG_OF;
-      }
-      this.writeReg(REG.EFLAGS, flags >>> 0);
+      const result = imulSignedWidth(src, imm, 32, this.readReg(REG.EFLAGS));
+      this.writeReg32ByIndex(modrmInfo.reg, result.result >>> 0);
+      this.writeReg(REG.EFLAGS, result.flags >>> 0);
       const immSize = opcode === 0x69 ? 4 : 1;
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size + immSize) >>> 0);
       return true;
@@ -6839,14 +6822,9 @@
           src = this.readMem32(ea);
         }
         const dst = this.readReg32ByIndex(modrmInfo.reg);
-        const result = Math.imul(dst | 0, src | 0) | 0;
-        this.writeReg32ByIndex(modrmInfo.reg, result >>> 0);
-        let flags = this.readReg(REG.EFLAGS);
-        const prod = BigInt(dst | 0) * BigInt(src | 0);
-        const high = prod >> 32n;
-        const overflow = high !== 0n && high !== -1n;
-        flags = overflow ? (flags | FLAG_CF | FLAG_OF) : (flags & ~(FLAG_CF | FLAG_OF));
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        const result = imulSignedWidth(dst, src, 32, this.readReg(REG.EFLAGS));
+        this.writeReg32ByIndex(modrmInfo.reg, result.result >>> 0);
+        this.writeReg(REG.EFLAGS, result.flags >>> 0);
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size) >>> 0);
         return true;
       }

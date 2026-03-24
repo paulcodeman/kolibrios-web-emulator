@@ -23,6 +23,8 @@ var bit_scan_last_index: u32 = 0;
 var bit_scan_last_zero: u32 = 1;
 var bit_test_last_result: u32 = 0;
 var bit_test_last_flags: u32 = 0;
+var imul_last_result: u32 = 0;
+var imul_last_flags: u32 = 0;
 
 fn shiftCount32(value: u32) u5 {
     return @intCast(value & 31);
@@ -441,6 +443,40 @@ pub export fn get_bit_test_last_result() u32 {
 
 pub export fn get_bit_test_last_flags() u32 {
     return bit_test_last_flags;
+}
+
+pub export fn imul_signed_width_exec(left: u32, right: u32, width_bits: u32, flags: u32) void {
+    const width: u32 = if (width_bits == 16) 16 else 32;
+    var product: i64 = 0;
+    if (width == 16) {
+        product = @as(i64, laneSigned16(left)) * @as(i64, laneSigned16(right));
+    } else {
+        product = @as(i64, laneSigned32(left)) * @as(i64, laneSigned32(right));
+    }
+    const product_bits: u64 = @bitCast(product);
+    if (width == 16) {
+        const low16: u16 = @truncate(product_bits);
+        imul_last_result = @as(u32, low16);
+    } else {
+        const low32: u32 = @truncate(product_bits);
+        imul_last_result = low32;
+    }
+    const overflow = if (width == 16)
+        (product < -32768 or product > 32767)
+    else
+        (product < -2147483648 or product > 2147483647);
+    imul_last_flags = flags & ~(FLAG_CF | FLAG_OF);
+    if (overflow) {
+        imul_last_flags |= FLAG_CF | FLAG_OF;
+    }
+}
+
+pub export fn get_imul_last_result() u32 {
+    return imul_last_result;
+}
+
+pub export fn get_imul_last_flags() u32 {
+    return imul_last_flags;
 }
 
 pub export fn shift_rotate_exec(value: u32, count: u32, width_bits: u32, mode: u32, flags: u32) void {

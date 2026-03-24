@@ -88,6 +88,13 @@
     };
   }
 
+  function readImulResult(exports) {
+    return {
+      result: (exports.get_imul_last_result?.() || 0) >>> 0,
+      flags: (exports.get_imul_last_flags?.() || 0) >>> 0
+    };
+  }
+
   function createWasmCpuBackend() {
     if (cache.backend) {
       return cache.backend;
@@ -111,6 +118,9 @@
       typeof exports.bit_test_modify_exec !== "function" ||
       typeof exports.get_bit_test_last_result !== "function" ||
       typeof exports.get_bit_test_last_flags !== "function" ||
+      typeof exports.imul_signed_width_exec !== "function" ||
+      typeof exports.get_imul_last_result !== "function" ||
+      typeof exports.get_imul_last_flags !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
@@ -174,6 +184,10 @@
       bitTestModify(value, bitIndex, widthBits, op, flags) {
         exports.bit_test_modify_exec(value >>> 0, bitIndex >>> 0, widthBits >>> 0, op >>> 0, flags >>> 0);
         return readBitTestResult(exports);
+      },
+      imulSignedWidth(left, right, widthBits, flags) {
+        exports.imul_signed_width_exec(left >>> 0, right >>> 0, widthBits >>> 0, flags >>> 0);
+        return readImulResult(exports);
       },
       shiftRotate(value, count, widthBits, mode, flags) {
         exports.shift_rotate_exec(value >>> 0, count >>> 0, widthBits >>> 0, mode >>> 0, flags >>> 0);
