@@ -236,6 +236,51 @@ function imulSignedWidth(left, right, widthBits, flags) {
   return imulSignedWidthJs(left, right, widthBits, flags);
 }
 
+function x87CompareCodeJs(left, right) {
+  const a = Number(left);
+  const b = Number(right);
+  if (Number.isNaN(a) || Number.isNaN(b)) {
+    return 3;
+  }
+  if (a > b) {
+    return 0;
+  }
+  if (a < b) {
+    return 1;
+  }
+  return 2;
+}
+
+function x87CompareCode(left, right) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87CompareCode === "function") {
+    return backend.x87CompareCode(Number(left), Number(right)) >>> 0;
+  }
+  return x87CompareCodeJs(left, right);
+}
+
+function shiftPacked64Js(lo, hi, count, leftShift) {
+  const shift = count >>> 0;
+  let value = (BigInt(hi >>> 0) << 32n) | BigInt(lo >>> 0);
+  if (leftShift) {
+    value = shift >= 64 ? 0n : ((value << BigInt(shift)) & 0xffffffffffffffffn);
+  } else {
+    value = shift >= 64 ? 0n : (value >> BigInt(shift));
+  }
+  return {
+    lo: Number(value & 0xffffffffn) >>> 0,
+    hi: Number((value >> 32n) & 0xffffffffn) >>> 0
+  };
+}
+
+function shiftPacked64(lo, hi, count, leftShift) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.shiftPacked64 === "function") {
+    return backend.shiftPacked64(lo >>> 0, hi >>> 0, count >>> 0, !!leftShift);
+  }
+  return shiftPacked64Js(lo, hi, count, leftShift);
+}
+
 function widthMask(widthBits) {
   if (widthBits === 8) {
     return 0xff;
@@ -759,6 +804,12 @@ function getJsCpuHelperBackend() {
       },
       imulSignedWidth(left, right, widthBits, flags) {
         return imulSignedWidthJs(left, right, widthBits, flags);
+      },
+      x87CompareCode(left, right) {
+        return x87CompareCodeJs(left, right);
+      },
+      shiftPacked64(lo, hi, count, leftShift) {
+        return shiftPacked64Js(lo, hi, count, leftShift);
       },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
@@ -2117,6 +2168,8 @@ class Emulator {
     bitScan,
     bitTestModify,
     imulSignedWidth,
+    x87CompareCode,
+    shiftPacked64,
     updateLogicFlagsWidth,
     updateAddFlags,
     updateAdcFlags,

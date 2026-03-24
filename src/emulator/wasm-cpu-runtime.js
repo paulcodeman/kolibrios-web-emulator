@@ -95,6 +95,13 @@
     };
   }
 
+  function readShiftPacked64Result(exports) {
+    return {
+      lo: (exports.get_shift_packed64_last_lo?.() || 0) >>> 0,
+      hi: (exports.get_shift_packed64_last_hi?.() || 0) >>> 0
+    };
+  }
+
   function createWasmCpuBackend() {
     if (cache.backend) {
       return cache.backend;
@@ -121,6 +128,10 @@
       typeof exports.imul_signed_width_exec !== "function" ||
       typeof exports.get_imul_last_result !== "function" ||
       typeof exports.get_imul_last_flags !== "function" ||
+      typeof exports.x87_compare_code !== "function" ||
+      typeof exports.shift_packed64_exec !== "function" ||
+      typeof exports.get_shift_packed64_last_lo !== "function" ||
+      typeof exports.get_shift_packed64_last_hi !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
@@ -188,6 +199,13 @@
       imulSignedWidth(left, right, widthBits, flags) {
         exports.imul_signed_width_exec(left >>> 0, right >>> 0, widthBits >>> 0, flags >>> 0);
         return readImulResult(exports);
+      },
+      x87CompareCode(left, right) {
+        return exports.x87_compare_code(Number(left), Number(right)) >>> 0;
+      },
+      shiftPacked64(lo, hi, count, leftShift) {
+        exports.shift_packed64_exec(lo >>> 0, hi >>> 0, count >>> 0, leftShift ? 1 : 0);
+        return readShiftPacked64Result(exports);
       },
       shiftRotate(value, count, widthBits, mode, flags) {
         exports.shift_rotate_exec(value >>> 0, count >>> 0, widthBits >>> 0, mode >>> 0, flags >>> 0);

@@ -55,6 +55,8 @@ try {
   assert(typeof wasmBackend.bitScan === "function", "wasm helper backend should expose bit scan helpers");
   assert(typeof wasmBackend.bitTestModify === "function", "wasm helper backend should expose bit test helpers");
   assert(typeof wasmBackend.imulSignedWidth === "function", "wasm helper backend should expose IMUL helpers");
+  assert(typeof wasmBackend.x87CompareCode === "function", "wasm helper backend should expose x87 compare helpers");
+  assert(typeof wasmBackend.shiftPacked64 === "function", "wasm helper backend should expose 64-bit shift helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -85,6 +87,22 @@ try {
       wasmBackend.x87StoreIntegerValue(value, true),
       jsBackend.x87StoreIntegerValue(value, true),
       `x87StoreIntegerValue(true) should match for ${String(value)}`
+    );
+  }
+
+  for (const [left, right] of [
+    [1, 0],
+    [0, 1],
+    [5, 5],
+    [Number.NaN, 1],
+    [1, Number.NaN],
+    [-0, 0],
+    [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]
+  ]) {
+    assertEq(
+      wasmBackend.x87CompareCode(left, right),
+      jsBackend.x87CompareCode(left, right),
+      `x87CompareCode should match for ${String(left)} vs ${String(right)}`
     );
   }
 
@@ -216,6 +234,18 @@ try {
         wasmBackend.imulSignedWidth(left, right, width, flags),
         jsBackend.imulSignedWidth(left, right, width, flags),
         `imulSignedWidth should match for width=${width}`
+      );
+    }
+  }
+
+  for (const count of [0, 1, 7, 8, 15, 31, 32, 33, 63, 64, 80]) {
+    const lo = nextRand();
+    const hi = nextRand();
+    for (const leftShift of [false, true]) {
+      assertDeepEq(
+        wasmBackend.shiftPacked64(lo, hi, count, leftShift),
+        jsBackend.shiftPacked64(lo, hi, count, leftShift),
+        `shiftPacked64 should match for count=${count}, left=${leftShift}`
       );
     }
   }

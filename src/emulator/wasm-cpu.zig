@@ -25,6 +25,9 @@ var bit_test_last_result: u32 = 0;
 var bit_test_last_flags: u32 = 0;
 var imul_last_result: u32 = 0;
 var imul_last_flags: u32 = 0;
+var x87_compare_last_code: u32 = 0;
+var shift_packed64_last_lo: u32 = 0;
+var shift_packed64_last_hi: u32 = 0;
 
 fn shiftCount32(value: u32) u5 {
     return @intCast(value & 31);
@@ -477,6 +480,41 @@ pub export fn get_imul_last_result() u32 {
 
 pub export fn get_imul_last_flags() u32 {
     return imul_last_flags;
+}
+
+pub export fn x87_compare_code(left: f64, right: f64) u32 {
+    if (std.math.isNan(left) or std.math.isNan(right)) {
+        x87_compare_last_code = 3;
+        return x87_compare_last_code;
+    }
+    if (left > right) {
+        x87_compare_last_code = 0;
+        return x87_compare_last_code;
+    }
+    if (left < right) {
+        x87_compare_last_code = 1;
+        return x87_compare_last_code;
+    }
+    x87_compare_last_code = 2;
+    return x87_compare_last_code;
+}
+
+pub export fn shift_packed64_exec(lo: u32, hi: u32, count: u32, left_shift: u32) void {
+    const value = (@as(u64, hi) << 32) | @as(u64, lo);
+    const shifted = if ((left_shift & 1) != 0)
+        (if (count >= 64) @as(u64, 0) else (value << @as(u6, @intCast(count))))
+    else
+        (if (count >= 64) @as(u64, 0) else (value >> @as(u6, @intCast(count))));
+    shift_packed64_last_lo = @truncate(shifted);
+    shift_packed64_last_hi = @truncate(shifted >> 32);
+}
+
+pub export fn get_shift_packed64_last_lo() u32 {
+    return shift_packed64_last_lo;
+}
+
+pub export fn get_shift_packed64_last_hi() u32 {
+    return shift_packed64_last_hi;
 }
 
 pub export fn shift_rotate_exec(value: u32, count: u32, width_bits: u32, mode: u32, flags: u32) void {

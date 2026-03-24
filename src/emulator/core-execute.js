@@ -22,6 +22,8 @@
       bitScan,
       bitTestModify,
       imulSignedWidth,
+      x87CompareCode,
+      shiftPacked64,
       updateLogicFlagsWidth,
       updateAddFlags,
       updateAdcFlags,
@@ -133,33 +135,27 @@
       },
 
       fpuCompareValues(a, b) {
-        const left = Number(a);
-        const right = Number(b);
-        if (Number.isNaN(left) || Number.isNaN(right)) {
+        const code = x87CompareCode(a, b);
+        if (code === 3) {
           this.setFpuCompareStatus(1, 1, 1);
-          return;
-        }
-        if (left > right) {
+        } else if (code === 0) {
           this.setFpuCompareStatus(0, 0, 0);
-          return;
-        }
-        if (left < right) {
+        } else if (code === 1) {
           this.setFpuCompareStatus(1, 0, 0);
-          return;
+        } else {
+          this.setFpuCompareStatus(0, 0, 1);
         }
-        this.setFpuCompareStatus(0, 0, 1);
       },
 
       setFpuCompareEflags(a, b) {
-        const left = Number(a);
-        const right = Number(b);
+        const code = x87CompareCode(a, b);
         let eflags = this.readReg(REG.EFLAGS) >>> 0;
         eflags &= ~(FLAG_CF | FLAG_AF | FLAG_PF | FLAG_ZF | FLAG_SF | FLAG_OF);
-        if (Number.isNaN(left) || Number.isNaN(right)) {
+        if (code === 3) {
           eflags |= FLAG_CF | FLAG_PF | FLAG_ZF;
-        } else if (left < right) {
+        } else if (code === 1) {
           eflags |= FLAG_CF;
-        } else if (left === right) {
+        } else if (code === 2) {
           eflags |= FLAG_ZF;
         }
         this.writeReg(REG.EFLAGS, eflags >>> 0);
@@ -1902,16 +1898,9 @@
             for (let lane = 0; lane < 2; lane += 1) {
               const lo = this.readXmmU32(regIdx, lane * 2) >>> 0;
               const hi = this.readXmmU32(regIdx, lane * 2 + 1) >>> 0;
-              let v = (BigInt(hi) << 32n) | BigInt(lo);
-              if (regField === 2) {
-                v = shift >= 64 ? 0n : (v >> BigInt(shift));
-              } else {
-                v = shift >= 64 ? 0n : ((v << BigInt(shift)) & 0xffffffffffffffffn);
-              }
-              const nlo = Number(v & 0xffffffffn) >>> 0;
-              const nhi = Number((v >> 32n) & 0xffffffffn) >>> 0;
-              this.writeXmmU32(regIdx, lane * 2, nlo);
-              this.writeXmmU32(regIdx, lane * 2 + 1, nhi);
+              const shifted = shiftPacked64(lo, hi, shift, regField === 6);
+              this.writeXmmU32(regIdx, lane * 2, shifted.lo >>> 0);
+              this.writeXmmU32(regIdx, lane * 2 + 1, shifted.hi >>> 0);
             }
           } else {
             return false;
@@ -6503,17 +6492,11 @@
           return true;
         }
         const count = imm & 0x3f;
-        let v = (BigInt(mm.hi >>> 0) << 32n) | BigInt(mm.lo >>> 0);
-        if (regField === 2) {
-          v = count >= 64 ? 0n : (v >> BigInt(count));
-        } else if (regField === 6 || regField === 7) {
-          v = count >= 64 ? 0n : ((v << BigInt(count)) & 0xffffffffffffffffn);
-        } else {
+        if (regField !== 2 && regField !== 6 && regField !== 7) {
           return false;
         }
-        const lo = Number(v & 0xffffffffn) >>> 0;
-        const hi = Number((v >> 32n) & 0xffffffffn) >>> 0;
-        this.writeMmx(idx, lo, hi);
+        const shifted = shiftPacked64(mm.lo >>> 0, mm.hi >>> 0, count, regField !== 2);
+        this.writeMmx(idx, shifted.lo >>> 0, shifted.hi >>> 0);
         this.writeReg(REG.EIP, (addr + 3 + modrmInfo.size) >>> 0);
         return true;
       }
