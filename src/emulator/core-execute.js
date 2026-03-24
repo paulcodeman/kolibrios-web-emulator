@@ -19,6 +19,8 @@
       x87StoreIntegerValue,
       x87PackedBcdToNumber,
       x87NumberToPackedBcd,
+      bitScan,
+      bitTestModify,
       updateLogicFlagsWidth,
       updateAddFlags,
       updateAdcFlags,
@@ -1382,13 +1384,10 @@
           }
           const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
           const bitIndex = this.readReg16ByIndex(modrmInfo.reg) & 0xffff;
-          const bit = bitIndex & 15;
-          let bitVal = 0;
           let value = 0;
           let ea = 0;
           if (modrmInfo.mod === 3) {
             value = this.readReg16ByIndex(modrmInfo.rm) & 0xffff;
-            bitVal = (value >>> bit) & 1;
           } else {
             const base = this.calcEffectiveAddress(modrmInfo);
             if (base === null) {
@@ -1397,26 +1396,18 @@
             const wordOffset = (bitIndex >>> 4) >>> 0;
             ea = (base + (wordOffset * 2)) >>> 0;
             value = this.readMem16(ea) & 0xffff;
-            bitVal = (value >>> bit) & 1;
           }
-          let flags = this.readReg(REG.EFLAGS);
-          flags = (flags & ~FLAG_CF) | (bitVal ? FLAG_CF : 0);
-          if (op3 !== 0xa3) {
-            let nextVal = value & 0xffff;
-            if (op3 === 0xab) {
-              nextVal = (value | (1 << bit)) & 0xffff;
-            } else if (op3 === 0xb3) {
-              nextVal = (value & ~(1 << bit)) & 0xffff;
-            } else if (op3 === 0xbb) {
-              nextVal = (value ^ (1 << bit)) & 0xffff;
-            }
+          const op = op3 === 0xa3 ? 4 : (op3 === 0xab ? 5 : (op3 === 0xb3 ? 6 : 7));
+          const result = bitTestModify(value, bitIndex, 16, op, this.readReg(REG.EFLAGS));
+          if (op !== 4) {
+            const nextVal = result.result & 0xffff;
             if (modrmInfo.mod === 3) {
               this.writeReg16ByIndex(modrmInfo.rm, nextVal & 0xffff);
             } else {
               this.writeMem16(ea >>> 0, nextVal & 0xffff);
             }
           }
-          this.writeReg(REG.EFLAGS, flags >>> 0);
+          this.writeReg(REG.EFLAGS, result.flags >>> 0);
           this.writeReg(REG.EIP, (addr + 3 + modrmInfo.size) >>> 0);
           return true;
         }
@@ -1944,7 +1935,6 @@
           const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
           const imm = bytes[2 + modrmInfo.size] & 0xff;
           const bitIndex = imm & 0xff;
-          const bit = bitIndex & 15;
           let value = 0;
           let ea = 0;
           if (modrmInfo.mod === 3) {
@@ -1958,32 +1948,24 @@
             ea = (base + (wordOffset * 2)) >>> 0;
             value = this.readMem16(ea) & 0xffff;
           }
-          const bitVal = (value >>> bit) & 1;
-          let flags = this.readReg(REG.EFLAGS);
-          flags = (flags & ~FLAG_CF) | (bitVal ? FLAG_CF : 0);
           const op = modrmInfo.reg & 7;
-          let nextVal = value & 0xffff;
-          if (op === 5) {
-            nextVal = (value | (1 << bit)) & 0xffff;
-          } else if (op === 6) {
-            nextVal = (value & ~(1 << bit)) & 0xffff;
-          } else if (op === 7) {
-            nextVal = (value ^ (1 << bit)) & 0xffff;
-          } else if (op !== 4) {
+          if (op !== 4 && op !== 5 && op !== 6 && op !== 7) {
             return stopInterpreterFault(
               this,
               "invalid-opcode",
               `Invalid 66 0F BA /${op} opcode at 0x${(addr >>> 0).toString(16)}`
             );
           }
+          const result = bitTestModify(value, bitIndex, 16, op, this.readReg(REG.EFLAGS));
           if (op !== 4) {
+            const nextVal = result.result & 0xffff;
             if (modrmInfo.mod === 3) {
               this.writeReg16ByIndex(modrmInfo.rm, nextVal & 0xffff);
             } else {
               this.writeMem16(ea, nextVal & 0xffff);
             }
           }
-          this.writeReg(REG.EFLAGS, flags >>> 0);
+          this.writeReg(REG.EFLAGS, result.flags >>> 0);
           this.writeReg(REG.EIP, (addr + 4 + modrmInfo.size) >>> 0);
           return true;
         }
@@ -5991,18 +5973,12 @@
           src = this.readMem32(ea) >>> 0;
         }
         let flags = this.readReg(REG.EFLAGS);
-        if (src === 0) {
+        const scan = bitScan(src, op2 === 0xbd, 32);
+        if (scan.zero) {
           flags |= FLAG_ZF;
         } else {
           flags &= ~FLAG_ZF;
-          let index = 0;
-          if (op2 === 0xbc) {
-            const lsb = (src & -src) >>> 0;
-            index = 31 - Math.clz32(lsb);
-          } else {
-            index = 31 - Math.clz32(src);
-          }
-          this.writeReg32ByIndex(modrmInfo.reg, index >>> 0);
+          this.writeReg32ByIndex(modrmInfo.reg, scan.index >>> 0);
         }
         this.writeReg(REG.EFLAGS, flags >>> 0);
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size) >>> 0);
@@ -6024,13 +6000,10 @@
         }
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const bitIndex = this.readReg32ByIndex(modrmInfo.reg) >>> 0;
-        const bit = bitIndex & 31;
-        let bitVal = 0;
         let value = 0;
         let ea = 0;
         if (modrmInfo.mod === 3) {
           value = this.readReg32ByIndex(modrmInfo.rm) >>> 0;
-          bitVal = (value >>> bit) & 1;
         } else {
           const base = this.calcEffectiveAddress(modrmInfo);
           if (base === null) {
@@ -6039,26 +6012,18 @@
           const wordOffset = bitIndex >>> 5;
           ea = (base + (wordOffset * 4)) >>> 0;
           value = this.readMem32(ea) >>> 0;
-          bitVal = (value >>> bit) & 1;
         }
-        let flags = this.readReg(REG.EFLAGS);
-        flags = (flags & ~FLAG_CF) | (bitVal ? FLAG_CF : 0);
-        if (op2 !== 0xa3) {
-          let nextVal = value >>> 0;
-          if (op2 === 0xab) {
-            nextVal = (value | (1 << bit)) >>> 0;
-          } else if (op2 === 0xb3) {
-            nextVal = (value & ~(1 << bit)) >>> 0;
-          } else if (op2 === 0xbb) {
-            nextVal = (value ^ (1 << bit)) >>> 0;
-          }
+        const op = op2 === 0xa3 ? 4 : (op2 === 0xab ? 5 : (op2 === 0xb3 ? 6 : 7));
+        const result = bitTestModify(value, bitIndex, 32, op, this.readReg(REG.EFLAGS));
+        if (op !== 4) {
+          const nextVal = result.result >>> 0;
           if (modrmInfo.mod === 3) {
             this.writeReg32ByIndex(modrmInfo.rm, nextVal >>> 0);
           } else {
             this.writeMem32(ea >>> 0, nextVal >>> 0);
           }
         }
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        this.writeReg(REG.EFLAGS, result.flags >>> 0);
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size) >>> 0);
         return true;
       }
@@ -6070,7 +6035,6 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const imm = bytes[2 + modrmInfo.size] & 0xff;
         const bitIndex = imm & 0xff;
-        const bit = bitIndex & 31;
         let value = 0;
         let ea = 0;
         if (modrmInfo.mod === 3) {
@@ -6084,32 +6048,24 @@
           ea = (base + (wordOffset * 4)) >>> 0;
           value = this.readMem32(ea);
         }
-        const bitVal = (value >>> bit) & 1;
-        let flags = this.readReg(REG.EFLAGS);
-        flags = (flags & ~FLAG_CF) | (bitVal ? FLAG_CF : 0);
         const op = modrmInfo.reg & 7;
-        let nextVal = value >>> 0;
-        if (op === 5) {
-          nextVal = (value | (1 << bit)) >>> 0;
-        } else if (op === 6) {
-          nextVal = (value & ~(1 << bit)) >>> 0;
-        } else if (op === 7) {
-          nextVal = (value ^ (1 << bit)) >>> 0;
-        } else if (op !== 4) {
+        if (op !== 4 && op !== 5 && op !== 6 && op !== 7) {
           return stopInterpreterFault(
             this,
             "invalid-opcode",
             `Invalid 0F BA /${op} opcode at 0x${(addr >>> 0).toString(16)}`
           );
         }
+        const result = bitTestModify(value, bitIndex, 32, op, this.readReg(REG.EFLAGS));
         if (op !== 4) {
+          const nextVal = result.result >>> 0;
           if (modrmInfo.mod === 3) {
             this.writeReg32ByIndex(modrmInfo.rm, nextVal >>> 0);
           } else {
             this.writeMem32(ea, nextVal >>> 0);
           }
         }
-        this.writeReg(REG.EFLAGS, flags >>> 0);
+        this.writeReg(REG.EFLAGS, result.flags >>> 0);
         this.writeReg(REG.EIP, (addr + 3 + modrmInfo.size) >>> 0);
         return true;
       }

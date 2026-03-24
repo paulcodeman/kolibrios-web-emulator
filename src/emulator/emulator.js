@@ -150,6 +150,61 @@ function x87NumberToPackedBcd(value) {
   return x87NumberToPackedBcdJs(value);
 }
 
+function bitScanJs(value, reverse, widthBits) {
+  const src = widthValueUnsigned(value >>> 0, widthBits >>> 0);
+  if (src === 0) {
+    return { zero: true, index: 0 };
+  }
+  if (reverse) {
+    return { zero: false, index: (31 - Math.clz32(src)) >>> 0 };
+  }
+  const lsb = (src & -src) >>> 0;
+  return { zero: false, index: (31 - Math.clz32(lsb)) >>> 0 };
+}
+
+function bitScan(value, reverse, widthBits) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.bitScan === "function") {
+    return backend.bitScan(value >>> 0, !!reverse, widthBits >>> 0);
+  }
+  return bitScanJs(value, reverse, widthBits);
+}
+
+function bitTestModifyJs(value, bitIndex, widthBits, op, flags) {
+  const width = (widthBits >>> 0) === 16 ? 16 : 32;
+  const src = widthValueUnsigned(value >>> 0, width);
+  const bit = width === 16 ? (bitIndex & 15) : (bitIndex & 31);
+  const bitMask = (1 << bit) >>> 0;
+  const bitValue = (src & bitMask) !== 0 ? 1 : 0;
+  let next = flags >>> 0;
+  next = (next & ~FLAG_CF) | (bitValue ? FLAG_CF : 0);
+  let result = src >>> 0;
+  switch (op & 7) {
+    case 4:
+      break;
+    case 5:
+      result = (src | bitMask) >>> 0;
+      break;
+    case 6:
+      result = (src & ~bitMask) >>> 0;
+      break;
+    case 7:
+      result = (src ^ bitMask) >>> 0;
+      break;
+    default:
+      break;
+  }
+  return { result: widthValueUnsigned(result, width) >>> 0, flags: next >>> 0 };
+}
+
+function bitTestModify(value, bitIndex, widthBits, op, flags) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.bitTestModify === "function") {
+    return backend.bitTestModify(value >>> 0, bitIndex >>> 0, widthBits >>> 0, op >>> 0, flags >>> 0);
+  }
+  return bitTestModifyJs(value, bitIndex, widthBits, op, flags);
+}
+
 function widthMask(widthBits) {
   if (widthBits === 8) {
     return 0xff;
@@ -664,6 +719,12 @@ function getJsCpuHelperBackend() {
       },
       x87NumberToPackedBcd(value) {
         return x87NumberToPackedBcdJs(value);
+      },
+      bitScan(value, reverse, widthBits) {
+        return bitScanJs(value, reverse, widthBits);
+      },
+      bitTestModify(value, bitIndex, widthBits, op, flags) {
+        return bitTestModifyJs(value, bitIndex, widthBits, op, flags);
       },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
@@ -2019,6 +2080,8 @@ class Emulator {
     x87StoreIntegerValue,
     x87PackedBcdToNumber,
     x87NumberToPackedBcd,
+    bitScan,
+    bitTestModify,
     updateLogicFlagsWidth,
     updateAddFlags,
     updateAdcFlags,

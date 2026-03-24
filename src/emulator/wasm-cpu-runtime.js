@@ -74,6 +74,20 @@
     return out;
   }
 
+  function readBitScanResult(exports) {
+    return {
+      zero: !!exports.get_bit_scan_last_zero?.(),
+      index: (exports.get_bit_scan_last_index?.() || 0) >>> 0
+    };
+  }
+
+  function readBitTestResult(exports) {
+    return {
+      result: (exports.get_bit_test_last_result?.() || 0) >>> 0,
+      flags: (exports.get_bit_test_last_flags?.() || 0) >>> 0
+    };
+  }
+
   function createWasmCpuBackend() {
     if (cache.backend) {
       return cache.backend;
@@ -91,6 +105,12 @@
       typeof exports.update_sub_flags !== "function" ||
       typeof exports.update_sbb_flags !== "function" ||
       typeof exports.eval_jcc_condition !== "function" ||
+      typeof exports.bit_scan_exec !== "function" ||
+      typeof exports.get_bit_scan_last_index !== "function" ||
+      typeof exports.get_bit_scan_last_zero !== "function" ||
+      typeof exports.bit_test_modify_exec !== "function" ||
+      typeof exports.get_bit_test_last_result !== "function" ||
+      typeof exports.get_bit_test_last_flags !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
@@ -146,6 +166,14 @@
       },
       evalJccCondition(cc, flags) {
         return !!exports.eval_jcc_condition(cc >>> 0, flags >>> 0);
+      },
+      bitScan(value, reverse, widthBits) {
+        exports.bit_scan_exec(value >>> 0, reverse ? 1 : 0, widthBits >>> 0);
+        return readBitScanResult(exports);
+      },
+      bitTestModify(value, bitIndex, widthBits, op, flags) {
+        exports.bit_test_modify_exec(value >>> 0, bitIndex >>> 0, widthBits >>> 0, op >>> 0, flags >>> 0);
+        return readBitTestResult(exports);
       },
       shiftRotate(value, count, widthBits, mode, flags) {
         exports.shift_rotate_exec(value >>> 0, count >>> 0, widthBits >>> 0, mode >>> 0, flags >>> 0);

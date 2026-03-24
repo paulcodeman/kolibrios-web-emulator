@@ -19,6 +19,10 @@ var double_shift_last_ok: u32 = 0;
 var packed64_last_lo: u32 = 0;
 var packed64_last_hi: u32 = 0;
 var packed_bcd_last: [10]u8 = [_]u8{0} ** 10;
+var bit_scan_last_index: u32 = 0;
+var bit_scan_last_zero: u32 = 1;
+var bit_test_last_result: u32 = 0;
+var bit_test_last_flags: u32 = 0;
 
 fn shiftCount32(value: u32) u5 {
     return @intCast(value & 31);
@@ -382,6 +386,61 @@ pub export fn eval_jcc_condition(cc: u32, flags: u32) u32 {
         else => false,
     };
     return if (take) 1 else 0;
+}
+
+pub export fn bit_scan_exec(value: u32, reverse: u32, width_bits: u32) void {
+    const src = widthValueUnsigned(value, width_bits);
+    if (src == 0) {
+        bit_scan_last_index = 0;
+        bit_scan_last_zero = 1;
+        return;
+    }
+    bit_scan_last_zero = 0;
+    if ((reverse & 1) != 0) {
+        bit_scan_last_index = 31 - @as(u32, @intCast(@clz(src)));
+    } else {
+        bit_scan_last_index = @as(u32, @intCast(@ctz(src)));
+    }
+}
+
+pub export fn get_bit_scan_last_index() u32 {
+    return bit_scan_last_index;
+}
+
+pub export fn get_bit_scan_last_zero() u32 {
+    return bit_scan_last_zero;
+}
+
+pub export fn bit_test_modify_exec(value: u32, bit_index: u32, width_bits: u32, op: u32, flags: u32) void {
+    const width: u32 = if (width_bits == 16) 16 else 32;
+    const src = widthValueUnsigned(value, width);
+    const bit: u32 = if (width == 16) (bit_index & 15) else (bit_index & 31);
+    const bit_mask = shl32(@as(u32, 1), bit);
+    const bit_value = if ((src & bit_mask) != 0) @as(u32, 1) else @as(u32, 0);
+    bit_test_last_flags = (flags & ~FLAG_CF) | (if (bit_value != 0) FLAG_CF else @as(u32, 0));
+    bit_test_last_result = src;
+    switch (op & 7) {
+        4 => {},
+        5 => {
+            bit_test_last_result = src | bit_mask;
+        },
+        6 => {
+            bit_test_last_result = src & ~bit_mask;
+        },
+        7 => {
+            bit_test_last_result = src ^ bit_mask;
+        },
+        else => {},
+    }
+    bit_test_last_result = widthValueUnsigned(bit_test_last_result, width);
+}
+
+pub export fn get_bit_test_last_result() u32 {
+    return bit_test_last_result;
+}
+
+pub export fn get_bit_test_last_flags() u32 {
+    return bit_test_last_flags;
 }
 
 pub export fn shift_rotate_exec(value: u32, count: u32, width_bits: u32, mode: u32, flags: u32) void {

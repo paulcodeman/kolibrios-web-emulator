@@ -52,6 +52,8 @@ try {
   assert(typeof wasmBackend.roundTiesToEven === "function", "wasm helper backend should expose x87 helpers");
   assert(typeof wasmBackend.evalJccCondition === "function", "wasm helper backend should expose Jcc helpers");
   assert(typeof wasmBackend.x87PackedBcdToNumber === "function", "wasm helper backend should expose packed BCD helpers");
+  assert(typeof wasmBackend.bitScan === "function", "wasm helper backend should expose bit scan helpers");
+  assert(typeof wasmBackend.bitTestModify === "function", "wasm helper backend should expose bit test helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -166,6 +168,42 @@ try {
       jsBackend.evalJccCondition(cc, flags),
       `evalJccCondition should match for random cc=${cc}, flags=0x${flags.toString(16)}`
     );
+  }
+
+  for (const width of [16, 32]) {
+    for (const value of [0, 1, 2, 0x10, 0x8000, 0x80000000, 0xffffffff]) {
+      for (const reverse of [false, true]) {
+        assertDeepEq(
+          wasmBackend.bitScan(value, reverse, width),
+          jsBackend.bitScan(value, reverse, width),
+          `bitScan should match for width=${width}, reverse=${reverse}, value=0x${(value >>> 0).toString(16)}`
+        );
+      }
+    }
+    for (let i = 0; i < 120; i += 1) {
+      const value = nextRand();
+      const reverse = (nextRand() & 1) !== 0;
+      assertDeepEq(
+        wasmBackend.bitScan(value, reverse, width),
+        jsBackend.bitScan(value, reverse, width),
+        `bitScan should match for random width=${width}, reverse=${reverse}`
+      );
+    }
+  }
+
+  for (const width of [16, 32]) {
+    for (const op of [4, 5, 6, 7]) {
+      for (let i = 0; i < 160; i += 1) {
+        const value = nextRand();
+        const bitIndex = nextRand();
+        const flags = nextRand();
+        assertDeepEq(
+          wasmBackend.bitTestModify(value, bitIndex, width, op, flags),
+          jsBackend.bitTestModify(value, bitIndex, width, op, flags),
+          `bitTestModify should match for width=${width}, op=${op}`
+        );
+      }
+    }
   }
 
   for (let i = 0; i < 120; i += 1) {
