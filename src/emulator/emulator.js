@@ -585,6 +585,133 @@ function sseCompareCode(left, right) {
   return sseCompareCodeJs(left, right) >>> 0;
 }
 
+const float32BitcastBuffer = new ArrayBuffer(4);
+const float32BitcastF32 = new Float32Array(float32BitcastBuffer);
+const float32BitcastU32 = new Uint32Array(float32BitcastBuffer);
+
+function f32BitsToNumber(value) {
+  float32BitcastU32[0] = value >>> 0;
+  return float32BitcastF32[0];
+}
+
+function numberToF32Bits(value) {
+  float32BitcastF32[0] = Math.fround(Number(value));
+  return float32BitcastU32[0] >>> 0;
+}
+
+function sseUnaryFloat32x4Js(v0, v1, v2, v3, op) {
+  const apply = op === 0
+    ? sseSqrtJs
+    : (op === 1 ? sseReciprocalJs : sseReciprocalSqrtJs);
+  return [
+    numberToF32Bits(apply(f32BitsToNumber(v0))),
+    numberToF32Bits(apply(f32BitsToNumber(v1))),
+    numberToF32Bits(apply(f32BitsToNumber(v2))),
+    numberToF32Bits(apply(f32BitsToNumber(v3)))
+  ];
+}
+
+function sseUnaryFloat32x4(v0, v1, v2, v3, op) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.sseUnaryFloat32x4 === "function") {
+    return backend.sseUnaryFloat32x4(
+      v0 >>> 0,
+      v1 >>> 0,
+      v2 >>> 0,
+      v3 >>> 0,
+      op >>> 0
+    );
+  }
+  return sseUnaryFloat32x4Js(v0, v1, v2, v3, op);
+}
+
+function sseBinaryFloat32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) {
+  return [
+    numberToF32Bits(sseBinaryFloatJs(f32BitsToNumber(dst0), f32BitsToNumber(src0), op)),
+    numberToF32Bits(sseBinaryFloatJs(f32BitsToNumber(dst1), f32BitsToNumber(src1), op)),
+    numberToF32Bits(sseBinaryFloatJs(f32BitsToNumber(dst2), f32BitsToNumber(src2), op)),
+    numberToF32Bits(sseBinaryFloatJs(f32BitsToNumber(dst3), f32BitsToNumber(src3), op))
+  ];
+}
+
+function sseBinaryFloat32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.sseBinaryFloat32x4 === "function") {
+    return backend.sseBinaryFloat32x4(
+      dst0 >>> 0,
+      dst1 >>> 0,
+      dst2 >>> 0,
+      dst3 >>> 0,
+      src0 >>> 0,
+      src1 >>> 0,
+      src2 >>> 0,
+      src3 >>> 0,
+      op >>> 0
+    );
+  }
+  return sseBinaryFloat32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op);
+}
+
+function sseCompare32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
+  const predicate = imm & 7;
+  const out = [0, 0, 0, 0];
+  const left = [dst0, dst1, dst2, dst3];
+  const right = [src0, src1, src2, src3];
+  for (let i = 0; i < 4; i += 1) {
+    const code = sseCompareCodeJs(f32BitsToNumber(left[i]), f32BitsToNumber(right[i]));
+    const unordered = code === 3;
+    let ok = false;
+    switch (predicate) {
+      case 0: ok = code === 2; break;
+      case 1: ok = code === 1; break;
+      case 2: ok = code === 1 || code === 2; break;
+      case 3: ok = unordered; break;
+      case 4: ok = unordered || code !== 2; break;
+      case 5: ok = unordered || code === 0 || code === 2; break;
+      case 6: ok = unordered || code === 0; break;
+      case 7: ok = !unordered; break;
+      default: ok = false; break;
+    }
+    out[i] = ok ? 0xffffffff : 0;
+  }
+  return out;
+}
+
+function sseCompare32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.sseCompare32x4 === "function") {
+    return backend.sseCompare32x4(
+      dst0 >>> 0,
+      dst1 >>> 0,
+      dst2 >>> 0,
+      dst3 >>> 0,
+      src0 >>> 0,
+      src1 >>> 0,
+      src2 >>> 0,
+      src3 >>> 0,
+      imm >>> 0
+    );
+  }
+  return sseCompare32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm);
+}
+
+function cvtdq2ps32x4Js(v0, v1, v2, v3) {
+  return [
+    numberToF32Bits(v0 | 0),
+    numberToF32Bits(v1 | 0),
+    numberToF32Bits(v2 | 0),
+    numberToF32Bits(v3 | 0)
+  ];
+}
+
+function cvtdq2ps32x4(v0, v1, v2, v3) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.cvtdq2ps32x4 === "function") {
+    return backend.cvtdq2ps32x4(v0 >>> 0, v1 >>> 0, v2 >>> 0, v3 >>> 0);
+  }
+  return cvtdq2ps32x4Js(v0, v1, v2, v3);
+}
+
 function widthMask(widthBits) {
   if (widthBits === 8) {
     return 0xff;
@@ -1227,6 +1354,18 @@ function getJsCpuHelperBackend() {
       sseCompareCode(left, right) {
         return sseCompareCodeJs(left, right);
       },
+      sseUnaryFloat32x4(v0, v1, v2, v3, op) {
+        return sseUnaryFloat32x4Js(v0, v1, v2, v3, op);
+      },
+      sseBinaryFloat32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) {
+        return sseBinaryFloat32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op);
+      },
+      sseCompare32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
+        return sseCompare32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm);
+      },
+      cvtdq2ps32x4(v0, v1, v2, v3) {
+        return cvtdq2ps32x4Js(v0, v1, v2, v3);
+      },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
       },
@@ -1331,6 +1470,15 @@ function getJsCpuHelperBackend() {
       },
       shufps32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
         return shufps32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm);
+      },
+      bswap32(value) {
+        return bswap32Js(value);
+      },
+      xaddWidth(dst, src, widthBits, flags) {
+        return xaddWidthJs(dst, src, widthBits, flags);
+      },
+      cmpxchgWidth(accumulator, source, replacement, widthBits, flags) {
+        return cmpxchgWidthJs(accumulator, source, replacement, widthBits, flags);
       },
       evalJccCondition(cc, flags) {
         return evalJccConditionJs(cc, flags);
@@ -1919,6 +2067,73 @@ function evalJccCondition(cc, flags) {
     return !!backend.evalJccCondition(cc >>> 0, flags >>> 0);
   }
   return evalJccConditionJs(cc, flags);
+}
+
+function bswap32Js(value) {
+  const v = value >>> 0;
+  return (
+    ((v & 0xff) << 24) |
+    ((v & 0xff00) << 8) |
+    ((v >>> 8) & 0xff00) |
+    ((v >>> 24) & 0xff)
+  ) >>> 0;
+}
+
+function bswap32(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.bswap32 === "function") {
+    return backend.bswap32(value >>> 0) >>> 0;
+  }
+  return bswap32Js(value);
+}
+
+function xaddWidthJs(dst, src, widthBits, flags) {
+  const width = widthBits === 8 ? 8 : (widthBits === 16 ? 16 : 32);
+  const originalDst = widthValueUnsigned(dst, width);
+  const originalSrc = widthValueUnsigned(src, width);
+  const alu = aluBinaryWidthJs(0, originalDst, originalSrc, width, flags >>> 0);
+  return {
+    dst: widthValueUnsigned(alu.result, width),
+    src: originalDst,
+    flags: alu.flags >>> 0
+  };
+}
+
+function xaddWidth(dst, src, widthBits, flags) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.xaddWidth === "function") {
+    return backend.xaddWidth(dst >>> 0, src >>> 0, widthBits >>> 0, flags >>> 0);
+  }
+  return xaddWidthJs(dst, src, widthBits, flags);
+}
+
+function cmpxchgWidthJs(accumulator, source, replacement, widthBits, flags) {
+  const width = widthBits === 8 ? 8 : (widthBits === 16 ? 16 : 32);
+  const acc = widthValueUnsigned(accumulator, width);
+  const src = widthValueUnsigned(source, width);
+  const repl = widthValueUnsigned(replacement, width);
+  const cmp = aluBinaryWidthJs(7, acc, src, width, flags >>> 0);
+  const exchanged = acc === src;
+  return {
+    result: exchanged ? repl : src,
+    accumulator: exchanged ? acc : src,
+    exchanged,
+    flags: cmp.flags >>> 0
+  };
+}
+
+function cmpxchgWidth(accumulator, source, replacement, widthBits, flags) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.cmpxchgWidth === "function") {
+    return backend.cmpxchgWidth(
+      accumulator >>> 0,
+      source >>> 0,
+      replacement >>> 0,
+      widthBits >>> 0,
+      flags >>> 0
+    );
+  }
+  return cmpxchgWidthJs(accumulator, source, replacement, widthBits, flags);
 }
 
 function normalizeCpuBackendMode(mode) {
@@ -2819,6 +3034,10 @@ class Emulator {
     sseReciprocalSqrt,
     sseBinaryFloat,
     sseCompareCode,
+    sseUnaryFloat32x4,
+    sseBinaryFloat32x4,
+    sseCompare32x4,
+    cvtdq2ps32x4,
     updateLogicFlagsWidth,
     updateAddFlags,
     updateAdcFlags,
@@ -2854,6 +3073,9 @@ class Emulator {
     movmskBytes128,
     movmskFloat32x4,
     shufps32x4,
+    bswap32,
+    xaddWidth,
+    cmpxchgWidth,
     matchBytes,
     FAST_LOOP_SHADE,
     FAST_LOOP_MAX,

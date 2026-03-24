@@ -28,6 +28,13 @@ var imul_last_result: u32 = 0;
 var imul_last_flags: u32 = 0;
 var alu_last_result: u32 = 0;
 var alu_last_flags: u32 = 0;
+var xadd_last_dst: u32 = 0;
+var xadd_last_src: u32 = 0;
+var xadd_last_flags: u32 = 0;
+var cmpxchg_last_result: u32 = 0;
+var cmpxchg_last_accumulator: u32 = 0;
+var cmpxchg_last_flags: u32 = 0;
+var cmpxchg_last_exchanged: u32 = 0;
 var x87_compare_last_code: u32 = 0;
 var shift_packed64_last_lo: u32 = 0;
 var shift_packed64_last_hi: u32 = 0;
@@ -461,6 +468,77 @@ pub export fn get_alu_last_flags() u32 {
     return alu_last_flags;
 }
 
+pub export fn bswap32(value: u32) u32 {
+    return @byteSwap(value);
+}
+
+pub export fn xadd_width_exec(dst: u32, src: u32, width_bits: u32, flags: u32) void {
+    const width: u32 = switch (width_bits) {
+        8 => 8,
+        16 => 16,
+        else => 32,
+    };
+    const mask = widthMask(width);
+    const left = widthValueUnsigned(dst, width);
+    const right = widthValueUnsigned(src, width);
+    const result = if (width == 32)
+        left +% right
+    else
+        ((left +% right) & mask);
+    xadd_last_dst = widthValueUnsigned(result, width);
+    xadd_last_src = left;
+    xadd_last_flags = update_add_flags(flags, left, right, result, width);
+}
+
+pub export fn get_xadd_last_dst() u32 {
+    return xadd_last_dst;
+}
+
+pub export fn get_xadd_last_src() u32 {
+    return xadd_last_src;
+}
+
+pub export fn get_xadd_last_flags() u32 {
+    return xadd_last_flags;
+}
+
+pub export fn cmpxchg_width_exec(accumulator: u32, source: u32, replacement: u32, width_bits: u32, flags: u32) void {
+    const width: u32 = switch (width_bits) {
+        8 => 8,
+        16 => 16,
+        else => 32,
+    };
+    const mask = widthMask(width);
+    const acc = widthValueUnsigned(accumulator, width);
+    const src = widthValueUnsigned(source, width);
+    const repl = widthValueUnsigned(replacement, width);
+    const cmp_result = if (width == 32)
+        acc -% src
+    else
+        ((acc -% src) & mask);
+    const exchanged = acc == src;
+    cmpxchg_last_result = if (exchanged) repl else src;
+    cmpxchg_last_accumulator = if (exchanged) acc else src;
+    cmpxchg_last_flags = update_sub_flags(flags, acc, src, cmp_result, width);
+    cmpxchg_last_exchanged = if (exchanged) 1 else 0;
+}
+
+pub export fn get_cmpxchg_last_result() u32 {
+    return cmpxchg_last_result;
+}
+
+pub export fn get_cmpxchg_last_accumulator() u32 {
+    return cmpxchg_last_accumulator;
+}
+
+pub export fn get_cmpxchg_last_flags() u32 {
+    return cmpxchg_last_flags;
+}
+
+pub export fn get_cmpxchg_last_exchanged() u32 {
+    return cmpxchg_last_exchanged;
+}
+
 pub export fn eval_jcc_condition(cc: u32, flags: u32) u32 {
     const of = (flags & FLAG_OF) != 0;
     const cf = (flags & FLAG_CF) != 0;
@@ -846,6 +924,166 @@ pub export fn sse_compare_code(left: f64, right: f64) u32 {
         return 2;
     }
     return if (left < right) 1 else 0;
+}
+
+fn bitsToF32(value: u32) f32 {
+    return @bitCast(value);
+}
+
+fn f32ToBits(value: f32) u32 {
+    return @bitCast(value);
+}
+
+fn sseBinaryFloat32Impl(left: f32, right: f32, op: u32) f32 {
+    switch (op & 7) {
+        0 => return left + right,
+        1 => return left - right,
+        2 => return left * right,
+        3 => return left / right,
+        4 => {
+            if (std.math.isNan(left) or std.math.isNan(right)) {
+                return std.math.nan(f32);
+            }
+            if (left < right) {
+                return left;
+            }
+            if (right < left) {
+                return right;
+            }
+            if (left == 0.0 and right == 0.0) {
+                return if (std.math.signbit(left) or std.math.signbit(right)) -0.0 else 0.0;
+            }
+            return left;
+        },
+        5 => {
+            if (std.math.isNan(left) or std.math.isNan(right)) {
+                return std.math.nan(f32);
+            }
+            if (left > right) {
+                return left;
+            }
+            if (right > left) {
+                return right;
+            }
+            if (left == 0.0 and right == 0.0) {
+                return if (std.math.signbit(left) and std.math.signbit(right)) -0.0 else 0.0;
+            }
+            return left;
+        },
+        else => return std.math.nan(f32),
+    }
+}
+
+fn sseCompareCode32(left: f32, right: f32) u32 {
+    if (!std.math.isFinite(left) or !std.math.isFinite(right)) {
+        return 3;
+    }
+    if (left == right) {
+        return 2;
+    }
+    return if (left < right) 1 else 0;
+}
+
+fn sseComparePredicate(code: u32, predicate: u32) bool {
+    const unordered = code == 3;
+    return switch (predicate & 7) {
+        0 => code == 2,
+        1 => code == 1,
+        2 => code == 1 or code == 2,
+        3 => unordered,
+        4 => unordered or code != 2,
+        5 => unordered or code == 0 or code == 2,
+        6 => unordered or code == 0,
+        7 => !unordered,
+        else => false,
+    };
+}
+
+pub export fn sse_unary_float32x4_exec(v0: u32, v1: u32, v2: u32, v3: u32, op: u32) void {
+    const a0 = bitsToF32(v0);
+    const a1 = bitsToF32(v1);
+    const a2 = bitsToF32(v2);
+    const a3 = bitsToF32(v3);
+    const r0: f32 = switch (op & 3) {
+        0 => @sqrt(a0),
+        1 => 1.0 / a0,
+        2 => 1.0 / @sqrt(a0),
+        else => std.math.nan(f32),
+    };
+    const r1: f32 = switch (op & 3) {
+        0 => @sqrt(a1),
+        1 => 1.0 / a1,
+        2 => 1.0 / @sqrt(a1),
+        else => std.math.nan(f32),
+    };
+    const r2: f32 = switch (op & 3) {
+        0 => @sqrt(a2),
+        1 => 1.0 / a2,
+        2 => 1.0 / @sqrt(a2),
+        else => std.math.nan(f32),
+    };
+    const r3: f32 = switch (op & 3) {
+        0 => @sqrt(a3),
+        1 => 1.0 / a3,
+        2 => 1.0 / @sqrt(a3),
+        else => std.math.nan(f32),
+    };
+    setPacked128(f32ToBits(r0), f32ToBits(r1), f32ToBits(r2), f32ToBits(r3));
+}
+
+pub export fn sse_binary_float32x4_exec(
+    dst0: u32,
+    dst1: u32,
+    dst2: u32,
+    dst3: u32,
+    src0: u32,
+    src1: u32,
+    src2: u32,
+    src3: u32,
+    op: u32,
+) void {
+    setPacked128(
+        f32ToBits(sseBinaryFloat32Impl(bitsToF32(dst0), bitsToF32(src0), op)),
+        f32ToBits(sseBinaryFloat32Impl(bitsToF32(dst1), bitsToF32(src1), op)),
+        f32ToBits(sseBinaryFloat32Impl(bitsToF32(dst2), bitsToF32(src2), op)),
+        f32ToBits(sseBinaryFloat32Impl(bitsToF32(dst3), bitsToF32(src3), op)),
+    );
+}
+
+pub export fn sse_compare32x4_exec(
+    dst0: u32,
+    dst1: u32,
+    dst2: u32,
+    dst3: u32,
+    src0: u32,
+    src1: u32,
+    src2: u32,
+    src3: u32,
+    predicate: u32,
+) void {
+    const c0 = sseCompareCode32(bitsToF32(dst0), bitsToF32(src0));
+    const c1 = sseCompareCode32(bitsToF32(dst1), bitsToF32(src1));
+    const c2 = sseCompareCode32(bitsToF32(dst2), bitsToF32(src2));
+    const c3 = sseCompareCode32(bitsToF32(dst3), bitsToF32(src3));
+    setPacked128(
+        if (sseComparePredicate(c0, predicate)) 0xffffffff else 0,
+        if (sseComparePredicate(c1, predicate)) 0xffffffff else 0,
+        if (sseComparePredicate(c2, predicate)) 0xffffffff else 0,
+        if (sseComparePredicate(c3, predicate)) 0xffffffff else 0,
+    );
+}
+
+pub export fn cvtdq2ps32x4_exec(v0: u32, v1: u32, v2: u32, v3: u32) void {
+    const iv0: i32 = @bitCast(v0);
+    const iv1: i32 = @bitCast(v1);
+    const iv2: i32 = @bitCast(v2);
+    const iv3: i32 = @bitCast(v3);
+    setPacked128(
+        f32ToBits(@as(f32, @floatFromInt(iv0))),
+        f32ToBits(@as(f32, @floatFromInt(iv1))),
+        f32ToBits(@as(f32, @floatFromInt(iv2))),
+        f32ToBits(@as(f32, @floatFromInt(iv3))),
+    );
 }
 
 pub export fn shift_rotate_exec(value: u32, count: u32, width_bits: u32, mode: u32, flags: u32) void {

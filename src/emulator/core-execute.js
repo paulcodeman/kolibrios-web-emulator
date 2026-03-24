@@ -40,6 +40,10 @@
       sseReciprocalSqrt,
       sseBinaryFloat,
       sseCompareCode,
+      sseUnaryFloat32x4,
+      sseBinaryFloat32x4,
+      sseCompare32x4,
+      cvtdq2ps32x4,
       updateLogicFlagsWidth,
       updateAddFlags,
       updateAdcFlags,
@@ -75,6 +79,9 @@
       movmskBytes128,
       movmskFloat32x4,
       shufps32x4,
+      bswap32,
+      xaddWidth,
+      cmpxchgWidth,
       matchBytes,
       FAST_LOOP_SHADE,
       FAST_LOOP_MAX,
@@ -1346,32 +1353,30 @@
           }
           const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
           const eax = this.readReg(REG.EAX) & 0xffff;
+          let ea = 0;
           let src = 0;
           if (modrmInfo.mod === 3) {
             src = this.readReg16ByIndex(modrmInfo.rm) & 0xffff;
           } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
+            const targetEa = this.calcEffectiveAddress(modrmInfo);
+            if (targetEa === null) {
               return false;
             }
+            ea = targetEa >>> 0;
             src = this.readMem16(ea) & 0xffff;
           }
-          const alu = aluBinaryWidth(7, eax, src, 16, this.readReg(REG.EFLAGS));
-          if (eax === src) {
-            const regVal = this.readReg16ByIndex(modrmInfo.reg) & 0xffff;
+          const regVal = this.readReg16ByIndex(modrmInfo.reg) & 0xffff;
+          const result = cmpxchgWidth(eax, src, regVal, 16, this.readReg(REG.EFLAGS));
+          if (result.exchanged) {
             if (modrmInfo.mod === 3) {
-              this.writeReg16ByIndex(modrmInfo.rm, regVal);
+              this.writeReg16ByIndex(modrmInfo.rm, result.result & 0xffff);
             } else {
-              const ea = this.calcEffectiveAddress(modrmInfo);
-              if (ea === null) {
-                return false;
-              }
-              this.writeMem16(ea, regVal);
+              this.writeMem16(ea >>> 0, result.result & 0xffff);
             }
           } else {
-            this.writeReg16ByIndex(0, src & 0xffff);
+            this.writeReg16ByIndex(0, result.accumulator & 0xffff);
           }
-          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
+          this.writeReg(REG.EFLAGS, result.flags >>> 0);
           this.writeReg(REG.EIP, (addr + 4 + modrmInfo.size) >>> 0);
           return true;
         }
@@ -1382,28 +1387,26 @@
           }
           const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
           const src = this.readReg16ByIndex(modrmInfo.reg) & 0xffff;
+          let ea = 0;
           let dst = 0;
           if (modrmInfo.mod === 3) {
             dst = this.readReg16ByIndex(modrmInfo.rm) & 0xffff;
           } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
+            const targetEa = this.calcEffectiveAddress(modrmInfo);
+            if (targetEa === null) {
               return false;
             }
+            ea = targetEa >>> 0;
             dst = this.readMem16(ea) & 0xffff;
           }
-          const alu = aluBinaryWidth(0, dst, src, 16, this.readReg(REG.EFLAGS));
-          this.writeReg16ByIndex(modrmInfo.reg, dst & 0xffff);
+          const result = xaddWidth(dst, src, 16, this.readReg(REG.EFLAGS));
+          this.writeReg16ByIndex(modrmInfo.reg, result.src & 0xffff);
           if (modrmInfo.mod === 3) {
-            this.writeReg16ByIndex(modrmInfo.rm, alu.result & 0xffff);
+            this.writeReg16ByIndex(modrmInfo.rm, result.dst & 0xffff);
           } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            this.writeMem16(ea, alu.result & 0xffff);
+            this.writeMem16(ea >>> 0, result.dst & 0xffff);
           }
-          this.writeReg(REG.EFLAGS, alu.flags >>> 0);
+          this.writeReg(REG.EFLAGS, result.flags >>> 0);
           this.writeReg(REG.EIP, (addr + 4 + modrmInfo.size) >>> 0);
           return true;
         }
@@ -4931,11 +4934,7 @@
       if (op2 >= 0xc8 && op2 <= 0xcf) { // bswap r32
         const regIdx = op2 & 7;
         const value = this.readReg32ByIndex(regIdx) >>> 0;
-        const swapped =
-          ((value & 0xff) << 24) |
-          ((value & 0xff00) << 8) |
-          ((value >>> 8) & 0xff00) |
-          ((value >>> 24) & 0xff);
+        const swapped = bswap32(value >>> 0);
         this.writeReg32ByIndex(regIdx, swapped >>> 0);
         this.writeReg(REG.EIP, (addr + 2) >>> 0);
         return true;
@@ -5000,32 +4999,30 @@
         }
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const eax = this.readReg(REG.EAX) >>> 0;
+        let ea = 0;
         let src = 0;
         if (modrmInfo.mod === 3) {
           src = this.readReg32ByIndex(modrmInfo.rm) >>> 0;
         } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
+          const targetEa = this.calcEffectiveAddress(modrmInfo);
+          if (targetEa === null) {
             return false;
           }
+          ea = targetEa >>> 0;
           src = this.readMem32(ea) >>> 0;
         }
-        const alu = aluBinaryWidth(7, eax, src, 32, this.readReg(REG.EFLAGS));
-        if (eax === src) {
-          const regVal = this.readReg32ByIndex(modrmInfo.reg) >>> 0;
+        const regVal = this.readReg32ByIndex(modrmInfo.reg) >>> 0;
+        const result = cmpxchgWidth(eax, src, regVal, 32, this.readReg(REG.EFLAGS));
+        if (result.exchanged) {
           if (modrmInfo.mod === 3) {
-            this.writeReg32ByIndex(modrmInfo.rm, regVal >>> 0);
+            this.writeReg32ByIndex(modrmInfo.rm, result.result >>> 0);
           } else {
-            const ea = this.calcEffectiveAddress(modrmInfo);
-            if (ea === null) {
-              return false;
-            }
-            this.writeMem32(ea, regVal >>> 0);
+            this.writeMem32(ea >>> 0, result.result >>> 0);
           }
         } else {
-          this.writeReg(REG.EAX, src >>> 0);
+          this.writeReg(REG.EAX, result.accumulator >>> 0);
         }
-        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
+        this.writeReg(REG.EFLAGS, result.flags >>> 0);
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size) >>> 0);
         return true;
       }
@@ -5040,44 +5037,42 @@
         const src = isByte
           ? (this.readReg8ByIndex(modrmInfo.reg) & 0xff)
           : (this.readReg32ByIndex(modrmInfo.reg) >>> 0);
+        let ea = 0;
         let dst = 0;
         if (modrmInfo.mod === 3) {
           dst = isByte
             ? (this.readReg8ByIndex(modrmInfo.rm) & 0xff)
             : (this.readReg32ByIndex(modrmInfo.rm) >>> 0);
         } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
+          const targetEa = this.calcEffectiveAddress(modrmInfo);
+          if (targetEa === null) {
             return false;
           }
+          ea = targetEa >>> 0;
           dst = isByte
             ? (this.readMem8(ea) & 0xff)
             : (this.readMem32(ea) >>> 0);
         }
-        const alu = aluBinaryWidth(0, dst, src, widthBits, this.readReg(REG.EFLAGS));
+        const result = xaddWidth(dst, src, widthBits, this.readReg(REG.EFLAGS));
         if (isByte) {
-          this.writeReg8ByIndex(modrmInfo.reg, dst & 0xff);
+          this.writeReg8ByIndex(modrmInfo.reg, result.src & 0xff);
         } else {
-          this.writeReg32ByIndex(modrmInfo.reg, dst >>> 0);
+          this.writeReg32ByIndex(modrmInfo.reg, result.src >>> 0);
         }
         if (modrmInfo.mod === 3) {
           if (isByte) {
-            this.writeReg8ByIndex(modrmInfo.rm, alu.result & 0xff);
+            this.writeReg8ByIndex(modrmInfo.rm, result.dst & 0xff);
           } else {
-            this.writeReg32ByIndex(modrmInfo.rm, alu.result >>> 0);
+            this.writeReg32ByIndex(modrmInfo.rm, result.dst >>> 0);
           }
         } else {
-          const ea = this.calcEffectiveAddress(modrmInfo);
-          if (ea === null) {
-            return false;
-          }
           if (isByte) {
-            this.writeMem8(ea, alu.result & 0xff);
+            this.writeMem8(ea >>> 0, result.dst & 0xff);
           } else {
-            this.writeMem32(ea, alu.result >>> 0);
+            this.writeMem32(ea >>> 0, result.dst >>> 0);
           }
         }
-        this.writeReg(REG.EFLAGS, alu.flags >>> 0);
+        this.writeReg(REG.EFLAGS, result.flags >>> 0);
         this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size) >>> 0);
         return true;
       }
@@ -5188,12 +5183,11 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const regIdx = modrmInfo.reg & 7;
         const len = 2 + modrmInfo.size;
+        let src = [0, 0, 0, 0];
         if (modrmInfo.mod === 3) {
           const srcIdx = modrmInfo.rm & 7;
           for (let i = 0; i < 4; i += 1) {
-            const src = this.readXmmF32(srcIdx, i);
-            const result = op2 === 0x52 ? sseReciprocalSqrt(src) : sseReciprocal(src);
-            this.writeXmmF32(regIdx, i, result);
+            src[i] = this.readXmmU32(srcIdx, i) >>> 0;
           }
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
@@ -5201,10 +5195,18 @@
             return false;
           }
           for (let i = 0; i < 4; i += 1) {
-            const src = this.readMemFloat32((ea + i * 4) >>> 0);
-            const result = op2 === 0x52 ? sseReciprocalSqrt(src) : sseReciprocal(src);
-            this.writeXmmF32(regIdx, i, result);
+            src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
           }
+        }
+        const out = sseUnaryFloat32x4(
+          src[0],
+          src[1],
+          src[2],
+          src[3],
+          op2 === 0x52 ? 2 : 1
+        );
+        for (let i = 0; i < 4; i += 1) {
+          this.writeXmmU32(regIdx, i, out[i] >>> 0);
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5603,11 +5605,16 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const len = 2 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
+        const dst = [
+          this.readXmmU32(regIdx, 0) >>> 0,
+          this.readXmmU32(regIdx, 1) >>> 0,
+          this.readXmmU32(regIdx, 2) >>> 0,
+          this.readXmmU32(regIdx, 3) >>> 0
+        ];
+        let src = [0, 0, 0, 0];
         if (modrmInfo.mod === 3) {
           for (let i = 0; i < 4; i += 1) {
-            const a = this.readXmmF32(regIdx, i);
-            const b = this.readXmmF32(modrmInfo.rm, i);
-            this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, 2));
+            src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
           }
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
@@ -5615,10 +5622,16 @@
             return false;
           }
           for (let i = 0; i < 4; i += 1) {
-            const a = this.readXmmF32(regIdx, i);
-            const b = this.readMemFloat32((ea + i * 4) >>> 0);
-            this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, 2));
+            src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
           }
+        }
+        const out = sseBinaryFloat32x4(
+          dst[0], dst[1], dst[2], dst[3],
+          src[0], src[1], src[2], src[3],
+          2
+        );
+        for (let i = 0; i < 4; i += 1) {
+          this.writeXmmU32(regIdx, i, out[i] >>> 0);
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5632,10 +5645,10 @@
         const len = 2 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
         if (op2 === 0x51) {
+          let src = [0, 0, 0, 0];
           if (modrmInfo.mod === 3) {
             for (let i = 0; i < 4; i += 1) {
-              const v = this.readXmmF32(modrmInfo.rm, i);
-              this.writeXmmF32(regIdx, i, sseSqrt(v));
+              src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
             }
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
@@ -5643,17 +5656,24 @@
               return false;
             }
             for (let i = 0; i < 4; i += 1) {
-              const v = this.readMemFloat32((ea + i * 4) >>> 0);
-              this.writeXmmF32(regIdx, i, sseSqrt(v));
+              src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
             }
           }
+          const out = sseUnaryFloat32x4(src[0], src[1], src[2], src[3], 0);
+          for (let i = 0; i < 4; i += 1) {
+            this.writeXmmU32(regIdx, i, out[i] >>> 0);
+          }
         } else {
+          const dst = [
+            this.readXmmU32(regIdx, 0) >>> 0,
+            this.readXmmU32(regIdx, 1) >>> 0,
+            this.readXmmU32(regIdx, 2) >>> 0,
+            this.readXmmU32(regIdx, 3) >>> 0
+          ];
+          let src = [0, 0, 0, 0];
           if (modrmInfo.mod === 3) {
             for (let i = 0; i < 4; i += 1) {
-              const a = this.readXmmF32(regIdx, i);
-              const b = this.readXmmF32(modrmInfo.rm, i);
-              const op = op2 === 0x58 ? 0 : (op2 === 0x5c ? 1 : 3);
-              this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, op));
+              src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
             }
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
@@ -5661,11 +5681,17 @@
               return false;
             }
             for (let i = 0; i < 4; i += 1) {
-              const a = this.readXmmF32(regIdx, i);
-              const b = this.readMemFloat32((ea + i * 4) >>> 0);
-              const op = op2 === 0x58 ? 0 : (op2 === 0x5c ? 1 : 3);
-              this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, op));
+              src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
             }
+          }
+          const op = op2 === 0x58 ? 0 : (op2 === 0x5c ? 1 : 3);
+          const out = sseBinaryFloat32x4(
+            dst[0], dst[1], dst[2], dst[3],
+            src[0], src[1], src[2], src[3],
+            op
+          );
+          for (let i = 0; i < 4; i += 1) {
+            this.writeXmmU32(regIdx, i, out[i] >>> 0);
           }
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
@@ -5679,12 +5705,16 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const len = 2 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
+        const dst = [
+          this.readXmmU32(regIdx, 0) >>> 0,
+          this.readXmmU32(regIdx, 1) >>> 0,
+          this.readXmmU32(regIdx, 2) >>> 0,
+          this.readXmmU32(regIdx, 3) >>> 0
+        ];
+        let src = [0, 0, 0, 0];
         if (modrmInfo.mod === 3) {
           for (let i = 0; i < 4; i += 1) {
-            const a = this.readXmmF32(regIdx, i);
-            const b = this.readXmmF32(modrmInfo.rm, i);
-            const op = op2 === 0x5d ? 4 : 5;
-            this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, op));
+            src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
           }
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
@@ -5692,11 +5722,16 @@
             return false;
           }
           for (let i = 0; i < 4; i += 1) {
-            const a = this.readXmmF32(regIdx, i);
-            const b = this.readMemFloat32((ea + i * 4) >>> 0);
-            const op = op2 === 0x5d ? 4 : 5;
-            this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, op));
+            src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
           }
+        }
+        const out = sseBinaryFloat32x4(
+          dst[0], dst[1], dst[2], dst[3],
+          src[0], src[1], src[2], src[3],
+          op2 === 0x5d ? 4 : 5
+        );
+        for (let i = 0; i < 4; i += 1) {
+          this.writeXmmU32(regIdx, i, out[i] >>> 0);
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5709,10 +5744,10 @@
         const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
         const len = 2 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
+        let src = [0, 0, 0, 0];
         if (modrmInfo.mod === 3) {
           for (let i = 0; i < 4; i += 1) {
-            const v = this.readXmmU32(modrmInfo.rm, i) | 0;
-            this.writeXmmF32(regIdx, i, v);
+            src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
           }
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
@@ -5720,9 +5755,12 @@
             return false;
           }
           for (let i = 0; i < 4; i += 1) {
-            const v = this.readMem32((ea + i * 4) >>> 0) | 0;
-            this.writeXmmF32(regIdx, i, v);
+            src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
           }
+        }
+        const out = cvtdq2ps32x4(src[0], src[1], src[2], src[3]);
+        for (let i = 0; i < 4; i += 1) {
+          this.writeXmmU32(regIdx, i, out[i] >>> 0);
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5834,10 +5872,16 @@
         const imm = bytes[2 + modrmInfo.size] & 0xff;
         const len = 3 + modrmInfo.size;
         const regIdx = modrmInfo.reg & 7;
+        const dst = [
+          this.readXmmU32(regIdx, 0) >>> 0,
+          this.readXmmU32(regIdx, 1) >>> 0,
+          this.readXmmU32(regIdx, 2) >>> 0,
+          this.readXmmU32(regIdx, 3) >>> 0
+        ];
         let src = [0, 0, 0, 0];
         if (modrmInfo.mod === 3) {
           for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readXmmF32(modrmInfo.rm, i);
+            src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
           }
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
@@ -5845,25 +5889,16 @@
             return false;
           }
           for (let i = 0; i < 4; i += 1) {
-            src[i] = this.readMemFloat32((ea + i * 4) >>> 0);
+            src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
           }
         }
+        const out = sseCompare32x4(
+          dst[0], dst[1], dst[2], dst[3],
+          src[0], src[1], src[2], src[3],
+          imm
+        );
         for (let i = 0; i < 4; i += 1) {
-          const code = sseCompareCode(this.readXmmF32(regIdx, i), src[i]);
-          const unordered = code === 3;
-          let ok = false;
-          switch (imm & 7) {
-            case 0: ok = code === 2; break; // eq
-            case 1: ok = code === 1; break; // lt
-            case 2: ok = code === 1 || code === 2; break; // le
-            case 3: ok = unordered; break; // unord
-            case 4: ok = unordered || code !== 2; break; // neq
-            case 5: ok = unordered || code === 0 || code === 2; break; // nlt
-            case 6: ok = unordered || code === 0; break; // nle
-            case 7: ok = !unordered; break; // ord
-            default: ok = false; break;
-          }
-          this.writeXmmU32(regIdx, i, ok ? 0xffffffff : 0);
+          this.writeXmmU32(regIdx, i, out[i] >>> 0);
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -6897,11 +6932,7 @@
         if (site && site.type === "bswap") {
           const regIdx = site.reg & 7;
           const value = this.readReg32ByIndex(regIdx);
-          const swapped =
-            ((value & 0xff) << 24) |
-            ((value & 0xff00) << 8) |
-            ((value >>> 8) & 0xff00) |
-            ((value >>> 24) & 0xff);
+          const swapped = bswap32(value >>> 0);
           switch (regIdx) {
             case 0: this.writeReg(REG.EAX, swapped >>> 0); break;
             case 1: this.writeReg(REG.ECX, swapped >>> 0); break;

@@ -111,6 +111,23 @@
     };
   }
 
+  function readXaddResult(exports) {
+    return {
+      dst: (exports.get_xadd_last_dst?.() || 0) >>> 0,
+      src: (exports.get_xadd_last_src?.() || 0) >>> 0,
+      flags: (exports.get_xadd_last_flags?.() || 0) >>> 0
+    };
+  }
+
+  function readCmpxchgResult(exports) {
+    return {
+      result: (exports.get_cmpxchg_last_result?.() || 0) >>> 0,
+      accumulator: (exports.get_cmpxchg_last_accumulator?.() || 0) >>> 0,
+      exchanged: !!exports.get_cmpxchg_last_exchanged?.(),
+      flags: (exports.get_cmpxchg_last_flags?.() || 0) >>> 0
+    };
+  }
+
   function readShiftPacked64Result(exports) {
     return {
       lo: (exports.get_shift_packed64_last_lo?.() || 0) >>> 0,
@@ -158,6 +175,7 @@
       typeof exports.update_sub_flags !== "function" ||
       typeof exports.update_sbb_flags !== "function" ||
       typeof exports.eval_jcc_condition !== "function" ||
+      typeof exports.bswap32 !== "function" ||
       typeof exports.bit_scan_exec !== "function" ||
       typeof exports.get_bit_scan_last_index !== "function" ||
       typeof exports.get_bit_scan_last_zero !== "function" ||
@@ -170,6 +188,15 @@
       typeof exports.alu_binary_width_exec !== "function" ||
       typeof exports.get_alu_last_result !== "function" ||
       typeof exports.get_alu_last_flags !== "function" ||
+      typeof exports.xadd_width_exec !== "function" ||
+      typeof exports.get_xadd_last_dst !== "function" ||
+      typeof exports.get_xadd_last_src !== "function" ||
+      typeof exports.get_xadd_last_flags !== "function" ||
+      typeof exports.cmpxchg_width_exec !== "function" ||
+      typeof exports.get_cmpxchg_last_result !== "function" ||
+      typeof exports.get_cmpxchg_last_accumulator !== "function" ||
+      typeof exports.get_cmpxchg_last_flags !== "function" ||
+      typeof exports.get_cmpxchg_last_exchanged !== "function" ||
       typeof exports.x87_compare_code !== "function" ||
       typeof exports.shift_packed64_exec !== "function" ||
       typeof exports.get_shift_packed64_last_lo !== "function" ||
@@ -198,6 +225,10 @@
       typeof exports.sse_reciprocal_sqrt !== "function" ||
       typeof exports.sse_binary_float !== "function" ||
       typeof exports.sse_compare_code !== "function" ||
+      typeof exports.sse_unary_float32x4_exec !== "function" ||
+      typeof exports.sse_binary_float32x4_exec !== "function" ||
+      typeof exports.sse_compare32x4_exec !== "function" ||
+      typeof exports.cvtdq2ps32x4_exec !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
@@ -263,6 +294,9 @@
       evalJccCondition(cc, flags) {
         return !!exports.eval_jcc_condition(cc >>> 0, flags >>> 0);
       },
+      bswap32(value) {
+        return exports.bswap32(value >>> 0) >>> 0;
+      },
       bitScan(value, reverse, widthBits) {
         exports.bit_scan_exec(value >>> 0, reverse ? 1 : 0, widthBits >>> 0);
         return readBitScanResult(exports);
@@ -270,6 +304,20 @@
       bitTestModify(value, bitIndex, widthBits, op, flags) {
         exports.bit_test_modify_exec(value >>> 0, bitIndex >>> 0, widthBits >>> 0, op >>> 0, flags >>> 0);
         return readBitTestResult(exports);
+      },
+      xaddWidth(dst, src, widthBits, flags) {
+        exports.xadd_width_exec(dst >>> 0, src >>> 0, widthBits >>> 0, flags >>> 0);
+        return readXaddResult(exports);
+      },
+      cmpxchgWidth(accumulator, source, replacement, widthBits, flags) {
+        exports.cmpxchg_width_exec(
+          accumulator >>> 0,
+          source >>> 0,
+          replacement >>> 0,
+          widthBits >>> 0,
+          flags >>> 0
+        );
+        return readCmpxchgResult(exports);
       },
       imulSignedWidth(left, right, widthBits, flags) {
         exports.imul_signed_width_exec(left >>> 0, right >>> 0, widthBits >>> 0, flags >>> 0);
@@ -336,6 +384,42 @@
       },
       sseCompareCode(left, right) {
         return exports.sse_compare_code(Number(left), Number(right)) >>> 0;
+      },
+      sseUnaryFloat32x4(v0, v1, v2, v3, op) {
+        exports.sse_unary_float32x4_exec(v0 >>> 0, v1 >>> 0, v2 >>> 0, v3 >>> 0, op >>> 0);
+        return readPacked128Result(exports);
+      },
+      sseBinaryFloat32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) {
+        exports.sse_binary_float32x4_exec(
+          dst0 >>> 0,
+          dst1 >>> 0,
+          dst2 >>> 0,
+          dst3 >>> 0,
+          src0 >>> 0,
+          src1 >>> 0,
+          src2 >>> 0,
+          src3 >>> 0,
+          op >>> 0
+        );
+        return readPacked128Result(exports);
+      },
+      sseCompare32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, imm) {
+        exports.sse_compare32x4_exec(
+          dst0 >>> 0,
+          dst1 >>> 0,
+          dst2 >>> 0,
+          dst3 >>> 0,
+          src0 >>> 0,
+          src1 >>> 0,
+          src2 >>> 0,
+          src3 >>> 0,
+          imm >>> 0
+        );
+        return readPacked128Result(exports);
+      },
+      cvtdq2ps32x4(v0, v1, v2, v3) {
+        exports.cvtdq2ps32x4_exec(v0 >>> 0, v1 >>> 0, v2 >>> 0, v3 >>> 0);
+        return readPacked128Result(exports);
       },
       shiftRotate(value, count, widthBits, mode, flags) {
         exports.shift_rotate_exec(value >>> 0, count >>> 0, widthBits >>> 0, mode >>> 0, flags >>> 0);

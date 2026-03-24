@@ -67,6 +67,15 @@ function createLcg(seed) {
   };
 }
 
+const f32BitcastBuffer = new ArrayBuffer(4);
+const f32BitcastF32 = new Float32Array(f32BitcastBuffer);
+const f32BitcastU32 = new Uint32Array(f32BitcastBuffer);
+
+function numberToF32Bits(value) {
+  f32BitcastF32[0] = Math.fround(Number(value));
+  return f32BitcastU32[0] >>> 0;
+}
+
 function createInstructionEmulator(cpuBackend) {
   const surface = createHeadlessSurface(8, 8);
   const emulator = new Emulator(surface, () => {}, { cpuBackend });
@@ -113,7 +122,19 @@ function runInstructionScenario(cpuBackend, bytes, setup) {
     edi: emulator.readReg(REG_EDI) >>> 0,
     mem0: emulator.readMem32(0) >>> 0,
     mem4: emulator.readMem32(4) >>> 0,
-    mem8: emulator.readMem32(8) >>> 0
+    mem8: emulator.readMem32(8) >>> 0,
+    xmm0: [
+      emulator.readXmmU32(0, 0) >>> 0,
+      emulator.readXmmU32(0, 1) >>> 0,
+      emulator.readXmmU32(0, 2) >>> 0,
+      emulator.readXmmU32(0, 3) >>> 0
+    ],
+    xmm1: [
+      emulator.readXmmU32(1, 0) >>> 0,
+      emulator.readXmmU32(1, 1) >>> 0,
+      emulator.readXmmU32(1, 2) >>> 0,
+      emulator.readXmmU32(1, 3) >>> 0
+    ]
   };
 }
 
@@ -149,6 +170,10 @@ try {
   assert(typeof wasmBackend.sseSqrt === "function", "wasm helper backend should expose SSE sqrt helpers");
   assert(typeof wasmBackend.sseBinaryFloat === "function", "wasm helper backend should expose SSE binary float helpers");
   assert(typeof wasmBackend.sseCompareCode === "function", "wasm helper backend should expose SSE compare helpers");
+  assert(typeof wasmBackend.sseUnaryFloat32x4 === "function", "wasm helper backend should expose SSE unary vector helpers");
+  assert(typeof wasmBackend.sseBinaryFloat32x4 === "function", "wasm helper backend should expose SSE binary vector helpers");
+  assert(typeof wasmBackend.sseCompare32x4 === "function", "wasm helper backend should expose SSE compare vector helpers");
+  assert(typeof wasmBackend.cvtdq2ps32x4 === "function", "wasm helper backend should expose cvtdq2ps vector helpers");
   assert(typeof wasmBackend.packedOp32x2 === "function", "wasm helper backend should expose packed 64-bit logical helpers");
   assert(typeof wasmBackend.packedOp32x4 === "function", "wasm helper backend should expose packed 128-bit logical helpers");
   assert(typeof wasmBackend.punpckldq32x4 === "function", "wasm helper backend should expose punpckldq helpers");
@@ -157,6 +182,9 @@ try {
   assert(typeof wasmBackend.movmskBytes128 === "function", "wasm helper backend should expose 128-bit movemask helpers");
   assert(typeof wasmBackend.movmskFloat32x4 === "function", "wasm helper backend should expose float movemask helpers");
   assert(typeof wasmBackend.shufps32x4 === "function", "wasm helper backend should expose shufps helpers");
+  assert(typeof wasmBackend.bswap32 === "function", "wasm helper backend should expose bswap helpers");
+  assert(typeof wasmBackend.xaddWidth === "function", "wasm helper backend should expose xadd helpers");
+  assert(typeof wasmBackend.cmpxchgWidth === "function", "wasm helper backend should expose cmpxchg helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -355,6 +383,88 @@ try {
       );
     }
   }
+
+  for (const op of [0, 1, 2]) {
+    assertDeepEq(
+      wasmBackend.sseUnaryFloat32x4(
+        numberToF32Bits(1),
+        numberToF32Bits(4),
+        numberToF32Bits(9),
+        numberToF32Bits(16),
+        op
+      ),
+      jsBackend.sseUnaryFloat32x4(
+        numberToF32Bits(1),
+        numberToF32Bits(4),
+        numberToF32Bits(9),
+        numberToF32Bits(16),
+        op
+      ),
+      `sseUnaryFloat32x4 should match for op=${op}`
+    );
+  }
+
+  for (const op of [0, 1, 2, 3, 4, 5]) {
+    assertDeepEq(
+      wasmBackend.sseBinaryFloat32x4(
+        numberToF32Bits(1),
+        numberToF32Bits(-2),
+        numberToF32Bits(3.5),
+        numberToF32Bits(-0),
+        numberToF32Bits(4),
+        numberToF32Bits(0.5),
+        numberToF32Bits(-2),
+        numberToF32Bits(0),
+        op
+      ),
+      jsBackend.sseBinaryFloat32x4(
+        numberToF32Bits(1),
+        numberToF32Bits(-2),
+        numberToF32Bits(3.5),
+        numberToF32Bits(-0),
+        numberToF32Bits(4),
+        numberToF32Bits(0.5),
+        numberToF32Bits(-2),
+        numberToF32Bits(0),
+        op
+      ),
+      `sseBinaryFloat32x4 should match for op=${op}`
+    );
+  }
+
+  for (const imm of [0, 1, 2, 3, 4, 5, 6, 7]) {
+    assertDeepEq(
+      wasmBackend.sseCompare32x4(
+        numberToF32Bits(1),
+        numberToF32Bits(2),
+        numberToF32Bits(2),
+        numberToF32Bits(Number.NaN),
+        numberToF32Bits(1),
+        numberToF32Bits(1),
+        numberToF32Bits(3),
+        numberToF32Bits(0),
+        imm
+      ),
+      jsBackend.sseCompare32x4(
+        numberToF32Bits(1),
+        numberToF32Bits(2),
+        numberToF32Bits(2),
+        numberToF32Bits(Number.NaN),
+        numberToF32Bits(1),
+        numberToF32Bits(1),
+        numberToF32Bits(3),
+        numberToF32Bits(0),
+        imm
+      ),
+      `sseCompare32x4 should match for imm=${imm}`
+    );
+  }
+
+  assertDeepEq(
+    wasmBackend.cvtdq2ps32x4(0, 1, 0xffffffff, 0x80000000),
+    jsBackend.cvtdq2ps32x4(0, 1, 0xffffffff, 0x80000000),
+    "cvtdq2ps32x4 should match"
+  );
   for (let i = 0; i < 200; i += 1) {
     const flags = nextRand();
     const cc = nextRand() & 0xf;
@@ -363,6 +473,41 @@ try {
       jsBackend.evalJccCondition(cc, flags),
       `evalJccCondition should match for random cc=${cc}, flags=0x${flags.toString(16)}`
     );
+  }
+
+  for (const value of [0, 1, 0x12345678, 0xaabbccdd, 0xffffffff]) {
+    assertEq(
+      wasmBackend.bswap32(value),
+      jsBackend.bswap32(value),
+      `bswap32 should match for 0x${(value >>> 0).toString(16)}`
+    );
+  }
+
+  for (const width of widths) {
+    for (let i = 0; i < 160; i += 1) {
+      const dst = nextRand();
+      const src = nextRand();
+      const flags = nextRand();
+      assertDeepEq(
+        wasmBackend.xaddWidth(dst, src, width, flags),
+        jsBackend.xaddWidth(dst, src, width, flags),
+        `xaddWidth should match for width=${width}`
+      );
+    }
+  }
+
+  for (const width of widths) {
+    for (let i = 0; i < 160; i += 1) {
+      const accumulator = nextRand();
+      const source = nextRand();
+      const replacement = nextRand();
+      const flags = nextRand();
+      assertDeepEq(
+        wasmBackend.cmpxchgWidth(accumulator, source, replacement, width, flags),
+        jsBackend.cmpxchgWidth(accumulator, source, replacement, width, flags),
+        `cmpxchgWidth should match for width=${width}`
+      );
+    }
   }
 
   for (const width of [16, 32]) {
@@ -752,6 +897,61 @@ try {
       setup(emulator) {
         emulator.writeReg(REG_ECX, 0x00000020);
         emulator.writeReg(REG_EDX, 0x00000007);
+      }
+    },
+    {
+      name: "0f c8 bswap eax",
+      bytes: [0x0f, 0xc8],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x12345678);
+      }
+    },
+    {
+      name: "0f 58 addps xmm0, xmm1",
+      bytes: [0x0f, 0x58, 0xc1],
+      setup(emulator) {
+        emulator.writeXmmU32(0, 0, numberToF32Bits(1));
+        emulator.writeXmmU32(0, 1, numberToF32Bits(2));
+        emulator.writeXmmU32(0, 2, numberToF32Bits(3));
+        emulator.writeXmmU32(0, 3, numberToF32Bits(4));
+        emulator.writeXmmU32(1, 0, numberToF32Bits(5));
+        emulator.writeXmmU32(1, 1, numberToF32Bits(6));
+        emulator.writeXmmU32(1, 2, numberToF32Bits(7));
+        emulator.writeXmmU32(1, 3, numberToF32Bits(8));
+      }
+    },
+    {
+      name: "0f 51 sqrtps xmm0, xmm1",
+      bytes: [0x0f, 0x51, 0xc1],
+      setup(emulator) {
+        emulator.writeXmmU32(1, 0, numberToF32Bits(1));
+        emulator.writeXmmU32(1, 1, numberToF32Bits(4));
+        emulator.writeXmmU32(1, 2, numberToF32Bits(9));
+        emulator.writeXmmU32(1, 3, numberToF32Bits(16));
+      }
+    },
+    {
+      name: "0f c2 cmpps xmm0, xmm1, eq",
+      bytes: [0x0f, 0xc2, 0xc1, 0x00],
+      setup(emulator) {
+        emulator.writeXmmU32(0, 0, numberToF32Bits(1));
+        emulator.writeXmmU32(0, 1, numberToF32Bits(2));
+        emulator.writeXmmU32(0, 2, numberToF32Bits(Number.NaN));
+        emulator.writeXmmU32(0, 3, numberToF32Bits(-0));
+        emulator.writeXmmU32(1, 0, numberToF32Bits(1));
+        emulator.writeXmmU32(1, 1, numberToF32Bits(3));
+        emulator.writeXmmU32(1, 2, numberToF32Bits(0));
+        emulator.writeXmmU32(1, 3, numberToF32Bits(0));
+      }
+    },
+    {
+      name: "0f 5b cvtdq2ps xmm0, xmm1",
+      bytes: [0x0f, 0x5b, 0xc1],
+      setup(emulator) {
+        emulator.writeXmmU32(1, 0, 0);
+        emulator.writeXmmU32(1, 1, 1);
+        emulator.writeXmmU32(1, 2, 0xffffffff);
+        emulator.writeXmmU32(1, 3, 0x80000000);
       }
     },
     {
