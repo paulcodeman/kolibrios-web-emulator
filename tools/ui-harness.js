@@ -10,6 +10,7 @@ const DEFAULT_SYSTEM_RAM_BYTES = 512 * 1024 * 1024;
 const DEFAULT_SYSTEM_RESERVED_RAM_BYTES = 16 * 1024 * 1024;
 const DEFAULT_SYSTEM_SKIN_PATH = "/sys/default.skn";
 const DEFAULT_SYSTEM_BUTTON_STYLE = 1;
+const DEBUG_BOARD_CAPACITY = 512;
 const SYSTEM_STYLE_INI_PATH = "/sys/settings/system.ini";
 
 const REG = {
@@ -55,6 +56,84 @@ let runtimeLoaded = false;
 
 function cloneBytes(data) {
   return data instanceof Uint8Array ? data.slice() : null;
+}
+
+function createDebugBoardState() {
+  return {
+    buffer: new Uint8Array(DEBUG_BOARD_CAPACITY),
+    readIndex: 0,
+    size: 0
+  };
+}
+
+function resetDebugBoardState(state) {
+  if (!state) {
+    return;
+  }
+  state.readIndex = 0;
+  state.size = 0;
+}
+
+function pushDebugBoardByte(state, value) {
+  if (!state || !(state.buffer instanceof Uint8Array) || (state.buffer.length | 0) <= 0) {
+    return false;
+  }
+  const capacity = state.buffer.length | 0;
+  let size = state.size | 0;
+  let readIndex = state.readIndex | 0;
+  let writeIndex = ((readIndex + size) % capacity) | 0;
+  if (size >= capacity) {
+    writeIndex = readIndex;
+    readIndex = ((readIndex + 1) % capacity) | 0;
+    size = (capacity - 1) | 0;
+  }
+  state.buffer[writeIndex] = value & 0xff;
+  state.readIndex = readIndex;
+  state.size = (size + 1) | 0;
+  return true;
+}
+
+function readDebugBoardByte(state) {
+  if (!state || !(state.buffer instanceof Uint8Array) || (state.size | 0) <= 0) {
+    return { hasByte: false, byte: 0 };
+  }
+  const byte = state.buffer[state.readIndex | 0] & 0xff;
+  state.readIndex = (((state.readIndex | 0) + 1) % (state.buffer.length | 0)) | 0;
+  state.size = Math.max(0, ((state.size | 0) - 1) | 0) | 0;
+  return { hasByte: true, byte };
+}
+
+function writeDebugBoardText(state, text) {
+  const source = String(text || "");
+  for (let i = 0; i < source.length; i += 1) {
+    const code = source.charCodeAt(i);
+    pushDebugBoardByte(state, code >= 0 && code <= 0xff ? code : 0x3f);
+  }
+  return source.length | 0;
+}
+
+function classifyProcessLogSeverity(message) {
+  const text = String(message || "");
+  if (!text || /^debug:\s/i.test(text)) {
+    return "";
+  }
+  if (
+    /^Unhandled /.test(text) ||
+    /^Interpreter error:/.test(text) ||
+    /^Unknown opcode /.test(text) ||
+    /^Unknown opcode handler /.test(text) ||
+    /^Host session .* failed:/.test(text) ||
+    /^Skin load failed/.test(text) ||
+    /^Built-in skin load failed:/.test(text) ||
+    /^File provider error /.test(text) ||
+    /^File info provider error /.test(text) ||
+    /^File mutation provider error /.test(text) ||
+    /^KPCK unpack failed /.test(text) ||
+    /^Named memory bootstrap failed /.test(text)
+  ) {
+    return "E";
+  }
+  return "";
 }
 
 function getIniHelpers() {
@@ -459,6 +538,7 @@ class HeadlessUiHarness {
     this.processBySlot = new Map();
     this.activeProcess = null;
     this.sharedNamedMemoryStore = new Map();
+    this.debugBoardState = createDebugBoardState();
     this.namedMemoryBootstrapActive = false;
     this.surface = null;
     this.emulator = null;
@@ -1380,6 +1460,30 @@ class HeadlessUiHarness {
     this.syncActiveAliases();
   }
 
+  writeDebugBoardByte(value) {
+    return pushDebugBoardByte(this.debugBoardState, value & 0xff);
+  }
+
+  writeDebugBoardMessage(message) {
+    return writeDebugBoardText(this.debugBoardState, String(message || ""));
+  }
+
+  readDebugBoardByte() {
+    return readDebugBoardByte(this.debugBoardState);
+  }
+
+  mirrorProcessLogToDebugBoard(process, message) {
+    const severity = classifyProcessLogSeverity(message);
+    if (!severity) {
+      return false;
+    }
+    const source = process
+      ? String(process.displayPath || process.processPath || process.fileName || "process")
+      : "emulator";
+    this.writeDebugBoardMessage(`${severity}: ${source}: ${String(message || "")}\r\n`);
+    return true;
+  }
+
   logForProcess(process, message) {
     const line = String(message);
     const target = process && process.logs ? process.logs : this.logs;
@@ -1391,6 +1495,7 @@ class HeadlessUiHarness {
       const prefix = process ? `[pid ${process.pid >>> 0} slot ${process.slot >>> 0}] ` : "";
       console.log(`${prefix}${line}`);
     }
+    this.mirrorProcessLogToDebugBoard(process, line);
   }
 
   log(message) {
@@ -1425,6 +1530,7 @@ class HeadlessUiHarness {
     this.emulator = null;
     this.image = null;
     this.sharedNamedMemoryStore = new Map();
+    resetDebugBoardState(this.debugBoardState);
     this.namedMemoryBootstrapActive = false;
     this.resetDesktopState();
   }

@@ -1,6 +1,58 @@
 (() => {
   const KosEmu = globalThis.KosEmu;
   const UTF8_DECODER = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8") : null;
+  const DEBUG_BOARD_CAPACITY = 512;
+
+  function ensureDebugBoardState(owner) {
+    if (
+      owner &&
+      owner.debugBoardState &&
+      owner.debugBoardState.buffer instanceof Uint8Array &&
+      (owner.debugBoardState.buffer.length | 0) > 0
+    ) {
+      return owner.debugBoardState;
+    }
+    const state = {
+      buffer: new Uint8Array(DEBUG_BOARD_CAPACITY),
+      readIndex: 0,
+      size: 0
+    };
+    if (owner) {
+      owner.debugBoardState = state;
+    }
+    return state;
+  }
+
+  function pushDebugBoardByte(state, value) {
+    const board = state && state.buffer instanceof Uint8Array ? state : null;
+    if (!board || !(board.buffer instanceof Uint8Array) || board.buffer.length <= 0) {
+      return false;
+    }
+    const capacity = board.buffer.length | 0;
+    let size = board.size | 0;
+    let readIndex = board.readIndex | 0;
+    let writeIndex = ((readIndex + size) % capacity) | 0;
+    if (size >= capacity) {
+      writeIndex = readIndex;
+      readIndex = ((readIndex + 1) % capacity) | 0;
+      size = (capacity - 1) | 0;
+    }
+    board.buffer[writeIndex] = value & 0xff;
+    board.readIndex = readIndex;
+    board.size = (size + 1) | 0;
+    return true;
+  }
+
+  function readDebugBoardByte(state) {
+    const board = state && state.buffer instanceof Uint8Array ? state : null;
+    if (!board || (board.size | 0) <= 0) {
+      return { hasByte: false, byte: 0 };
+    }
+    const byte = board.buffer[board.readIndex | 0] & 0xff;
+    board.readIndex = (((board.readIndex | 0) + 1) % (board.buffer.length | 0)) | 0;
+    board.size = Math.max(0, ((board.size | 0) - 1) | 0) | 0;
+    return { hasByte: true, byte };
+  }
 
   function decodeCp866Z(bytes) {
     const source = bytes instanceof Uint8Array ? bytes : null;
@@ -1027,6 +1079,42 @@
               : errorFallbackValue
           );
         }
+      },
+
+      getLocalDebugBoardState() {
+        return ensureDebugBoardState(this);
+      },
+
+      writeDebugBoardByte(value) {
+        const byte = value & 0xff;
+        const session = this.hostSession;
+        if (session && typeof session.writeDebugBoardByte === "function") {
+          try {
+            return !!session.writeDebugBoardByte(byte, this);
+          } catch (err) {
+            this.log(`Host session writeDebugBoardByte failed: ${err}`);
+          }
+        }
+        return pushDebugBoardByte(this.getLocalDebugBoardState(), byte);
+      },
+
+      readDebugBoardByte() {
+        const session = this.hostSession;
+        if (session && typeof session.readDebugBoardByte === "function") {
+          try {
+            const result = session.readDebugBoardByte(this);
+            if (result && result.hasByte) {
+              return {
+                hasByte: true,
+                byte: (result.byte & 0xff) >>> 0
+              };
+            }
+            return { hasByte: false, byte: 0 };
+          } catch (err) {
+            this.log(`Host session readDebugBoardByte failed: ${err}`);
+          }
+        }
+        return readDebugBoardByte(this.getLocalDebugBoardState());
       },
 
       getHostMaxThreadSlot() {

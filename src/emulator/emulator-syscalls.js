@@ -2475,14 +2475,25 @@
       sysDebugBoard() {
         const sub = this.readReg(REG.EBX) & 0xff;
         if (sub === 2) {
-          this.writeReg(REG.EAX, 0);
-          this.writeReg(REG.EBX, 0);
+          const result = typeof this.readDebugBoardByte === "function"
+            ? this.readDebugBoardByte()
+            : { hasByte: false, byte: 0 };
+          if (result && result.hasByte) {
+            this.writeReg(REG.EAX, result.byte & 0xff);
+            this.writeReg(REG.EBX, 1);
+          } else {
+            this.writeReg(REG.EAX, 0);
+            this.writeReg(REG.EBX, 0);
+          }
           return;
         }
         if (sub !== 1) {
           return;
         }
         const byte = this.readReg(REG.ECX) & 0xff;
+        if (typeof this.writeDebugBoardByte === "function") {
+          this.writeDebugBoardByte(byte);
+        }
         if (byte === 10 || byte === 13) {
           if (this.debugLine) {
             this.log(`debug: ${this.debugLine}`);

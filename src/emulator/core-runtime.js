@@ -169,7 +169,7 @@
           return;
         }
         const deferredPresentPending = !!this.presentYieldPending;
-        if (!this.yieldRequested && deferredPresentPending && this.surfaceDirty && !this.inRedraw) {
+        if (deferredPresentPending && this.surfaceDirty && !this.inRedraw) {
           this.presentIfNeeded(true);
         }
         this.presentYieldPending = false;
