@@ -89,6 +89,8 @@ try {
   assert(typeof wasmBackend.sseSqrt === "function", "wasm helper backend should expose SSE sqrt helpers");
   assert(typeof wasmBackend.sseBinaryFloat === "function", "wasm helper backend should expose SSE binary float helpers");
   assert(typeof wasmBackend.sseCompareCode === "function", "wasm helper backend should expose SSE compare helpers");
+  assert(typeof wasmBackend.packedOp32x2 === "function", "wasm helper backend should expose packed 64-bit logical helpers");
+  assert(typeof wasmBackend.packedOp32x4 === "function", "wasm helper backend should expose packed 128-bit logical helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -404,6 +406,41 @@ try {
       wasmBackend.punpckhwd64(dstHi, srcHi),
       jsBackend.punpckhwd64(dstHi, srcHi),
       "punpckhwd64 should match"
+    );
+  }
+
+  for (const op of [0, 1, 2, 3, 4]) {
+    assertDeepEq(
+      wasmBackend.packedOp32x2(0x12345678, 0xffffffff, 0x00ff00ff, 0x12345678, op),
+      jsBackend.packedOp32x2(0x12345678, 0xffffffff, 0x00ff00ff, 0x12345678, op),
+      `packedOp32x2 should match for op ${op}`
+    );
+    assertDeepEq(
+      wasmBackend.packedOp32x4(0, 0xffffffff, 0x12345678, 0x80000000, 0xffffffff, 0x12345678, 0x12345678, 0x7fffffff, op),
+      jsBackend.packedOp32x4(0, 0xffffffff, 0x12345678, 0x80000000, 0xffffffff, 0x12345678, 0x12345678, 0x7fffffff, op),
+      `packedOp32x4 should match for op ${op}`
+    );
+  }
+
+  for (let i = 0; i < 120; i += 1) {
+    const dstLo = nextRand();
+    const dstHi = nextRand();
+    const srcLo = nextRand();
+    const srcHi = nextRand();
+    const op = nextRand() % 5;
+    const dst2 = nextRand();
+    const dst3 = nextRand();
+    const src2 = nextRand();
+    const src3 = nextRand();
+    assertDeepEq(
+      wasmBackend.packedOp32x2(dstLo, dstHi, srcLo, srcHi, op),
+      jsBackend.packedOp32x2(dstLo, dstHi, srcLo, srcHi, op),
+      `packedOp32x2 should match for op ${op}`
+    );
+    assertDeepEq(
+      wasmBackend.packedOp32x4(dstLo, dstHi, dst2, dst3, srcLo, srcHi, src2, src3, op),
+      jsBackend.packedOp32x4(dstLo, dstHi, dst2, dst3, srcLo, srcHi, src2, src3, op),
+      `packedOp32x4 should match for op ${op}`
     );
   }
 

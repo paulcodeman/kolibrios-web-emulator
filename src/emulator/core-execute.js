@@ -66,6 +66,8 @@
       punpckhbw64,
       punpcklwd64,
       punpckhwd64,
+      packedOp32x2,
+      packedOp32x4,
       matchBytes,
       FAST_LOOP_SHADE,
       FAST_LOOP_MAX,
@@ -1263,12 +1265,11 @@
           }
           const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
           const regIdx = modrmInfo.reg & 7;
+          const src = [0, 0, 0, 0];
           if (modrmInfo.mod === 3) {
             const srcIdx = modrmInfo.rm & 7;
             for (let i = 0; i < 4; i += 1) {
-              const a = this.readXmmU32(regIdx, i) >>> 0;
-              const b = this.readXmmU32(srcIdx, i) >>> 0;
-              this.writeXmmU32(regIdx, i, a === b ? 0xffffffff : 0);
+              src[i] = this.readXmmU32(srcIdx, i) >>> 0;
             }
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
@@ -1276,10 +1277,22 @@
               return false;
             }
             for (let i = 0; i < 4; i += 1) {
-              const a = this.readXmmU32(regIdx, i) >>> 0;
-              const b = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-              this.writeXmmU32(regIdx, i, a === b ? 0xffffffff : 0);
+              src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
             }
+          }
+          const out = packedOp32x4(
+            this.readXmmU32(regIdx, 0),
+            this.readXmmU32(regIdx, 1),
+            this.readXmmU32(regIdx, 2),
+            this.readXmmU32(regIdx, 3),
+            src[0],
+            src[1],
+            src[2],
+            src[3],
+            4
+          );
+          for (let i = 0; i < 4; i += 1) {
+            this.writeXmmU32(regIdx, i, out[i] >>> 0);
           }
           this.writeReg(REG.EIP, (addr + 3 + modrmInfo.size) >>> 0);
           return true;
@@ -5595,11 +5608,10 @@
             storeMem128(ea, regIdx);
           }
         } else { // andps xmm, xmm/m128
+          const src = [0, 0, 0, 0];
           if (modrmInfo.mod === 3) {
             for (let i = 0; i < 4; i += 1) {
-              const a = this.readXmmU32(regIdx, i) >>> 0;
-              const b = this.readXmmU32(modrmInfo.rm, i) >>> 0;
-              this.writeXmmU32(regIdx, i, (a & b) >>> 0);
+              src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
             }
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
@@ -5607,10 +5619,22 @@
               return false;
             }
             for (let i = 0; i < 4; i += 1) {
-              const a = this.readXmmU32(regIdx, i) >>> 0;
-              const b = this.readMem32((ea + i * 4) >>> 0) >>> 0;
-              this.writeXmmU32(regIdx, i, (a & b) >>> 0);
+              src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
             }
+          }
+          const out = packedOp32x4(
+            this.readXmmU32(regIdx, 0),
+            this.readXmmU32(regIdx, 1),
+            this.readXmmU32(regIdx, 2),
+            this.readXmmU32(regIdx, 3),
+            src[0],
+            src[1],
+            src[2],
+            src[3],
+            0
+          );
+          for (let i = 0; i < 4; i += 1) {
+            this.writeXmmU32(regIdx, i, out[i] >>> 0);
           }
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
@@ -5752,9 +5776,8 @@
           srcHi = this.readMem32((ea + 4) >>> 0) >>> 0;
         }
         const dst = this.readMmx(dstIdx);
-        const outLo = (dst.lo >>> 0) === srcLo ? 0xffffffff : 0;
-        const outHi = (dst.hi >>> 0) === srcHi ? 0xffffffff : 0;
-        this.writeMmx(dstIdx, outLo >>> 0, outHi >>> 0);
+        const out = packedOp32x2(dst.lo, dst.hi, srcLo, srcHi, 4);
+        this.writeMmx(dstIdx, out.lo >>> 0, out.hi >>> 0);
         const len = 2 + modrmInfo.size;
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -5820,22 +5843,9 @@
           srcHi = this.readMem32((ea + 4) >>> 0) >>> 0;
         }
         const dst = this.readMmx(dstIdx);
-        let outLo = 0;
-        let outHi = 0;
-        if (op2 === 0xdb) {
-          outLo = (dst.lo & srcLo) >>> 0;
-          outHi = (dst.hi & srcHi) >>> 0;
-        } else if (op2 === 0xdf) {
-          outLo = ((~dst.lo) & srcLo) >>> 0;
-          outHi = ((~dst.hi) & srcHi) >>> 0;
-        } else if (op2 === 0xeb) {
-          outLo = (dst.lo | srcLo) >>> 0;
-          outHi = (dst.hi | srcHi) >>> 0;
-        } else {
-          outLo = (dst.lo ^ srcLo) >>> 0;
-          outHi = (dst.hi ^ srcHi) >>> 0;
-        }
-        this.writeMmx(dstIdx, outLo >>> 0, outHi >>> 0);
+        const op = op2 === 0xdb ? 0 : (op2 === 0xdf ? 1 : (op2 === 0xeb ? 2 : 3));
+        const out = packedOp32x2(dst.lo, dst.hi, srcLo, srcHi, op);
+        this.writeMmx(dstIdx, out.lo >>> 0, out.hi >>> 0);
         const len = 2 + modrmInfo.size;
         this.writeReg(REG.EIP, (addr + len) >>> 0);
         return true;
@@ -6451,11 +6461,10 @@
           return true;
         }
         if (op2 === 0x57) { // xorps xmm, xmm/m128
+          const src = [0, 0, 0, 0];
           if (modrmInfo.mod === 3) {
             for (let i = 0; i < 4; i += 1) {
-              const a = this.readXmmU32(regIdx, i);
-              const b = this.readXmmU32(modrmInfo.rm, i);
-              this.writeXmmU32(regIdx, i, (a ^ b) >>> 0);
+              src[i] = this.readXmmU32(modrmInfo.rm, i) >>> 0;
             }
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
@@ -6463,10 +6472,22 @@
               return false;
             }
             for (let i = 0; i < 4; i += 1) {
-              const a = this.readXmmU32(regIdx, i);
-              const b = this.readMem32((ea + i * 4) >>> 0);
-              this.writeXmmU32(regIdx, i, (a ^ b) >>> 0);
+              src[i] = this.readMem32((ea + i * 4) >>> 0) >>> 0;
             }
+          }
+          const out = packedOp32x4(
+            this.readXmmU32(regIdx, 0),
+            this.readXmmU32(regIdx, 1),
+            this.readXmmU32(regIdx, 2),
+            this.readXmmU32(regIdx, 3),
+            src[0],
+            src[1],
+            src[2],
+            src[3],
+            3
+          );
+          for (let i = 0; i < 4; i += 1) {
+            this.writeXmmU32(regIdx, i, out[i] >>> 0);
           }
           this.writeReg(REG.EIP, (addr + len) >>> 0);
           return true;

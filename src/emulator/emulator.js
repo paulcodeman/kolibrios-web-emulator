@@ -1241,6 +1241,12 @@ function getJsCpuHelperBackend() {
       punpckhwd64(dstHi, srcHi) {
         return punpckhwd64(dstHi, srcHi);
       },
+      packedOp32x2(dstLo, dstHi, srcLo, srcHi, op) {
+        return packedOp32x2Js(dstLo, dstHi, srcLo, srcHi, op);
+      },
+      packedOp32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) {
+        return packedOp32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op);
+      },
       evalJccCondition(cc, flags) {
         return evalJccConditionJs(cc, flags);
       }
@@ -1577,6 +1583,65 @@ function punpckhwd64(dstHi, srcHi) {
     lo: ((d0 & 0xffff) | ((s0 & 0xffff) << 16)) >>> 0,
     hi: ((d1 & 0xffff) | ((s1 & 0xffff) << 16)) >>> 0
   };
+}
+
+function packedOp32Word(left, right, op) {
+  switch (op >>> 0) {
+    case 0:
+      return (left & right) >>> 0;
+    case 1:
+      return ((~left) & right) >>> 0;
+    case 2:
+      return (left | right) >>> 0;
+    case 3:
+      return (left ^ right) >>> 0;
+    case 4:
+      return (left >>> 0) === (right >>> 0) ? 0xffffffff : 0;
+    default:
+      return 0;
+  }
+}
+
+function packedOp32x2Js(dstLo, dstHi, srcLo, srcHi, op) {
+  return {
+    lo: packedOp32Word(dstLo >>> 0, srcLo >>> 0, op),
+    hi: packedOp32Word(dstHi >>> 0, srcHi >>> 0, op)
+  };
+}
+
+function packedOp32x2(dstLo, dstHi, srcLo, srcHi, op) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.packedOp32x2 === "function") {
+    return backend.packedOp32x2(dstLo >>> 0, dstHi >>> 0, srcLo >>> 0, srcHi >>> 0, op >>> 0);
+  }
+  return packedOp32x2Js(dstLo, dstHi, srcLo, srcHi, op);
+}
+
+function packedOp32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) {
+  return [
+    packedOp32Word(dst0 >>> 0, src0 >>> 0, op),
+    packedOp32Word(dst1 >>> 0, src1 >>> 0, op),
+    packedOp32Word(dst2 >>> 0, src2 >>> 0, op),
+    packedOp32Word(dst3 >>> 0, src3 >>> 0, op)
+  ];
+}
+
+function packedOp32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.packedOp32x4 === "function") {
+    return backend.packedOp32x4(
+      dst0 >>> 0,
+      dst1 >>> 0,
+      dst2 >>> 0,
+      dst3 >>> 0,
+      src0 >>> 0,
+      src1 >>> 0,
+      src2 >>> 0,
+      src3 >>> 0,
+      op >>> 0
+    );
+  }
+  return packedOp32x4Js(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op);
 }
 
 function matchBytes(mem, start, pattern) {
@@ -2564,6 +2629,8 @@ class Emulator {
     punpckhbw64,
     punpcklwd64,
     punpckhwd64,
+    packedOp32x2,
+    packedOp32x4,
     matchBytes,
     FAST_LOOP_SHADE,
     FAST_LOOP_MAX,

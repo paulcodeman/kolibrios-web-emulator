@@ -18,6 +18,7 @@ var double_shift_last_ok: u32 = 0;
 
 var packed64_last_lo: u32 = 0;
 var packed64_last_hi: u32 = 0;
+var packed128_last: [4]u32 = [_]u32{0} ** 4;
 var packed_bcd_last: [10]u8 = [_]u8{0} ** 10;
 var bit_scan_last_index: u32 = 0;
 var bit_scan_last_zero: u32 = 1;
@@ -122,6 +123,24 @@ fn clampSigned16From32(value: u32) u32 {
 fn setPacked64(lo: u32, hi: u32) void {
     packed64_last_lo = lo;
     packed64_last_hi = hi;
+}
+
+fn setPacked128(v0: u32, v1: u32, v2: u32, v3: u32) void {
+    packed128_last[0] = v0;
+    packed128_last[1] = v1;
+    packed128_last[2] = v2;
+    packed128_last[3] = v3;
+}
+
+fn applyPackedOp32(left: u32, right: u32, op: u32) u32 {
+    return switch (op & 7) {
+        0 => left & right,
+        1 => (~left) & right,
+        2 => left | right,
+        3 => left ^ right,
+        4 => if (left == right) 0xffffffff else 0,
+        else => 0,
+    };
 }
 
 fn maxF64(a: f64, b: f64) f64 {
@@ -1291,6 +1310,26 @@ pub export fn punpckhwd64_exec(dst_hi: u32, src_hi: u32) void {
         d0 | shl32(s0, 16),
         d1 | shl32(s1, 16),
     );
+}
+
+pub export fn packed_op32x2_exec(dst_lo: u32, dst_hi: u32, src_lo: u32, src_hi: u32, op: u32) void {
+    setPacked64(
+        applyPackedOp32(dst_lo, src_lo, op),
+        applyPackedOp32(dst_hi, src_hi, op),
+    );
+}
+
+pub export fn packed_op32x4_exec(dst0: u32, dst1: u32, dst2: u32, dst3: u32, src0: u32, src1: u32, src2: u32, src3: u32, op: u32) void {
+    setPacked128(
+        applyPackedOp32(dst0, src0, op),
+        applyPackedOp32(dst1, src1, op),
+        applyPackedOp32(dst2, src2, op),
+        applyPackedOp32(dst3, src3, op),
+    );
+}
+
+pub export fn get_packed128_last_lane(index: u32) u32 {
+    return if (index < 4) packed128_last[index] else 0;
 }
 
 pub export fn get_packed64_last_lo() u32 {

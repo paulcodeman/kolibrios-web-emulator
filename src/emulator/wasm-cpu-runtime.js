@@ -66,6 +66,15 @@
     };
   }
 
+  function readPacked128Result(exports) {
+    return [
+      (exports.get_packed128_last_lane?.(0) || 0) >>> 0,
+      (exports.get_packed128_last_lane?.(1) || 0) >>> 0,
+      (exports.get_packed128_last_lane?.(2) || 0) >>> 0,
+      (exports.get_packed128_last_lane?.(3) || 0) >>> 0
+    ];
+  }
+
   function readPackedBcdResult(exports) {
     const out = new Uint8Array(10);
     for (let i = 0; i < out.length; i += 1) {
@@ -182,6 +191,9 @@
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
+      typeof exports.packed_op32x2_exec !== "function" ||
+      typeof exports.packed_op32x4_exec !== "function" ||
+      typeof exports.get_packed128_last_lane !== "function" ||
       typeof exports.packsswb64_exec !== "function"
     ) {
       throw new Error("WASM CPU backend exports are incomplete.");
@@ -348,6 +360,24 @@
       },
       pslld32(a, count) {
         return exports.pslld32(a >>> 0, count >>> 0) >>> 0;
+      },
+      packedOp32x2(dstLo, dstHi, srcLo, srcHi, op) {
+        exports.packed_op32x2_exec(dstLo >>> 0, dstHi >>> 0, srcLo >>> 0, srcHi >>> 0, op >>> 0);
+        return readPacked64Result(exports);
+      },
+      packedOp32x4(dst0, dst1, dst2, dst3, src0, src1, src2, src3, op) {
+        exports.packed_op32x4_exec(
+          dst0 >>> 0,
+          dst1 >>> 0,
+          dst2 >>> 0,
+          dst3 >>> 0,
+          src0 >>> 0,
+          src1 >>> 0,
+          src2 >>> 0,
+          src3 >>> 0,
+          op >>> 0
+        );
+        return readPacked128Result(exports);
       },
       packsswb64(dstLo, dstHi, srcLo, srcHi) {
         exports.packsswb64_exec(dstLo >>> 0, dstHi >>> 0, srcLo >>> 0, srcHi >>> 0);
