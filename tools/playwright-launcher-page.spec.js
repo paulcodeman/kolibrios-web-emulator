@@ -25,11 +25,18 @@ test("bundled launcher page boots desktop", async ({ page }, testInfo) => {
     const app = window.__app;
     const session = app && app.sessionManager ? app.sessionManager : null;
     const workspace = document.getElementById("workspace");
+    const rootInfo = app && app.browserFsRoot && typeof app.browserFsRoot.fileInfoProvider === "function"
+      ? app.browserFsRoot.fileInfoProvider("/", "list")
+      : null;
+    const rootEntries = rootInfo && Array.isArray(rootInfo.entries)
+      ? rootInfo.entries.map((entry) => String(entry && entry.name ? entry.name : "").toLowerCase())
+      : [];
     return {
       innerWidth: window.innerWidth,
       innerHeight: window.innerHeight,
       backgroundColor: getComputedStyle(document.body).backgroundColor,
       rootSummary: app && app.browserFsRoot ? String(app.browserFsRoot.summaryText()) : "",
+      rootEntries,
       processCount: session && Array.isArray(session.processes) ? session.processes.length : 0,
       hasTaskbar: !!(
         session &&
@@ -46,10 +53,40 @@ test("bundled launcher page boots desktop", async ({ page }, testInfo) => {
 
   expect(state.backgroundColor).toBe("rgb(0, 0, 0)");
   expect(state.rootSummary).toContain("bundled");
+  expect(state.rootEntries).toContain("rd");
+  expect(state.rootEntries).toContain("tmp0");
+  expect(state.rootEntries).not.toContain("sys");
   expect(state.hasTaskbar).toBe(true);
   expect(state.processCount).toBeGreaterThan(0);
   expect(state.workspaceWidth).toBeGreaterThanOrEqual(state.innerWidth - 2);
   expect(state.workspaceHeight).toBeGreaterThanOrEqual(state.innerHeight - 2);
+
+  const tmpDiskState = await page.evaluate(() => {
+    const app = window.__app;
+    if (!app || !app.browserFsRoot) {
+      return null;
+    }
+    const root = app.browserFsRoot;
+    const bytes = new Uint8Array([0x6f, 0x6b, 0x0a]);
+    const folder = root.mutationProvider("create-folder", "/tmp0/1/playwright-cache", {});
+    const file = root.mutationProvider("create-file", "/tmp0/1/playwright-cache/test.txt", { data: bytes });
+    const info = root.fileInfoProvider("/tmp0/1/playwright-cache", "list");
+    const readBack = root.fileProvider("/tmp0/1/playwright-cache/test.txt");
+    return {
+      folderCode: folder ? (folder.errorCode >>> 0) : 0xffffffff,
+      fileCode: file ? (file.errorCode >>> 0) : 0xffffffff,
+      fileWritten: file ? (file.written >>> 0) : 0,
+      entries: info && Array.isArray(info.entries) ? info.entries.map((entry) => String(entry && entry.name ? entry.name : "")) : [],
+      text: readBack instanceof Uint8Array ? Array.from(readBack).map((value) => String.fromCharCode(value & 0xff)).join("") : ""
+    };
+  });
+
+  expect(tmpDiskState).not.toBeNull();
+  expect(tmpDiskState.folderCode).toBe(0);
+  expect(tmpDiskState.fileCode).toBe(0);
+  expect(tmpDiskState.fileWritten).toBe(3);
+  expect(tmpDiskState.entries).toContain("test.txt");
+  expect(tmpDiskState.text).toBe("ok\n");
 
   await page.evaluate(() => {
     const app = window.__app;

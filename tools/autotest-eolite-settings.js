@@ -24,7 +24,7 @@ async function clickButtonById(harness, snapshot, id, settleMs) {
 
 async function main() {
   const rootDir = path.resolve(process.argv[2] || DEFAULT_ROOT);
-  const target = path.join(rootDir, "File Managers", "EOLITE");
+  const target = path.join(rootDir, "EOLITE");
   const harness = new HeadlessUiHarness({
     launchDelayMs: 220,
     defaultTimeoutMs: 5000,

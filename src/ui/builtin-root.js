@@ -71,6 +71,145 @@
     };
   }
 
+  const SYSTEM_DISK_NAME = "rd";
+  const SYSTEM_VOLUME_NAME = "1";
+  const DEFAULT_TMP_DISK_NAME = "tmp0";
+  const DEFAULT_TMP_VOLUME_NAME = "1";
+
+  function createVirtualDiskStore() {
+    const store = new Map();
+    ensureVirtualDiskVolume(store, DEFAULT_TMP_DISK_NAME, DEFAULT_TMP_VOLUME_NAME);
+    return store;
+  }
+
+  function getVirtualDiskState(store, diskName) {
+    if (!(store instanceof Map)) {
+      return null;
+    }
+    const key = String(diskName || "").trim().toLowerCase();
+    return key ? (store.get(key) || null) : null;
+  }
+
+  function getVirtualDiskVolume(store, diskName, volumeName) {
+    const disk = getVirtualDiskState(store, diskName);
+    if (!disk || !(disk.volumes instanceof Map)) {
+      return null;
+    }
+    const key = String(volumeName || "").trim().toLowerCase();
+    return key ? (disk.volumes.get(key) || null) : null;
+  }
+
+  function ensureVirtualDiskVolume(store, diskName, volumeName) {
+    if (!(store instanceof Map)) {
+      return null;
+    }
+    const diskKey = String(diskName || "").trim().toLowerCase();
+    const volumeKey = String(volumeName || "").trim().toLowerCase();
+    if (!diskKey || !volumeKey) {
+      return null;
+    }
+    let disk = store.get(diskKey) || null;
+    if (!disk) {
+      disk = {
+        name: String(diskName || diskKey),
+        volumes: new Map()
+      };
+      store.set(diskKey, disk);
+    }
+    let volume = disk.volumes.get(volumeKey) || null;
+    if (!volume) {
+      volume = makeDirEntry(String(volumeName || volumeKey));
+      disk.volumes.set(volumeKey, volume);
+    }
+    return volume;
+  }
+
+  function listVirtualRootEntries(store) {
+    const entries = [{
+      name: SYSTEM_DISK_NAME,
+      isDirectory: true,
+      size: 0,
+      mtimeMs: 0
+    }];
+    if (store instanceof Map) {
+      const names = Array.from(store.values())
+        .map((disk) => String(disk && disk.name ? disk.name : ""))
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+      for (let i = 0; i < names.length; i += 1) {
+        entries.push({
+          name: names[i],
+          isDirectory: true,
+          size: 0,
+          mtimeMs: 0
+        });
+      }
+    }
+    return entries;
+  }
+
+  function listVirtualDiskEntries(store, diskName) {
+    if (String(diskName || "").toLowerCase() === SYSTEM_DISK_NAME) {
+      return [{
+        name: SYSTEM_VOLUME_NAME,
+        isDirectory: true,
+        size: 0,
+        mtimeMs: 0
+      }];
+    }
+    const disk = getVirtualDiskState(store, diskName);
+    if (!disk || !(disk.volumes instanceof Map)) {
+      return [];
+    }
+    return Array.from(disk.volumes.values())
+      .map((volume) => ({
+        name: String(volume && volume.name ? volume.name : ""),
+        isDirectory: true,
+        size: 0,
+        mtimeMs: 0
+      }))
+      .filter((entry) => !!entry.name)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function createVirtualDirectoryInfo(pathText, entries) {
+    return {
+      path: pathText,
+      hostPath: pathText,
+      exists: true,
+      isDirectory: true,
+      size: 0,
+      mtimeMs: 0,
+      entries: Array.isArray(entries) ? entries.slice() : []
+    };
+  }
+
+  function parseTempDiskContainerPath(pathText) {
+    const normalized = normalizeKosInput(pathText) || "/";
+    const match = normalized.match(/^\/(tmp\d+)\/?$/i);
+    if (!match) {
+      return null;
+    }
+    return {
+      normalized,
+      diskName: match[1].toLowerCase()
+    };
+  }
+
+  function parseTempDiskVolumePath(pathText) {
+    const normalized = normalizeKosInput(pathText) || "/";
+    const match = normalized.match(/^\/(tmp\d+)\/(\d+)(?:\/(.*))?$/i);
+    if (!match) {
+      return null;
+    }
+    return {
+      normalized,
+      diskName: match[1].toLowerCase(),
+      volumeName: match[2],
+      relativePath: match[3] ? `/${match[3]}` : "/"
+    };
+  }
+
   function listDirEntries(entry) {
     const entries = [];
     if (!entry || entry.kind !== "directory") {
@@ -275,6 +414,7 @@
     const rootEntry = buildEntryTreeFromManifest(manifest);
     const stats = measureEntryTree(rootEntry);
     const accessors = createRootAccessors(rootEntry);
+    const virtualDisks = createVirtualDiskStore();
 
     const rootLabel = manifest && manifest.label ? String(manifest.label) : "builtin-kolibri-root";
 
@@ -288,12 +428,66 @@
         return Promise.resolve();
       },
       fileProvider(kpath) {
+        const normalized = normalizeKosInput(kpath) || "/";
+        const tempPath = parseTempDiskVolumePath(normalized);
+        if (tempPath) {
+          const volumeRoot = getVirtualDiskVolume(virtualDisks, tempPath.diskName, tempPath.volumeName);
+          if (!volumeRoot) {
+            return null;
+          }
+          const tempAccessors = createRootAccessors(volumeRoot);
+          const record = tempAccessors.resolveEntryRecord(tempPath.relativePath);
+          const bytes = tempAccessors.getBytes(record ? record.entry : null);
+          return bytes ? bytes.slice() : null;
+        }
+        if (normalized === "/" || /^\/rd\/?$/i.test(normalized) || parseTempDiskContainerPath(normalized)) {
+          return null;
+        }
         const record = accessors.resolveEntryRecord(kpath);
         const bytes = accessors.getBytes(record ? record.entry : null);
         return bytes ? bytes.slice() : null;
       },
       fileInfoProvider(kpath, kind) {
         const normalized = normalizeKosInput(kpath) || "/";
+        if (normalized === "/") {
+          return createVirtualDirectoryInfo(normalized, (kind || "stat") === "list" ? listVirtualRootEntries(virtualDisks) : []);
+        }
+        if (/^\/rd\/?$/i.test(normalized)) {
+          return createVirtualDirectoryInfo(normalized, (kind || "stat") === "list" ? listVirtualDiskEntries(virtualDisks, SYSTEM_DISK_NAME) : []);
+        }
+        const tempContainer = parseTempDiskContainerPath(normalized);
+        if (tempContainer) {
+          const disk = getVirtualDiskState(virtualDisks, tempContainer.diskName);
+          if (!disk) {
+            return null;
+          }
+          return createVirtualDirectoryInfo(normalized, (kind || "stat") === "list" ? listVirtualDiskEntries(virtualDisks, tempContainer.diskName) : []);
+        }
+        const tempPath = parseTempDiskVolumePath(normalized);
+        if (tempPath) {
+          const volumeRoot = getVirtualDiskVolume(virtualDisks, tempPath.diskName, tempPath.volumeName);
+          if (!volumeRoot) {
+            return null;
+          }
+          const tempAccessors = createRootAccessors(volumeRoot);
+          const record = tempAccessors.resolveEntryRecord(tempPath.relativePath);
+          const entry = record ? record.entry : null;
+          if (!entry) {
+            return null;
+          }
+          const info = {
+            path: normalized,
+            hostPath: normalized,
+            exists: true,
+            isDirectory: entry.kind === "directory",
+            size: entry.kind === "file" ? (entry.size >>> 0) : 0,
+            mtimeMs: entry.mtimeMs >>> 0
+          };
+          if ((kind || "stat") === "list") {
+            info.entries = listDirEntries(entry);
+          }
+          return info;
+        }
         const record = accessors.resolveEntryRecord(normalized);
         const entry = record ? record.entry : null;
         if (!entry) {
@@ -372,6 +566,7 @@
     const storageKey = getPersistStorageKey(manifest);
     const rootEntry = loadPersistedSnapshot(manifest) || buildEntryTreeFromManifest(manifest);
     const accessors = createRootAccessors(rootEntry);
+    const virtualDisks = createVirtualDiskStore();
     let stats = measureEntryTree(rootEntry);
     let pendingFlush = Promise.resolve();
 
@@ -387,12 +582,12 @@
         .catch(() => {})
         .then(() => {
           localStorage.setItem(storageKey, JSON.stringify(snapshotEntryTree(rootEntry)));
-        });
+      });
       return pendingFlush;
     }
 
-    function createOrRewriteFile(kpath, options) {
-      const parent = accessors.resolveParentRecord(kpath);
+    function createOrRewriteFileAt(targetAccessors, kpath, options, persistChanges) {
+      const parent = targetAccessors.resolveParentRecord(kpath);
       if (!parent || !parent.parentEntry || parent.parentEntry.kind !== "directory") {
         return { errorCode: 5, written: 0 };
       }
@@ -413,13 +608,15 @@
       entry.bytes = bytes;
       entry.base64 = encodeBase64(bytes);
       parent.parentEntry.children.set(name.toLowerCase(), entry);
-      updateStats();
-      queuePersist();
+      if (persistChanges) {
+        updateStats();
+        queuePersist();
+      }
       return { errorCode: 0, written: entry.size >>> 0 };
     }
 
-    function writeExistingFile(kpath, options) {
-      const record = accessors.resolveEntryRecord(kpath);
+    function writeExistingFileAt(targetAccessors, kpath, options, persistChanges) {
+      const record = targetAccessors.resolveEntryRecord(kpath);
       if (!record || !record.entry) {
         return { errorCode: 5, written: 0 };
       }
@@ -439,13 +636,15 @@
       record.entry.base64 = encodeBase64(next);
       record.entry.size = next.length >>> 0;
       record.entry.mtimeMs = Date.now();
-      updateStats();
-      queuePersist();
+      if (persistChanges) {
+        updateStats();
+        queuePersist();
+      }
       return { errorCode: 0, written: patch.length >>> 0 };
     }
 
-    function setEndOfFile(kpath, options) {
-      const record = accessors.resolveEntryRecord(kpath);
+    function setEndOfFileAt(targetAccessors, kpath, options, persistChanges) {
+      const record = targetAccessors.resolveEntryRecord(kpath);
       if (!record || !record.entry) {
         return { errorCode: 5, written: 0 };
       }
@@ -460,13 +659,15 @@
       record.entry.base64 = encodeBase64(next);
       record.entry.size = next.length >>> 0;
       record.entry.mtimeMs = Date.now();
-      updateStats();
-      queuePersist();
+      if (persistChanges) {
+        updateStats();
+        queuePersist();
+      }
       return { errorCode: 0, written: 0 };
     }
 
-    function deletePath(kpath) {
-      const record = accessors.resolveEntryRecord(kpath);
+    function deletePathAt(targetAccessors, kpath, persistChanges) {
+      const record = targetAccessors.resolveEntryRecord(kpath);
       if (!record || !record.entry || !record.parent) {
         return { errorCode: 5, written: 0 };
       }
@@ -474,13 +675,15 @@
         return { errorCode: 10, written: 0 };
       }
       record.parent.children.delete(record.entry.name.toLowerCase());
-      updateStats();
-      queuePersist();
+      if (persistChanges) {
+        updateStats();
+        queuePersist();
+      }
       return { errorCode: 0, written: 0 };
     }
 
-    function createFolder(kpath) {
-      const parent = accessors.resolveParentRecord(kpath);
+    function createFolderAt(targetAccessors, kpath, persistChanges) {
+      const parent = targetAccessors.resolveParentRecord(kpath);
       if (!parent || !parent.parentEntry || parent.parentEntry.kind !== "directory") {
         return { errorCode: 5, written: 0 };
       }
@@ -495,14 +698,16 @@
       const entry = makeDirEntry(name);
       entry.mtimeMs = Date.now();
       parent.parentEntry.children.set(name.toLowerCase(), entry);
-      queuePersist();
+      if (persistChanges) {
+        queuePersist();
+      }
       return { errorCode: 0, written: 0 };
     }
 
-    function renameOrMovePath(kpath, options) {
-      const source = accessors.resolveEntryRecord(kpath);
+    function renameOrMovePathAt(targetAccessors, kpath, options, persistChanges) {
+      const source = targetAccessors.resolveEntryRecord(kpath);
       const nextPath = options && options.nextPath ? String(options.nextPath) : "";
-      const target = accessors.resolveParentRecord(nextPath);
+      const target = targetAccessors.resolveParentRecord(nextPath);
       if (!source || !source.entry || !source.parent) {
         return { errorCode: 5, written: 0 };
       }
@@ -527,8 +732,10 @@
       source.entry.name = nextName;
       source.entry.mtimeMs = Date.now();
       target.parentEntry.children.set(nextName.toLowerCase(), source.entry);
-      updateStats();
-      queuePersist();
+      if (persistChanges) {
+        updateStats();
+        queuePersist();
+      }
       return { errorCode: 0, written: 0 };
     }
 
@@ -542,12 +749,66 @@
         return pendingFlush;
       },
       fileProvider(kpath) {
+        const normalized = normalizeKosInput(kpath) || "/";
+        const tempPath = parseTempDiskVolumePath(normalized);
+        if (tempPath) {
+          const volumeRoot = getVirtualDiskVolume(virtualDisks, tempPath.diskName, tempPath.volumeName);
+          if (!volumeRoot) {
+            return null;
+          }
+          const tempAccessors = createRootAccessors(volumeRoot);
+          const record = tempAccessors.resolveEntryRecord(tempPath.relativePath);
+          const bytes = tempAccessors.getBytes(record ? record.entry : null);
+          return bytes ? bytes.slice() : null;
+        }
+        if (normalized === "/" || /^\/rd\/?$/i.test(normalized) || parseTempDiskContainerPath(normalized)) {
+          return null;
+        }
         const record = accessors.resolveEntryRecord(kpath);
         const bytes = accessors.getBytes(record ? record.entry : null);
         return bytes ? bytes.slice() : null;
       },
       fileInfoProvider(kpath, kind) {
         const normalized = normalizeKosInput(kpath) || "/";
+        if (normalized === "/") {
+          return createVirtualDirectoryInfo(normalized, (kind || "stat") === "list" ? listVirtualRootEntries(virtualDisks) : []);
+        }
+        if (/^\/rd\/?$/i.test(normalized)) {
+          return createVirtualDirectoryInfo(normalized, (kind || "stat") === "list" ? listVirtualDiskEntries(virtualDisks, SYSTEM_DISK_NAME) : []);
+        }
+        const tempContainer = parseTempDiskContainerPath(normalized);
+        if (tempContainer) {
+          const disk = getVirtualDiskState(virtualDisks, tempContainer.diskName);
+          if (!disk) {
+            return null;
+          }
+          return createVirtualDirectoryInfo(normalized, (kind || "stat") === "list" ? listVirtualDiskEntries(virtualDisks, tempContainer.diskName) : []);
+        }
+        const tempPath = parseTempDiskVolumePath(normalized);
+        if (tempPath) {
+          const volumeRoot = getVirtualDiskVolume(virtualDisks, tempPath.diskName, tempPath.volumeName);
+          if (!volumeRoot) {
+            return null;
+          }
+          const tempAccessors = createRootAccessors(volumeRoot);
+          const record = tempAccessors.resolveEntryRecord(tempPath.relativePath);
+          const entry = record ? record.entry : null;
+          if (!entry) {
+            return null;
+          }
+          const info = {
+            path: normalized,
+            hostPath: normalized,
+            exists: true,
+            isDirectory: entry.kind === "directory",
+            size: entry.kind === "file" ? (entry.size >>> 0) : 0,
+            mtimeMs: entry.mtimeMs >>> 0
+          };
+          if ((kind || "stat") === "list") {
+            info.entries = listDirEntries(entry);
+          }
+          return info;
+        }
         const record = accessors.resolveEntryRecord(normalized);
         const entry = record ? record.entry : null;
         if (!entry) {
@@ -567,19 +828,50 @@
         return info;
       },
       mutationProvider(op, kpath, options) {
+        const normalized = normalizeKosInput(kpath) || "/";
+        const tempPath = parseTempDiskVolumePath(normalized);
+        if (tempPath) {
+          const volumeRoot = ensureVirtualDiskVolume(virtualDisks, tempPath.diskName, tempPath.volumeName);
+          const tempAccessors = createRootAccessors(volumeRoot);
+          switch (op) {
+            case "create-file":
+              return createOrRewriteFileAt(tempAccessors, tempPath.relativePath, options, false);
+            case "write-file":
+              return writeExistingFileAt(tempAccessors, tempPath.relativePath, options, false);
+            case "set-end":
+              return setEndOfFileAt(tempAccessors, tempPath.relativePath, options, false);
+            case "delete":
+              return deletePathAt(tempAccessors, tempPath.relativePath, false);
+            case "create-folder":
+              return createFolderAt(tempAccessors, tempPath.relativePath, false);
+            case "move": {
+              const nextTempPath = parseTempDiskVolumePath(options && options.nextPath ? options.nextPath : "");
+              if (
+                !nextTempPath ||
+                nextTempPath.diskName !== tempPath.diskName ||
+                String(nextTempPath.volumeName) !== String(tempPath.volumeName)
+              ) {
+                return { errorCode: 10, written: 0 };
+              }
+              return renameOrMovePathAt(tempAccessors, tempPath.relativePath, { ...(options || {}), nextPath: nextTempPath.relativePath }, false);
+            }
+            default:
+              return { errorCode: 2, written: 0 };
+          }
+        }
         switch (op) {
           case "create-file":
-            return createOrRewriteFile(kpath, options);
+            return createOrRewriteFileAt(accessors, normalized, options, true);
           case "write-file":
-            return writeExistingFile(kpath, options);
+            return writeExistingFileAt(accessors, normalized, options, true);
           case "set-end":
-            return setEndOfFile(kpath, options);
+            return setEndOfFileAt(accessors, normalized, options, true);
           case "delete":
-            return deletePath(kpath);
+            return deletePathAt(accessors, normalized, true);
           case "create-folder":
-            return createFolder(kpath);
+            return createFolderAt(accessors, normalized, true);
           case "move":
-            return renameOrMovePath(kpath, options);
+            return renameOrMovePathAt(accessors, normalized, options, true);
           default:
             return { errorCode: 2, written: 0 };
         }
