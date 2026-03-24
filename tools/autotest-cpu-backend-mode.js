@@ -8,6 +8,8 @@ const REG_ECX = 1;
 const REG_EDX = 2;
 const REG_EBX = 3;
 const REG_ESP = 4;
+const REG_ESI = 6;
+const REG_EDI = 7;
 const REG_EIP = 8;
 const REG_EFLAGS = 9;
 
@@ -107,6 +109,8 @@ function runInstructionScenario(cpuBackend, bytes, setup) {
     ecx: emulator.readReg(REG_ECX) >>> 0,
     edx: emulator.readReg(REG_EDX) >>> 0,
     ebx: emulator.readReg(REG_EBX) >>> 0,
+    esi: emulator.readReg(REG_ESI) >>> 0,
+    edi: emulator.readReg(REG_EDI) >>> 0,
     mem0: emulator.readMem32(0) >>> 0,
     mem4: emulator.readMem32(4) >>> 0,
     mem8: emulator.readMem32(8) >>> 0
@@ -734,6 +738,31 @@ try {
       }
     },
     {
+      name: "0f b1 cmpxchg ecx, edx",
+      bytes: [0x0f, 0xb1, 0xd1],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x00002222);
+        emulator.writeReg(REG_ECX, 0x00001111);
+        emulator.writeReg(REG_EDX, 0x00003333);
+      }
+    },
+    {
+      name: "0f c1 xadd ecx, edx",
+      bytes: [0x0f, 0xc1, 0xd1],
+      setup(emulator) {
+        emulator.writeReg(REG_ECX, 0x00000020);
+        emulator.writeReg(REG_EDX, 0x00000007);
+      }
+    },
+    {
+      name: "inc ecx",
+      bytes: [0x41],
+      setup(emulator) {
+        emulator.writeReg(REG_ECX, 0x7fffffff);
+        emulator.writeReg(REG_EFLAGS, 0x203);
+      }
+    },
+    {
       name: "66 or rm16, r16",
       bytes: [0x66, 0x09, 0xc1],
       setup(emulator) {
@@ -746,6 +775,32 @@ try {
       bytes: [0x66, 0x83, 0xe8, 0x01],
       setup(emulator) {
         emulator.writeReg(REG_EAX, 0x00008000);
+      }
+    },
+    {
+      name: "66 0f b1 cmpxchg cx, dx",
+      bytes: [0x66, 0x0f, 0xb1, 0xd1],
+      setup(emulator) {
+        emulator.writeReg(REG_EAX, 0x00001234);
+        emulator.writeReg(REG_ECX, 0x00001111);
+        emulator.writeReg(REG_EDX, 0x00002222);
+      }
+    },
+    {
+      name: "66 f7 neg cx",
+      bytes: [0x66, 0xf7, 0xd9],
+      setup(emulator) {
+        emulator.writeReg(REG_ECX, 0x00001234);
+      }
+    },
+    {
+      name: "cmpsb updates flags and pointers",
+      bytes: [0xa6],
+      setup(emulator) {
+        emulator.writeReg(REG_ESI, 0x100);
+        emulator.writeReg(REG_EDI, 0x120);
+        emulator.writeMem8(0x100, 0x33);
+        emulator.writeMem8(0x120, 0x34);
       }
     }
   ];
