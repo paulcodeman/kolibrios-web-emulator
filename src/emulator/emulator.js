@@ -334,6 +334,61 @@ function mulFullWidth(left, right, widthBits, signed, flags) {
   return mulFullWidthJs(left, right, widthBits, signed, flags);
 }
 
+function divideFullWidthJs(high, low, divisor, widthBits, signed) {
+  const width = (widthBits >>> 0) === 16 ? 16 : 32;
+  if (signed) {
+    const dividend = width === 16
+      ? BigInt.asIntN(32, (BigInt(high & 0xffff) << 16n) | BigInt(low & 0xffff))
+      : BigInt.asIntN(64, (BigInt(high >>> 0) << 32n) | BigInt(low >>> 0));
+    const den = width === 16
+      ? BigInt.asIntN(16, BigInt(divisor & 0xffff))
+      : BigInt.asIntN(32, BigInt(divisor >>> 0));
+    if (den === 0n) {
+      return { ok: false, quotient: 0, remainder: 0 };
+    }
+    const quotient = dividend / den;
+    const remainder = dividend % den;
+    const minQ = width === 16 ? -32768n : -0x80000000n;
+    const maxQ = width === 16 ? 32767n : 0x7fffffffn;
+    if (quotient < minQ || quotient > maxQ) {
+      return { ok: false, quotient: 0, remainder: 0 };
+    }
+    const q = width === 16
+      ? (Number(BigInt.asUintN(16, quotient)) & 0xffff)
+      : (Number(BigInt.asUintN(32, quotient)) >>> 0);
+    const r = width === 16
+      ? (Number(BigInt.asUintN(16, remainder)) & 0xffff)
+      : (Number(BigInt.asUintN(32, remainder)) >>> 0);
+    return { ok: true, quotient: q >>> 0, remainder: r >>> 0 };
+  }
+  const dividend = width === 16
+    ? ((BigInt(high & 0xffff) << 16n) | BigInt(low & 0xffff))
+    : ((BigInt(high >>> 0) << 32n) | BigInt(low >>> 0));
+  const den = width === 16 ? BigInt(divisor & 0xffff) : BigInt(divisor >>> 0);
+  if (den === 0n) {
+    return { ok: false, quotient: 0, remainder: 0 };
+  }
+  const quotient = dividend / den;
+  const remainder = dividend % den;
+  const maxQ = width === 16 ? 0xffffn : 0xffffffffn;
+  if (quotient > maxQ) {
+    return { ok: false, quotient: 0, remainder: 0 };
+  }
+  return {
+    ok: true,
+    quotient: width === 16 ? (Number(quotient) & 0xffff) : (Number(quotient) >>> 0),
+    remainder: width === 16 ? (Number(remainder) & 0xffff) : (Number(remainder) >>> 0)
+  };
+}
+
+function divideFullWidth(high, low, divisor, widthBits, signed) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.divideFullWidth === "function") {
+    return backend.divideFullWidth(high >>> 0, low >>> 0, divisor >>> 0, widthBits >>> 0, !!signed);
+  }
+  return divideFullWidthJs(high, low, divisor, widthBits, signed);
+}
+
 function widthMask(widthBits) {
   if (widthBits === 8) {
     return 0xff;
@@ -866,6 +921,9 @@ function getJsCpuHelperBackend() {
       },
       mulFullWidth(left, right, widthBits, signed, flags) {
         return mulFullWidthJs(left, right, widthBits, signed, flags);
+      },
+      divideFullWidth(high, low, divisor, widthBits, signed) {
+        return divideFullWidthJs(high, low, divisor, widthBits, signed);
       },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
@@ -2227,6 +2285,7 @@ class Emulator {
     x87CompareCode,
     shiftPacked64,
     mulFullWidth,
+    divideFullWidth,
     updateLogicFlagsWidth,
     updateAddFlags,
     updateAdcFlags,

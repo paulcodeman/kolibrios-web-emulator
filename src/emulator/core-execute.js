@@ -25,6 +25,7 @@
       x87CompareCode,
       shiftPacked64,
       mulFullWidth,
+      divideFullWidth,
       updateLogicFlagsWidth,
       updateAddFlags,
       updateAdcFlags,
@@ -2676,31 +2677,12 @@
           }
           const eax = this.readReg(REG.EAX) >>> 0;
           const edx = this.readReg(REG.EDX) >>> 0;
-          if (regField === 6) {
-            const dividend = ((edx & 0xffff) << 16) | (eax & 0xffff);
-            const divisor = op & 0xffff;
-            const quot = Math.floor(dividend / divisor);
-            const rem = dividend % divisor;
-            if (quot > 0xffff) {
-              return false;
-            }
-            this.writeReg(REG.EAX, (eax & 0xffff0000) | (quot & 0xffff));
-            this.writeReg(REG.EDX, (edx & 0xffff0000) | (rem & 0xffff));
-          } else {
-            const dividend = ((edx & 0xffff) << 16) | (eax & 0xffff);
-            const sDividend = (dividend << 16) >> 16;
-            const sDivisor = ((op & 0xffff) << 16) >> 16;
-            if (sDivisor === 0) {
-              return false;
-            }
-            const quot = (sDividend / sDivisor) | 0;
-            const rem = (sDividend % sDivisor) | 0;
-            if (quot < -32768 || quot > 32767) {
-              return false;
-            }
-            this.writeReg(REG.EAX, (eax & 0xffff0000) | (quot & 0xffff));
-            this.writeReg(REG.EDX, (edx & 0xffff0000) | (rem & 0xffff));
+          const div = divideFullWidth(edx & 0xffff, eax & 0xffff, op & 0xffff, 16, regField === 7);
+          if (!div.ok) {
+            return false;
           }
+          this.writeReg(REG.EAX, (eax & 0xffff0000) | (div.quotient & 0xffff));
+          this.writeReg(REG.EDX, (edx & 0xffff0000) | (div.remainder & 0xffff));
           this.writeReg(REG.EIP, (addr + 2 + modrmInfo.size) >>> 0);
           return true;
         }
@@ -5247,30 +5229,12 @@
         }
         const edx = this.readReg(REG.EDX) >>> 0;
         const eax = this.readReg(REG.EAX) >>> 0;
-        if (regField === 6) {
-          const dividend = (BigInt(edx) << 32n) | BigInt(eax);
-          const divisor = BigInt(op >>> 0);
-          const quot = dividend / divisor;
-          const rem = dividend % divisor;
-          if (quot > 0xffffffffn) {
-            return false;
-          }
-          this.writeReg(REG.EAX, Number(quot) >>> 0);
-          this.writeReg(REG.EDX, Number(rem) >>> 0);
-        } else {
-          const dividend = (BigInt(edx << 0) << 32n) | BigInt(eax);
-          const divisor = BigInt(op | 0);
-          if (divisor === 0n) {
-            return false;
-          }
-          const quot = dividend / divisor;
-          const rem = dividend % divisor;
-          if (quot < -0x80000000n || quot > 0x7fffffffn) {
-            return false;
-          }
-          this.writeReg(REG.EAX, Number(quot & 0xffffffffn) >>> 0);
-          this.writeReg(REG.EDX, Number(rem & 0xffffffffn) >>> 0);
+        const div = divideFullWidth(edx, eax, op >>> 0, 32, regField === 7);
+        if (!div.ok) {
+          return false;
         }
+        this.writeReg(REG.EAX, div.quotient >>> 0);
+        this.writeReg(REG.EDX, div.remainder >>> 0);
         this.writeReg(REG.EIP, (addr + immOffset) >>> 0);
         return true;
       }

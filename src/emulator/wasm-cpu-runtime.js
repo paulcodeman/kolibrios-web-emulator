@@ -110,6 +110,14 @@
     };
   }
 
+  function readDivResult(exports) {
+    return {
+      ok: !!exports.get_div_last_ok?.(),
+      quotient: (exports.get_div_last_quotient?.() || 0) >>> 0,
+      remainder: (exports.get_div_last_remainder?.() || 0) >>> 0
+    };
+  }
+
   function createWasmCpuBackend() {
     if (cache.backend) {
       return cache.backend;
@@ -144,6 +152,10 @@
       typeof exports.get_mul_last_lo !== "function" ||
       typeof exports.get_mul_last_hi !== "function" ||
       typeof exports.get_mul_last_flags !== "function" ||
+      typeof exports.divide_full_width_exec !== "function" ||
+      typeof exports.get_div_last_ok !== "function" ||
+      typeof exports.get_div_last_quotient !== "function" ||
+      typeof exports.get_div_last_remainder !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
@@ -222,6 +234,10 @@
       mulFullWidth(left, right, widthBits, signed, flags) {
         exports.mul_full_width_exec(left >>> 0, right >>> 0, widthBits >>> 0, signed ? 1 : 0, flags >>> 0);
         return readMulResult(exports);
+      },
+      divideFullWidth(high, low, divisor, widthBits, signed) {
+        exports.divide_full_width_exec(high >>> 0, low >>> 0, divisor >>> 0, widthBits >>> 0, signed ? 1 : 0);
+        return readDivResult(exports);
       },
       shiftRotate(value, count, widthBits, mode, flags) {
         exports.shift_rotate_exec(value >>> 0, count >>> 0, widthBits >>> 0, mode >>> 0, flags >>> 0);

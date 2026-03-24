@@ -31,6 +31,9 @@ var shift_packed64_last_hi: u32 = 0;
 var mul_last_lo: u32 = 0;
 var mul_last_hi: u32 = 0;
 var mul_last_flags: u32 = 0;
+var div_last_ok: u32 = 0;
+var div_last_quotient: u32 = 0;
+var div_last_remainder: u32 = 0;
 
 fn shiftCount32(value: u32) u5 {
     return @intCast(value & 31);
@@ -569,6 +572,83 @@ pub export fn get_mul_last_hi() u32 {
 
 pub export fn get_mul_last_flags() u32 {
     return mul_last_flags;
+}
+
+pub export fn divide_full_width_exec(high: u32, low: u32, divisor: u32, width_bits: u32, signed_div: u32) void {
+    const width: u32 = if (width_bits == 16) 16 else 32;
+    div_last_ok = 0;
+    div_last_quotient = 0;
+    div_last_remainder = 0;
+    if ((signed_div & 1) != 0) {
+        const den: i64 = if (width == 16)
+            @as(i64, laneSigned16(divisor))
+        else
+            @as(i64, laneSigned32(divisor));
+        if (den == 0) {
+            return;
+        }
+        const dividend: i64 = if (width == 16) blk: {
+            const bits = ((@as(u32, high & 0xffff) << 16) | @as(u32, low & 0xffff));
+            const signed_bits: i32 = @bitCast(bits);
+            break :blk @as(i64, signed_bits);
+        } else blk: {
+            const bits = (@as(u64, high) << 32) | @as(u64, low);
+            const signed_bits: i64 = @bitCast(bits);
+            break :blk signed_bits;
+        };
+        const quotient = @divTrunc(dividend, den);
+        const remainder = @rem(dividend, den);
+        const overflow = if (width == 16)
+            (quotient < -32768 or quotient > 32767)
+        else
+            (quotient < -2147483648 or quotient > 2147483647);
+        if (overflow) {
+            return;
+        }
+        if (width == 16) {
+            div_last_quotient = @as(u32, @as(u16, @bitCast(@as(i16, @intCast(quotient)))));
+            div_last_remainder = @as(u32, @as(u16, @bitCast(@as(i16, @intCast(remainder)))));
+        } else {
+            div_last_quotient = @as(u32, @bitCast(@as(i32, @intCast(quotient))));
+            div_last_remainder = @as(u32, @bitCast(@as(i32, @intCast(remainder))));
+        }
+        div_last_ok = 1;
+        return;
+    }
+    const den: u64 = if (width == 16) @as(u64, divisor & 0xffff) else @as(u64, divisor);
+    if (den == 0) {
+        return;
+    }
+    const dividend: u64 = if (width == 16)
+        ((@as(u64, high & 0xffff) << 16) | @as(u64, low & 0xffff))
+    else
+        ((@as(u64, high) << 32) | @as(u64, low));
+    const quotient = dividend / den;
+    const remainder = dividend % den;
+    const overflow = if (width == 16) quotient > 0xffff else quotient > 0xffffffff;
+    if (overflow) {
+        return;
+    }
+    if (width == 16) {
+        div_last_quotient = @as(u32, @as(u16, @truncate(quotient)));
+        div_last_remainder = @as(u32, @as(u16, @truncate(remainder)));
+    } else {
+        div_last_quotient = @as(u32, @truncate(quotient));
+        div_last_remainder = @as(u32, @truncate(remainder));
+    }
+    div_last_ok = 1;
+}
+
+pub export fn get_div_last_ok() u32 {
+    return div_last_ok;
+}
+
+pub export fn get_div_last_quotient() u32 {
+    return div_last_quotient;
+}
+
+pub export fn get_div_last_remainder() u32 {
+    return div_last_remainder;
 }
 
 pub export fn shift_rotate_exec(value: u32, count: u32, width_bits: u32, mode: u32, flags: u32) void {

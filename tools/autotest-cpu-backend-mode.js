@@ -58,6 +58,7 @@ try {
   assert(typeof wasmBackend.x87CompareCode === "function", "wasm helper backend should expose x87 compare helpers");
   assert(typeof wasmBackend.shiftPacked64 === "function", "wasm helper backend should expose 64-bit shift helpers");
   assert(typeof wasmBackend.mulFullWidth === "function", "wasm helper backend should expose full-width multiply helpers");
+  assert(typeof wasmBackend.divideFullWidth === "function", "wasm helper backend should expose full-width divide helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -351,6 +352,35 @@ try {
           wasmBackend.mulFullWidth(left, right, width, signed, flags),
           jsBackend.mulFullWidth(left, right, width, signed, flags),
           `mulFullWidth should match for width=${width}, signed=${signed}`
+        );
+      }
+    }
+  }
+
+  const divVectors = [
+    { high: 0, low: 100, divisor: 3, width: 16, signed: false },
+    { high: 0xffff, low: 0xff9c, divisor: 0xfffe, width: 16, signed: true },
+    { high: 1, low: 0, divisor: 2, width: 32, signed: false },
+    { high: 0xffffffff, low: 0xffffff9c, divisor: 0xfffffffe, width: 32, signed: true },
+    { high: 0, low: 1, divisor: 0, width: 32, signed: false }
+  ];
+  for (const vector of divVectors) {
+    assertDeepEq(
+      wasmBackend.divideFullWidth(vector.high, vector.low, vector.divisor, vector.width, vector.signed),
+      jsBackend.divideFullWidth(vector.high, vector.low, vector.divisor, vector.width, vector.signed),
+      `divideFullWidth should match for width=${vector.width}, signed=${vector.signed}`
+    );
+  }
+  for (const width of [16, 32]) {
+    for (const signed of [false, true]) {
+      for (let i = 0; i < 180; i += 1) {
+        const high = nextRand();
+        const low = nextRand();
+        const divisor = (i % 17 === 0) ? 0 : nextRand();
+        assertDeepEq(
+          wasmBackend.divideFullWidth(high, low, divisor, width, signed),
+          jsBackend.divideFullWidth(high, low, divisor, width, signed),
+          `divideFullWidth should match for width=${width}, signed=${signed}`
         );
       }
     }
