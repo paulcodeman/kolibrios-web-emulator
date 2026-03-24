@@ -40,6 +40,16 @@ function assertClose(actual, expected, epsilon, message) {
   }
 }
 
+function assertSameFloat(actual, expected, epsilon, message) {
+  if (Object.is(actual, expected)) {
+    return;
+  }
+  if ((actual === 0 || expected === 0) || !Number.isFinite(actual) || !Number.isFinite(expected)) {
+    throw new Error(`${message}: expected ${String(expected)}, got ${String(actual)}`);
+  }
+  assertClose(actual, expected, epsilon, message);
+}
+
 function createLcg(seed) {
   let state = seed >>> 0;
   return function next() {
@@ -77,6 +87,8 @@ try {
   assert(typeof wasmBackend.divideFullWidth === "function", "wasm helper backend should expose full-width divide helpers");
   assert(typeof wasmBackend.x87F2xm1 === "function", "wasm helper backend should expose x87 transcendental helpers");
   assert(typeof wasmBackend.sseSqrt === "function", "wasm helper backend should expose SSE sqrt helpers");
+  assert(typeof wasmBackend.sseBinaryFloat === "function", "wasm helper backend should expose SSE binary float helpers");
+  assert(typeof wasmBackend.sseCompareCode === "function", "wasm helper backend should expose SSE compare helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -146,6 +158,45 @@ try {
     assertClose(wasmBackend.sseSqrt(value), jsBackend.sseSqrt(value), 1e-12, `sseSqrt should match for ${value}`);
     assertClose(wasmBackend.sseReciprocal(value), jsBackend.sseReciprocal(value), 1e-12, `sseReciprocal should match for ${value}`);
     assertClose(wasmBackend.sseReciprocalSqrt(value), jsBackend.sseReciprocalSqrt(value), 1e-12, `sseReciprocalSqrt should match for ${value}`);
+  }
+  for (const [left, right] of [
+    [1, 2],
+    [-3, 5],
+    [5, -3],
+    [0, 0],
+    [-0, 0],
+    [0, -0],
+    [-0, -0],
+    [Number.POSITIVE_INFINITY, 2],
+    [2, Number.NEGATIVE_INFINITY],
+    [Number.NaN, 1],
+    [1, Number.NaN]
+  ]) {
+    for (const op of [0, 1, 2, 3, 4, 5]) {
+      assertSameFloat(
+        wasmBackend.sseBinaryFloat(left, right, op),
+        jsBackend.sseBinaryFloat(left, right, op),
+        1e-12,
+        `sseBinaryFloat should match for op=${op}, left=${String(left)}, right=${String(right)}`
+      );
+    }
+  }
+  for (const [left, right] of [
+    [1, 2],
+    [2, 1],
+    [1, 1],
+    [-0, 0],
+    [0, -0],
+    [Number.NaN, 1],
+    [1, Number.NaN],
+    [Number.POSITIVE_INFINITY, 1],
+    [1, Number.NEGATIVE_INFINITY]
+  ]) {
+    assertEq(
+      wasmBackend.sseCompareCode(left, right),
+      jsBackend.sseCompareCode(left, right),
+      `sseCompareCode should match for left=${String(left)}, right=${String(right)}`
+    );
   }
 
   const bcdVectors = [

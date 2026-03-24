@@ -710,6 +710,56 @@ pub export fn sse_reciprocal_sqrt(value: f64) f64 {
     return 1.0 / @sqrt(value);
 }
 
+pub export fn sse_binary_float(left: f64, right: f64, op: u32) f64 {
+    switch (op & 7) {
+        0 => return left + right,
+        1 => return left - right,
+        2 => return left * right,
+        3 => return left / right,
+        4 => {
+            if (std.math.isNan(left) or std.math.isNan(right)) {
+                return std.math.nan(f64);
+            }
+            if (left < right) {
+                return left;
+            }
+            if (right < left) {
+                return right;
+            }
+            if (left == 0.0 and right == 0.0) {
+                return if (std.math.signbit(left) or std.math.signbit(right)) -0.0 else 0.0;
+            }
+            return left;
+        },
+        5 => {
+            if (std.math.isNan(left) or std.math.isNan(right)) {
+                return std.math.nan(f64);
+            }
+            if (left > right) {
+                return left;
+            }
+            if (right > left) {
+                return right;
+            }
+            if (left == 0.0 and right == 0.0) {
+                return if (std.math.signbit(left) and std.math.signbit(right)) -0.0 else 0.0;
+            }
+            return left;
+        },
+        else => return std.math.nan(f64),
+    }
+}
+
+pub export fn sse_compare_code(left: f64, right: f64) u32 {
+    if (!std.math.isFinite(left) or !std.math.isFinite(right)) {
+        return 3;
+    }
+    if (left == right) {
+        return 2;
+    }
+    return if (left < right) 1 else 0;
+}
+
 pub export fn shift_rotate_exec(value: u32, count: u32, width_bits: u32, mode: u32, flags: u32) void {
     const mask = widthMask(width_bits);
     const sign_bit = widthSign(width_bits);

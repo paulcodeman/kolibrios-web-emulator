@@ -38,6 +38,8 @@
       sseSqrt,
       sseReciprocal,
       sseReciprocalSqrt,
+      sseBinaryFloat,
+      sseCompareCode,
       updateLogicFlagsWidth,
       updateAddFlags,
       updateAdcFlags,
@@ -6073,7 +6075,7 @@
           for (let i = 0; i < 4; i += 1) {
             const a = this.readXmmF32(regIdx, i);
             const b = this.readXmmF32(modrmInfo.rm, i);
-            this.writeXmmF32(regIdx, i, a * b);
+            this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, 2));
           }
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
@@ -6083,7 +6085,7 @@
           for (let i = 0; i < 4; i += 1) {
             const a = this.readXmmF32(regIdx, i);
             const b = this.readMemFloat32((ea + i * 4) >>> 0);
-            this.writeXmmF32(regIdx, i, a * b);
+            this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, 2));
           }
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
@@ -6118,13 +6120,8 @@
             for (let i = 0; i < 4; i += 1) {
               const a = this.readXmmF32(regIdx, i);
               const b = this.readXmmF32(modrmInfo.rm, i);
-              let result = a / b;
-              if (op2 === 0x58) {
-                result = a + b;
-              } else if (op2 === 0x5c) {
-                result = a - b;
-              }
-              this.writeXmmF32(regIdx, i, result);
+              const op = op2 === 0x58 ? 0 : (op2 === 0x5c ? 1 : 3);
+              this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, op));
             }
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
@@ -6134,13 +6131,8 @@
             for (let i = 0; i < 4; i += 1) {
               const a = this.readXmmF32(regIdx, i);
               const b = this.readMemFloat32((ea + i * 4) >>> 0);
-              let result = a / b;
-              if (op2 === 0x58) {
-                result = a + b;
-              } else if (op2 === 0x5c) {
-                result = a - b;
-              }
-              this.writeXmmF32(regIdx, i, result);
+              const op = op2 === 0x58 ? 0 : (op2 === 0x5c ? 1 : 3);
+              this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, op));
             }
           }
         }
@@ -6159,8 +6151,8 @@
           for (let i = 0; i < 4; i += 1) {
             const a = this.readXmmF32(regIdx, i);
             const b = this.readXmmF32(modrmInfo.rm, i);
-            const result = op2 === 0x5d ? Math.min(a, b) : Math.max(a, b);
-            this.writeXmmF32(regIdx, i, result);
+            const op = op2 === 0x5d ? 4 : 5;
+            this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, op));
           }
         } else {
           const ea = this.calcEffectiveAddress(modrmInfo);
@@ -6170,8 +6162,8 @@
           for (let i = 0; i < 4; i += 1) {
             const a = this.readXmmF32(regIdx, i);
             const b = this.readMemFloat32((ea + i * 4) >>> 0);
-            const result = op2 === 0x5d ? Math.min(a, b) : Math.max(a, b);
-            this.writeXmmF32(regIdx, i, result);
+            const op = op2 === 0x5d ? 4 : 5;
+            this.writeXmmF32(regIdx, i, sseBinaryFloat(a, b, op));
           }
         }
         this.writeReg(REG.EIP, (addr + len) >>> 0);
@@ -6319,18 +6311,17 @@
           }
         }
         for (let i = 0; i < 4; i += 1) {
-          const a = this.readXmmF32(regIdx, i);
-          const b = src[i];
-          const unordered = !Number.isFinite(a) || !Number.isFinite(b);
+          const code = sseCompareCode(this.readXmmF32(regIdx, i), src[i]);
+          const unordered = code === 3;
           let ok = false;
           switch (imm & 7) {
-            case 0: ok = !unordered && a === b; break; // eq
-            case 1: ok = !unordered && a < b; break; // lt
-            case 2: ok = !unordered && a <= b; break; // le
+            case 0: ok = code === 2; break; // eq
+            case 1: ok = code === 1; break; // lt
+            case 2: ok = code === 1 || code === 2; break; // le
             case 3: ok = unordered; break; // unord
-            case 4: ok = unordered || a !== b; break; // neq
-            case 5: ok = unordered || a >= b; break; // nlt
-            case 6: ok = unordered || a > b; break; // nle
+            case 4: ok = unordered || code !== 2; break; // neq
+            case 5: ok = unordered || code === 0 || code === 2; break; // nlt
+            case 6: ok = unordered || code === 0; break; // nle
             case 7: ok = !unordered; break; // ord
             default: ok = false; break;
           }
@@ -6523,14 +6514,14 @@
             }
             b = this.readMemFloat32(ea);
           }
-          const a = this.readXmmF32(regIdx, 0);
+          const code = sseCompareCode(this.readXmmF32(regIdx, 0), b);
           let flags = this.readReg(REG.EFLAGS);
           flags &= ~(FLAG_ZF | FLAG_PF | FLAG_CF);
-          if (!Number.isFinite(a) || !Number.isFinite(b)) {
+          if (code === 3) {
             flags |= FLAG_ZF | FLAG_PF | FLAG_CF;
-          } else if (a === b) {
+          } else if (code === 2) {
             flags |= FLAG_ZF;
-          } else if (a < b) {
+          } else if (code === 1) {
             flags |= FLAG_CF;
           }
           this.writeReg(REG.EFLAGS, flags >>> 0);
@@ -6944,17 +6935,17 @@
             const dst = this.readXmmF32(regIdx, 0);
             let result = dst;
             if (op === 0x58) { // addss
-              result = dst + src;
+              result = sseBinaryFloat(dst, src, 0);
             } else if (op === 0x59) { // mulss
-              result = dst * src;
+              result = sseBinaryFloat(dst, src, 2);
             } else if (op === 0x5c) { // subss
-              result = dst - src;
+              result = sseBinaryFloat(dst, src, 1);
             } else if (op === 0x5e) { // divss
-              result = dst / src;
+              result = sseBinaryFloat(dst, src, 3);
             } else if (op === 0x5d) { // minss
-              result = Math.min(dst, src);
+              result = sseBinaryFloat(dst, src, 4);
             } else if (op === 0x5f) { // maxss
-              result = Math.max(dst, src);
+              result = sseBinaryFloat(dst, src, 5);
             }
             this.writeXmmF32(regIdx, 0, result);
             this.writeReg(REG.EIP, (addr + len) >>> 0);

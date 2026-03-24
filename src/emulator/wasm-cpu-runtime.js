@@ -177,6 +177,8 @@
       typeof exports.sse_sqrt !== "function" ||
       typeof exports.sse_reciprocal !== "function" ||
       typeof exports.sse_reciprocal_sqrt !== "function" ||
+      typeof exports.sse_binary_float !== "function" ||
+      typeof exports.sse_compare_code !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
@@ -296,6 +298,12 @@
       },
       sseReciprocalSqrt(value) {
         return Number(exports.sse_reciprocal_sqrt(Number(value)));
+      },
+      sseBinaryFloat(left, right, op) {
+        return Number(exports.sse_binary_float(Number(left), Number(right), op >>> 0));
+      },
+      sseCompareCode(left, right) {
+        return exports.sse_compare_code(Number(left), Number(right)) >>> 0;
       },
       shiftRotate(value, count, widthBits, mode, flags) {
         exports.shift_rotate_exec(value >>> 0, count >>> 0, widthBits >>> 0, mode >>> 0, flags >>> 0);

@@ -536,6 +536,55 @@ function sseReciprocalSqrt(value) {
   return sseReciprocalSqrtJs(value);
 }
 
+function sseBinaryFloatJs(left, right, op) {
+  const a = Number(left);
+  const b = Number(right);
+  switch (op >>> 0) {
+    case 0:
+      return a + b;
+    case 1:
+      return a - b;
+    case 2:
+      return a * b;
+    case 3:
+      return a / b;
+    case 4:
+      return Math.min(a, b);
+    case 5:
+      return Math.max(a, b);
+    default:
+      return Number.NaN;
+  }
+}
+
+function sseBinaryFloat(left, right, op) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.sseBinaryFloat === "function") {
+    return Number(backend.sseBinaryFloat(Number(left), Number(right), op >>> 0));
+  }
+  return sseBinaryFloatJs(left, right, op);
+}
+
+function sseCompareCodeJs(left, right) {
+  const a = Number(left);
+  const b = Number(right);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return 3;
+  }
+  if (a === b) {
+    return 2;
+  }
+  return a < b ? 1 : 0;
+}
+
+function sseCompareCode(left, right) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.sseCompareCode === "function") {
+    return backend.sseCompareCode(Number(left), Number(right)) >>> 0;
+  }
+  return sseCompareCodeJs(left, right) >>> 0;
+}
+
 function widthMask(widthBits) {
   if (widthBits === 8) {
     return 0xff;
@@ -1107,6 +1156,12 @@ function getJsCpuHelperBackend() {
       },
       sseReciprocalSqrt(value) {
         return sseReciprocalSqrtJs(value);
+      },
+      sseBinaryFloat(left, right, op) {
+        return sseBinaryFloatJs(left, right, op);
+      },
+      sseCompareCode(left, right) {
+        return sseCompareCodeJs(left, right);
       },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
@@ -2481,6 +2536,8 @@ class Emulator {
     sseSqrt,
     sseReciprocal,
     sseReciprocalSqrt,
+    sseBinaryFloat,
+    sseCompareCode,
     updateLogicFlagsWidth,
     updateAddFlags,
     updateAdcFlags,
