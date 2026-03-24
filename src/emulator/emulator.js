@@ -99,6 +99,57 @@ function x87StoreIntegerValue(value, truncate) {
   return x87StoreIntegerValueJs(value, truncate);
 }
 
+function x87PackedBcdToNumberJs(bytes) {
+  const source = bytes instanceof Uint8Array ? bytes : null;
+  if (!source || source.length < 10) {
+    return 0;
+  }
+  let magnitude = 0n;
+  let factor = 1n;
+  for (let i = 0; i < 9; i += 1) {
+    const packed = source[i] & 0xff;
+    magnitude += BigInt(packed & 0x0f) * factor;
+    factor *= 10n;
+    magnitude += BigInt((packed >>> 4) & 0x0f) * factor;
+    factor *= 10n;
+  }
+  const negative = (source[9] & 0x80) !== 0;
+  return Number(negative ? -magnitude : magnitude);
+}
+
+function x87PackedBcdToNumber(bytes) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87PackedBcdToNumber === "function") {
+    return Number(backend.x87PackedBcdToNumber(bytes));
+  }
+  return x87PackedBcdToNumberJs(bytes);
+}
+
+function x87NumberToPackedBcdJs(value) {
+  const out = new Uint8Array(10);
+  const rounded = x87StoreIntegerValueJs(value, false);
+  let magnitude = BigInt(Math.abs(rounded));
+  for (let i = 0; i < 9; i += 1) {
+    const lo = Number(magnitude % 10n) & 0x0f;
+    magnitude /= 10n;
+    const hi = Number(magnitude % 10n) & 0x0f;
+    magnitude /= 10n;
+    out[i] = (lo | (hi << 4)) & 0xff;
+  }
+  if (rounded < 0 || Object.is(rounded, -0)) {
+    out[9] = 0x80;
+  }
+  return out;
+}
+
+function x87NumberToPackedBcd(value) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87NumberToPackedBcd === "function") {
+    return backend.x87NumberToPackedBcd(Number(value));
+  }
+  return x87NumberToPackedBcdJs(value);
+}
+
 function widthMask(widthBits) {
   if (widthBits === 8) {
     return 0xff;
@@ -608,6 +659,12 @@ function getJsCpuHelperBackend() {
       x87StoreIntegerValue(value, truncate) {
         return x87StoreIntegerValueJs(value, truncate);
       },
+      x87PackedBcdToNumber(bytes) {
+        return x87PackedBcdToNumberJs(bytes);
+      },
+      x87NumberToPackedBcd(value) {
+        return x87NumberToPackedBcdJs(value);
+      },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return updateLogicFlagsWidthJs(flags, result, widthBits);
       },
@@ -685,6 +742,9 @@ function getJsCpuHelperBackend() {
       },
       punpckhwd64(dstHi, srcHi) {
         return punpckhwd64(dstHi, srcHi);
+      },
+      evalJccCondition(cc, flags) {
+        return evalJccConditionJs(cc, flags);
       }
     };
   }
@@ -1047,7 +1107,7 @@ const FAST_LOOP_BLUR_RIGHT = new Uint8Array([
   0x0f, 0xe0, 0xc3, 0x0f, 0x7f, 0x07, 0x83, 0xc7, 0x08
 ]);
 
-function evalJccCondition(cc, flags) {
+function evalJccConditionJs(cc, flags) {
   const of = (flags & FLAG_OF) !== 0;
   const cf = (flags & FLAG_CF) !== 0;
   const zf = (flags & FLAG_ZF) !== 0;
@@ -1072,6 +1132,14 @@ function evalJccCondition(cc, flags) {
     case 0xF: return !zf && (sf === of);
     default: return false;
   }
+}
+
+function evalJccCondition(cc, flags) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.evalJccCondition === "function") {
+    return !!backend.evalJccCondition(cc >>> 0, flags >>> 0);
+  }
+  return evalJccConditionJs(cc, flags);
 }
 
 function normalizeCpuBackendMode(mode) {
@@ -1949,6 +2017,8 @@ class Emulator {
     parityEven8,
     roundTiesToEven,
     x87StoreIntegerValue,
+    x87PackedBcdToNumber,
+    x87NumberToPackedBcd,
     updateLogicFlagsWidth,
     updateAddFlags,
     updateAdcFlags,

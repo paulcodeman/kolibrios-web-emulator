@@ -17,6 +17,8 @@
       parityEven8,
       roundTiesToEven,
       x87StoreIntegerValue,
+      x87PackedBcdToNumber,
+      x87NumberToPackedBcd,
       updateLogicFlagsWidth,
       updateAddFlags,
       updateAdcFlags,
@@ -64,41 +66,6 @@
         emulator.emitStopped(reason || "cpu-fault");
       }
       return true;
-    }
-
-    function x87PackedBcdToNumber(bytes) {
-      const source = bytes instanceof Uint8Array ? bytes : null;
-      if (!source || source.length < 10) {
-        return 0;
-      }
-      let magnitude = 0n;
-      let factor = 1n;
-      for (let i = 0; i < 9; i += 1) {
-        const packed = source[i] & 0xff;
-        magnitude += BigInt(packed & 0x0f) * factor;
-        factor *= 10n;
-        magnitude += BigInt((packed >>> 4) & 0x0f) * factor;
-        factor *= 10n;
-      }
-      const negative = (source[9] & 0x80) !== 0;
-      return Number(negative ? -magnitude : magnitude);
-    }
-
-    function x87NumberToPackedBcd(value) {
-      const out = new Uint8Array(10);
-      const rounded = x87StoreIntegerValue(value, false);
-      let magnitude = BigInt(Math.abs(rounded));
-      for (let i = 0; i < 9; i += 1) {
-        const lo = Number(magnitude % 10n) & 0x0f;
-        magnitude /= 10n;
-        const hi = Number(magnitude % 10n) & 0x0f;
-        magnitude /= 10n;
-        out[i] = (lo | (hi << 4)) & 0xff;
-      }
-      if (rounded < 0 || Object.is(rounded, -0)) {
-        out[9] = 0x80;
-      }
-      return out;
     }
 
     Object.assign(Emulator.prototype, {

@@ -50,6 +50,8 @@ try {
   assertEq(wasmBackend.apiVersion, 1, "wasm helper backend api should match build");
   assert(typeof wasmBackend.psubusb32 === "function", "wasm helper backend should expose MMX helpers");
   assert(typeof wasmBackend.roundTiesToEven === "function", "wasm helper backend should expose x87 helpers");
+  assert(typeof wasmBackend.evalJccCondition === "function", "wasm helper backend should expose Jcc helpers");
+  assert(typeof wasmBackend.x87PackedBcdToNumber === "function", "wasm helper backend should expose packed BCD helpers");
 
   const nextRand = createLcg(0x4b1d5e77);
   const widths = [8, 16, 32];
@@ -80,6 +82,32 @@ try {
       wasmBackend.x87StoreIntegerValue(value, true),
       jsBackend.x87StoreIntegerValue(value, true),
       `x87StoreIntegerValue(true) should match for ${String(value)}`
+    );
+  }
+
+  const bcdVectors = [
+    { bytes: Uint8Array.from([0x45, 0x23, 0x01, 0, 0, 0, 0, 0, 0, 0x00]), number: 12345 },
+    { bytes: Uint8Array.from([0x89, 0x67, 0x45, 0x23, 0x01, 0, 0, 0, 0, 0x80]), number: -123456789 },
+    { bytes: Uint8Array.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]), number: -0 }
+  ];
+  for (const vector of bcdVectors) {
+    assertEq(
+      wasmBackend.x87PackedBcdToNumber(vector.bytes),
+      jsBackend.x87PackedBcdToNumber(vector.bytes),
+      `x87PackedBcdToNumber should match for ${Array.from(vector.bytes).join(",")}`
+    );
+    assertEq(
+      wasmBackend.x87PackedBcdToNumber(vector.bytes),
+      vector.number,
+      `x87PackedBcdToNumber should decode expected value for ${Array.from(vector.bytes).join(",")}`
+    );
+  }
+
+  for (const value of [-987654321, -12345.5, -0, 0, 42, 123456789012345, 999999999999999999]) {
+    assertDeepEq(
+      Array.from(wasmBackend.x87NumberToPackedBcd(value)),
+      Array.from(jsBackend.x87NumberToPackedBcd(value)),
+      `x87NumberToPackedBcd should match for ${String(value)}`
     );
   }
 
@@ -118,6 +146,26 @@ try {
         );
       }
     }
+  }
+
+  const jccFlagVectors = [0, 1, 0x40, 0x80, 0x800, 0x884, 0xffffffff];
+  for (const flags of jccFlagVectors) {
+    for (let cc = 0; cc < 16; cc += 1) {
+      assertEq(
+        wasmBackend.evalJccCondition(cc, flags),
+        jsBackend.evalJccCondition(cc, flags),
+        `evalJccCondition should match for cc=${cc}, flags=0x${flags.toString(16)}`
+      );
+    }
+  }
+  for (let i = 0; i < 200; i += 1) {
+    const flags = nextRand();
+    const cc = nextRand() & 0xf;
+    assertEq(
+      wasmBackend.evalJccCondition(cc, flags),
+      jsBackend.evalJccCondition(cc, flags),
+      `evalJccCondition should match for random cc=${cc}, flags=0x${flags.toString(16)}`
+    );
   }
 
   for (let i = 0; i < 120; i += 1) {

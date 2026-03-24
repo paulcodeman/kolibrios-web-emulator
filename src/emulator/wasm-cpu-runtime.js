@@ -66,6 +66,14 @@
     };
   }
 
+  function readPackedBcdResult(exports) {
+    const out = new Uint8Array(10);
+    for (let i = 0; i < out.length; i += 1) {
+      out[i] = (exports.get_packed_bcd_last_byte?.(i >>> 0) || 0) & 0xff;
+    }
+    return out;
+  }
+
   function createWasmCpuBackend() {
     if (cache.backend) {
       return cache.backend;
@@ -75,10 +83,14 @@
       typeof exports.update_logic_flags_width !== "function" ||
       typeof exports.round_ties_to_even !== "function" ||
       typeof exports.x87_store_integer_value !== "function" ||
+      typeof exports.x87_packed_bcd_to_number !== "function" ||
+      typeof exports.x87_number_to_packed_bcd_exec !== "function" ||
+      typeof exports.get_packed_bcd_last_byte !== "function" ||
       typeof exports.update_add_flags !== "function" ||
       typeof exports.update_adc_flags !== "function" ||
       typeof exports.update_sub_flags !== "function" ||
       typeof exports.update_sbb_flags !== "function" ||
+      typeof exports.eval_jcc_condition !== "function" ||
       typeof exports.shift_rotate_exec !== "function" ||
       typeof exports.double_shift_exec !== "function" ||
       typeof exports.psubusb32 !== "function" ||
@@ -98,6 +110,25 @@
       x87StoreIntegerValue(value, truncate) {
         return Number(exports.x87_store_integer_value(Number(value), truncate ? 1 : 0));
       },
+      x87PackedBcdToNumber(bytes) {
+        const source = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
+        return Number(exports.x87_packed_bcd_to_number(
+          source[0] >>> 0,
+          source[1] >>> 0,
+          source[2] >>> 0,
+          source[3] >>> 0,
+          source[4] >>> 0,
+          source[5] >>> 0,
+          source[6] >>> 0,
+          source[7] >>> 0,
+          source[8] >>> 0,
+          source[9] >>> 0
+        ));
+      },
+      x87NumberToPackedBcd(value) {
+        exports.x87_number_to_packed_bcd_exec(Number(value));
+        return readPackedBcdResult(exports);
+      },
       updateLogicFlagsWidth(flags, result, widthBits) {
         return exports.update_logic_flags_width(flags >>> 0, result >>> 0, widthBits >>> 0) >>> 0;
       },
@@ -112,6 +143,9 @@
       },
       updateSbbFlags(flags, op1, op2, carry, result, widthBits) {
         return exports.update_sbb_flags(flags >>> 0, op1 >>> 0, op2 >>> 0, carry >>> 0, result >>> 0, widthBits >>> 0) >>> 0;
+      },
+      evalJccCondition(cc, flags) {
+        return !!exports.eval_jcc_condition(cc >>> 0, flags >>> 0);
       },
       shiftRotate(value, count, widthBits, mode, flags) {
         exports.shift_rotate_exec(value >>> 0, count >>> 0, widthBits >>> 0, mode >>> 0, flags >>> 0);

@@ -18,6 +18,7 @@ var double_shift_last_ok: u32 = 0;
 
 var packed64_last_lo: u32 = 0;
 var packed64_last_hi: u32 = 0;
+var packed_bcd_last: [10]u8 = [_]u8{0} ** 10;
 
 fn shiftCount32(value: u32) u5 {
     return @intCast(value & 31);
@@ -110,6 +111,10 @@ fn maxF64(a: f64, b: f64) f64 {
     return if (a > b) a else b;
 }
 
+fn absF64(value: f64) f64 {
+    return if (value < 0.0 or std.math.signbit(value)) -value else value;
+}
+
 fn shl32(value: u32, count: u32) u32 {
     return value << shiftCount32(count);
 }
@@ -148,6 +153,72 @@ pub export fn x87_store_integer_value(value: f64, truncate: u32) f64 {
         return 0;
     }
     return if ((truncate & 1) != 0) @trunc(value) else round_ties_to_even(value);
+}
+
+pub export fn x87_packed_bcd_to_number(
+    b0: u32,
+    b1: u32,
+    b2: u32,
+    b3: u32,
+    b4: u32,
+    b5: u32,
+    b6: u32,
+    b7: u32,
+    b8: u32,
+    b9: u32,
+) f64 {
+    const values = [_]u32{
+        b0 & 0xff, b1 & 0xff, b2 & 0xff, b3 & 0xff, b4 & 0xff,
+        b5 & 0xff, b6 & 0xff, b7 & 0xff, b8 & 0xff, b9 & 0xff,
+    };
+    var magnitude: u64 = 0;
+    var factor: u64 = 1;
+    var i: usize = 0;
+    while (i < 9) : (i += 1) {
+        const packed_byte = values[i];
+        magnitude += @as(u64, packed_byte & 0x0f) * factor;
+        factor *= 10;
+        magnitude += @as(u64, (packed_byte >> 4) & 0x0f) * factor;
+        factor *= 10;
+    }
+    const value = @as(f64, @floatFromInt(magnitude));
+    return if ((values[9] & 0x80) != 0) -value else value;
+}
+
+pub export fn x87_number_to_packed_bcd_exec(value: f64) void {
+    var i: usize = 0;
+    while (i < packed_bcd_last.len) : (i += 1) {
+        packed_bcd_last[i] = 0;
+    }
+    const rounded = x87_store_integer_value(value, 0);
+    if (!std.math.isFinite(rounded)) {
+        return;
+    }
+    var magnitude: u64 = 0;
+    const abs_value = absF64(rounded);
+    if (abs_value > @as(f64, @floatFromInt(std.math.maxInt(u64)))) {
+        magnitude = std.math.maxInt(u64);
+    } else {
+        magnitude = @intFromFloat(@trunc(abs_value));
+    }
+    i = 0;
+    while (i < 9) : (i += 1) {
+        const lo: u8 = @intCast(magnitude % 10);
+        magnitude /= 10;
+        const hi: u8 = @intCast(magnitude % 10);
+        magnitude /= 10;
+        packed_bcd_last[i] = lo | (hi << 4);
+    }
+    if (rounded < 0.0 or std.math.signbit(rounded)) {
+        packed_bcd_last[9] = 0x80;
+    }
+}
+
+pub export fn get_packed_bcd_last_byte(index: u32) u32 {
+    if (index >= packed_bcd_last.len) {
+        return 0;
+    }
+    return packed_bcd_last[index];
 }
 
 pub export fn update_logic_flags_width(flags: u32, result: u32, width_bits: u32) u32 {
@@ -283,6 +354,34 @@ pub export fn update_sub_flags(flags: u32, op1: u32, op2: u32, result: u32, widt
         next |= FLAG_PF;
     }
     return next;
+}
+
+pub export fn eval_jcc_condition(cc: u32, flags: u32) u32 {
+    const of = (flags & FLAG_OF) != 0;
+    const cf = (flags & FLAG_CF) != 0;
+    const zf = (flags & FLAG_ZF) != 0;
+    const sf = (flags & FLAG_SF) != 0;
+    const pf = (flags & FLAG_PF) != 0;
+    const take = switch (cc & 0xf) {
+        0x0 => of,
+        0x1 => !of,
+        0x2 => cf,
+        0x3 => !cf,
+        0x4 => zf,
+        0x5 => !zf,
+        0x6 => cf or zf,
+        0x7 => !cf and !zf,
+        0x8 => sf,
+        0x9 => !sf,
+        0xa => pf,
+        0xb => !pf,
+        0xc => sf != of,
+        0xd => sf == of,
+        0xe => zf or (sf != of),
+        0xf => !zf and (sf == of),
+        else => false,
+    };
+    return if (take) 1 else 0;
 }
 
 pub export fn shift_rotate_exec(value: u32, count: u32, width_bits: u32, mode: u32, flags: u32) void {
