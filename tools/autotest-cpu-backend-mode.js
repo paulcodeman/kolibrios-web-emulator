@@ -175,12 +175,46 @@ function runCachedBlockScenario(cpuBackend, bytes, setup) {
   emulator.writeReg(REG_EIP, 0);
   const cached = emulator.executeCachedBasicBlock(0, 64);
   const cachedState = captureBlockState(emulator, block);
+  emulator.cpu.regs.set(initialRegs);
+  emulator.writeReg(REG_EIP, 0);
+  const cachedAgain = emulator.executeCachedBasicBlock(0, 64);
+  const cachedAgainState = captureBlockState(emulator, block);
   return {
     built: built >>> 0,
     cached: cached >>> 0,
+    cachedAgain: cachedAgain >>> 0,
     hasSimplePlan: !!(block && block.simplePlan),
+    hasPreparedPlan: !!(block && block.simplePlan && block.simplePlan.prepared),
     linearState,
-    cachedState
+    cachedState,
+    cachedAgainState
+  };
+}
+
+function runPrewarmedSoftBlockScenario(cpuBackend, bytes, setup) {
+  const emulator = createInstructionEmulator(cpuBackend);
+  for (let i = 0; i < bytes.length; i += 1) {
+    emulator.writeMem8(i, bytes[i] & 0xff);
+  }
+  if (loaderApi && typeof loaderApi.scanSoftOps === "function") {
+    const scan = loaderApi.scanSoftOps(emulator.cpu.mem, 0, bytes.length);
+    emulator.softInstructionSites = scan && scan.sites instanceof Map ? scan.sites : new Map();
+  }
+  if (typeof setup === "function") {
+    setup(emulator);
+  }
+  const prepared = typeof emulator.prewarmSoftBasicBlocks === "function"
+    ? (emulator.prewarmSoftBasicBlocks(emulator.softInstructionSites, 64) >>> 0)
+    : 0;
+  const block = emulator.basicBlockCache.get(0) || null;
+  emulator.writeReg(REG_EIP, 0);
+  const cached = emulator.executeCachedBasicBlock(0, 64);
+  return {
+    prepared,
+    cached,
+    hasBlock: !!block,
+    hasPreparedPlan: !!(block && block.simplePlan && block.simplePlan.prepared),
+    state: captureBlockState(emulator, block)
   };
 }
 
@@ -1250,10 +1284,64 @@ try {
   const wasmBlock = runCachedBlockScenario("wasm", cachedBlockBytes, cachedBlockSetup);
   assert(jsBlock.built >= 2, "cached block scenario should build a multi-entry block");
   assertEq(jsBlock.cached, jsBlock.built, "js cached block should replay the full block");
+  assertEq(jsBlock.cachedAgain, jsBlock.built, "js cached block should replay the full block on repeated hit");
   assertEq(wasmBlock.cached, wasmBlock.built, "wasm cached block should replay the full block");
+  assertEq(wasmBlock.cachedAgain, wasmBlock.built, "wasm cached block should replay the full block on repeated hit");
   assert(wasmBlock.hasSimplePlan, "wasm cached block should compile a simple block plan");
+  assert(wasmBlock.hasPreparedPlan, "wasm cached block should prepare a wasm slot-backed block plan");
   assertDeepEq(wasmBlock.linearState, jsBlock.linearState, "cached block linear execution should match between js and wasm");
   assertDeepEq(wasmBlock.cachedState, jsBlock.cachedState, "cached block replay should match between js and wasm");
+  assertDeepEq(wasmBlock.cachedAgainState, jsBlock.cachedAgainState, "cached block repeated replay should match between js and wasm");
+
+  const prewarmedSoftBytes = [
+    0x41,
+    0x89, 0xd9,
+    0x83, 0xc1, 0x07,
+    0x0f, 0xcb,
+    0x31, 0xd9,
+    0x24, 0xf0,
+    0x4b,
+    0xc3
+  ];
+  const prewarmedSoftSetup = (emulator) => {
+    emulator.writeReg(REG_EAX, 0x0000005a);
+    emulator.writeReg(REG_EBX, 0x12345678);
+    emulator.writeReg(REG_EFLAGS, 0x203);
+  };
+  const wasmPrewarmed = runPrewarmedSoftBlockScenario("wasm", prewarmedSoftBytes, prewarmedSoftSetup);
+  assert(wasmPrewarmed.prepared > 0, "soft block prewarm should cache at least one block");
+  assert(wasmPrewarmed.hasBlock, "soft block prewarm should place the entry block into cache");
+  assert(wasmPrewarmed.hasPreparedPlan, "soft block prewarm should prepare a wasm slot-backed plan");
+  assert(wasmPrewarmed.cached >= 2, "prewarmed soft block should execute through cached path on first hit");
+
+  const cachedByteBlockBytes = [
+    0x8a, 0xc3,
+    0x80, 0xe0, 0xf0,
+    0xf6, 0xc0, 0xc0,
+    0x88, 0xc1,
+    0x83, 0xc3, 0x01,
+    0xc1, 0xe3, 0x04,
+    0xc0, 0xeb, 0x01,
+    0xd0, 0xe1,
+    0xc3
+  ];
+  const cachedByteBlockSetup = (emulator) => {
+    emulator.writeReg(REG_EAX, 0x0000005a);
+    emulator.writeReg(REG_EBX, 0x1234567b);
+    emulator.writeReg(REG_ECX, 0xabcdef12);
+    emulator.writeReg(REG_EFLAGS, 0x203);
+  };
+  const jsByteBlock = runCachedBlockScenario("js", cachedByteBlockBytes, cachedByteBlockSetup);
+  const wasmByteBlock = runCachedBlockScenario("wasm", cachedByteBlockBytes, cachedByteBlockSetup);
+  assert(jsByteBlock.built >= 2, "8-bit cached block scenario should build a multi-entry block");
+  assertEq(jsByteBlock.cached, jsByteBlock.built, "js 8-bit cached block should replay the full block");
+  assertEq(wasmByteBlock.cached, wasmByteBlock.built, "wasm 8-bit cached block should replay the full block");
+  assertEq(wasmByteBlock.cachedAgain, wasmByteBlock.built, "wasm 8-bit cached block should replay on repeated hit");
+  assert(wasmByteBlock.hasSimplePlan, "wasm 8-bit cached block should compile a simple block plan");
+  assert(wasmByteBlock.hasPreparedPlan, "wasm 8-bit cached block should prepare a wasm slot-backed plan");
+  assertDeepEq(wasmByteBlock.linearState, jsByteBlock.linearState, "8-bit cached block linear execution should match between js and wasm");
+  assertDeepEq(wasmByteBlock.cachedState, jsByteBlock.cachedState, "8-bit cached block replay should match between js and wasm");
+  assertDeepEq(wasmByteBlock.cachedAgainState, jsByteBlock.cachedAgainState, "8-bit cached block repeated replay should match between js and wasm");
 
   const jsEmulator = new Emulator(createHeadlessSurface(8, 8), () => {}, { cpuBackend: "js" });
   assertEq(jsEmulator.getCpuBackendInfo().requested, "js", "constructor should store requested js backend");

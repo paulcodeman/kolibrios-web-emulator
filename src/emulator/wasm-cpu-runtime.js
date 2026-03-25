@@ -199,10 +199,13 @@
       typeof exports.get_cmpxchg_last_exchanged !== "function" ||
       !exports.memory ||
       typeof exports.simple_block_max_words !== "function" ||
+      typeof exports.simple_block_slot_count !== "function" ||
       typeof exports.get_simple_block_plan_ptr !== "function" ||
+      typeof exports.get_simple_block_slot_plan_ptr !== "function" ||
       typeof exports.get_simple_block_regs_ptr !== "function" ||
       typeof exports.get_simple_block_last_flags !== "function" ||
       typeof exports.execute_simple_block_exec !== "function" ||
+      typeof exports.execute_simple_block_slot_exec !== "function" ||
       typeof exports.x87_compare_code !== "function" ||
       typeof exports.shift_packed64_exec !== "function" ||
       typeof exports.get_shift_packed64_last_lo !== "function" ||
@@ -256,8 +259,97 @@
     const memory = exports.memory;
     let memoryU32 = new Uint32Array(memory.buffer);
     const simpleBlockMaxWords = exports.simple_block_max_words() >>> 0;
+    const simpleBlockSlotCount = exports.simple_block_slot_count() >>> 0;
     const simpleBlockPlanIndex = (exports.get_simple_block_plan_ptr() >>> 0) >>> 2;
     const simpleBlockRegsIndex = (exports.get_simple_block_regs_ptr() >>> 0) >>> 2;
+    const simpleBlockSlotPlanIndices = new Uint32Array(simpleBlockSlotCount || 0);
+    for (let slot = 0; slot < simpleBlockSlotCount; slot += 1) {
+      simpleBlockSlotPlanIndices[slot] = (exports.get_simple_block_slot_plan_ptr(slot >>> 0) >>> 0) >>> 2;
+    }
+    const simpleBlockPreparedPlans = typeof WeakMap === "function" ? new WeakMap() : null;
+    const simpleBlockPreparedOwners = new Array(simpleBlockSlotCount).fill(null);
+    let nextSimpleBlockSlot = 0;
+
+    function refreshMemoryView() {
+      if (memoryU32.buffer !== memory.buffer) {
+        memoryU32 = new Uint32Array(memory.buffer);
+      }
+      return memoryU32;
+    }
+
+    function copyRegsIntoSimpleBlockScratch(regs) {
+      const view = refreshMemoryView();
+      for (let i = 0; i < 8; i += 1) {
+        view[simpleBlockRegsIndex + i] = regs[i] >>> 0;
+      }
+      return view;
+    }
+
+    function copyRegsOutOfSimpleBlockScratch(regs) {
+      const view = refreshMemoryView();
+      for (let i = 0; i < 8; i += 1) {
+        regs[i] = view[simpleBlockRegsIndex + i] >>> 0;
+      }
+    }
+
+    function prepareSimpleBlockPlan(words, totalWords) {
+      if (!simpleBlockSlotCount || !simpleBlockPreparedPlans) {
+        return null;
+      }
+      const cached = simpleBlockPreparedPlans.get(words);
+      if (
+        cached &&
+        cached.wordCount === totalWords &&
+        simpleBlockPreparedOwners[cached.slot] === words
+      ) {
+        return cached;
+      }
+      const slot = nextSimpleBlockSlot % simpleBlockSlotCount;
+      nextSimpleBlockSlot = (slot + 1) % simpleBlockSlotCount;
+      const view = refreshMemoryView();
+      view.set(words.subarray(0, totalWords), simpleBlockSlotPlanIndices[slot] >>> 0);
+      simpleBlockPreparedOwners[slot] = words;
+      const prepared = {
+        slot: slot >>> 0,
+        wordCount: totalWords >>> 0,
+        key: words
+      };
+      simpleBlockPreparedPlans.set(words, prepared);
+      return prepared;
+    }
+
+    function executePreparedSimpleBlock(prepared, regs, flags) {
+      if (
+        !prepared ||
+        !regs ||
+        typeof regs.length !== "number" ||
+        regs.length < 8 ||
+        !simpleBlockSlotCount
+      ) {
+        return { ok: false, flags: flags >>> 0 };
+      }
+      const slot = prepared.slot >>> 0;
+      if (
+        slot >= simpleBlockSlotCount ||
+        simpleBlockPreparedOwners[slot] !== prepared.key
+      ) {
+        return { ok: false, flags: flags >>> 0 };
+      }
+      copyRegsIntoSimpleBlockScratch(regs);
+      const ok = !!exports.execute_simple_block_slot_exec(slot, prepared.wordCount >>> 0, flags >>> 0);
+      if (!ok) {
+        return {
+          ok: false,
+          flags: (exports.get_simple_block_last_flags?.() || flags || 0) >>> 0
+        };
+      }
+      copyRegsOutOfSimpleBlockScratch(regs);
+      return {
+        ok: true,
+        flags: (exports.get_simple_block_last_flags?.() || 0) >>> 0
+      };
+    }
+
     cache.backend = {
       kind: "wasm",
       apiVersion: typeof exports.api_version === "function" ? (exports.api_version() >>> 0) : 0,
@@ -332,6 +424,17 @@
         );
         return readCmpxchgResult(exports);
       },
+      prepareSimpleBlockPlan(planWords, wordCount) {
+        const words = planWords instanceof Uint32Array ? planWords : new Uint32Array(planWords || 0);
+        const totalWords = Math.min(words.length >>> 0, wordCount >>> 0);
+        if (!totalWords || totalWords > simpleBlockMaxWords) {
+          return null;
+        }
+        return prepareSimpleBlockPlan(words, totalWords);
+      },
+      executePreparedSimpleBlock(prepared, regs, flags) {
+        return executePreparedSimpleBlock(prepared, regs, flags);
+      },
       executeSimpleBlock(planWords, wordCount, regs, flags) {
         const words = planWords instanceof Uint32Array ? planWords : new Uint32Array(planWords || 0);
         const totalWords = Math.min(words.length >>> 0, wordCount >>> 0);
@@ -344,13 +447,13 @@
         ) {
           return { ok: false, flags: flags >>> 0 };
         }
-        if (memoryU32.buffer !== memory.buffer) {
-          memoryU32 = new Uint32Array(memory.buffer);
+        const prepared = prepareSimpleBlockPlan(words, totalWords);
+        if (prepared) {
+          return executePreparedSimpleBlock(prepared, regs, flags);
         }
-        memoryU32.set(words.subarray(0, totalWords), simpleBlockPlanIndex);
-        for (let i = 0; i < 8; i += 1) {
-          memoryU32[simpleBlockRegsIndex + i] = regs[i] >>> 0;
-        }
+        const view = refreshMemoryView();
+        view.set(words.subarray(0, totalWords), simpleBlockPlanIndex);
+        copyRegsIntoSimpleBlockScratch(regs);
         const ok = !!exports.execute_simple_block_exec(totalWords >>> 0, flags >>> 0);
         if (!ok) {
           return {
@@ -358,9 +461,7 @@
             flags: (exports.get_simple_block_last_flags?.() || flags || 0) >>> 0
           };
         }
-        for (let i = 0; i < 8; i += 1) {
-          regs[i] = memoryU32[simpleBlockRegsIndex + i] >>> 0;
-        }
+        copyRegsOutOfSimpleBlockScratch(regs);
         return {
           ok: true,
           flags: (exports.get_simple_block_last_flags?.() || 0) >>> 0

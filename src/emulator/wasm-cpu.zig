@@ -9,6 +9,7 @@ const FLAG_OF: u32 = 0x00000800;
 const ALU_FLAG_MASK: u32 = FLAG_CF | FLAG_PF | FLAG_ZF | FLAG_SF | FLAG_OF;
 const SIMPLE_BLOCK_RECORD_WORDS: u32 = 5;
 const SIMPLE_BLOCK_MAX_WORDS: u32 = 512;
+const SIMPLE_BLOCK_SLOT_COUNT: u32 = 64;
 const SIMPLE_BLOCK_OP_NOP: u32 = 0;
 const SIMPLE_BLOCK_OP_INC_R32: u32 = 1;
 const SIMPLE_BLOCK_OP_DEC_R32: u32 = 2;
@@ -18,6 +19,10 @@ const SIMPLE_BLOCK_OP_MOV_R32_IMM32: u32 = 5;
 const SIMPLE_BLOCK_OP_ALU_R32_R32: u32 = 6;
 const SIMPLE_BLOCK_OP_ALU_R32_IMM32: u32 = 7;
 const SIMPLE_BLOCK_OP_ALU_AL_IMM8: u32 = 8;
+const SIMPLE_BLOCK_OP_MOV_R8_R8: u32 = 9;
+const SIMPLE_BLOCK_OP_ALU_R8_IMM8: u32 = 10;
+const SIMPLE_BLOCK_OP_SHIFT_R32_IMM: u32 = 11;
+const SIMPLE_BLOCK_OP_SHIFT_R8_IMM: u32 = 12;
 
 var shift_rotate_last_result: u32 = 0;
 var shift_rotate_last_flags: u32 = 0;
@@ -60,6 +65,8 @@ var x87_sincos_last_cos: f64 = 1;
 var simple_block_plan: [SIMPLE_BLOCK_MAX_WORDS]u32 = [_]u32{0} ** SIMPLE_BLOCK_MAX_WORDS;
 var simple_block_regs: [8]u32 = [_]u32{0} ** 8;
 var simple_block_last_flags: u32 = 0;
+var simple_block_slot_plans: [SIMPLE_BLOCK_SLOT_COUNT][SIMPLE_BLOCK_MAX_WORDS]u32 =
+    [_][SIMPLE_BLOCK_MAX_WORDS]u32{[_]u32{0} ** SIMPLE_BLOCK_MAX_WORDS} ** SIMPLE_BLOCK_SLOT_COUNT;
 
 fn shiftCount32(value: u32) u5 {
     return @intCast(value & 31);
@@ -569,7 +576,26 @@ pub export fn get_simple_block_last_flags() u32 {
     return simple_block_last_flags;
 }
 
-pub export fn execute_simple_block_exec(word_count: u32, flags: u32) u32 {
+fn simpleBlockReadReg8(index: u32) u32 {
+    const idx = index & 7;
+    if (idx <= 3) {
+        return simple_block_regs[idx] & 0xff;
+    }
+    return shr32(simple_block_regs[idx - 4], 8) & 0xff;
+}
+
+fn simpleBlockWriteReg8(index: u32, value: u32) void {
+    const idx = index & 7;
+    const v = value & 0xff;
+    if (idx <= 3) {
+        simple_block_regs[idx] = (simple_block_regs[idx] & 0xffffff00) | v;
+        return;
+    }
+    const base = idx - 4;
+    simple_block_regs[base] = (simple_block_regs[base] & 0xffff00ff) | shl32(v, 8);
+}
+
+fn execute_simple_block_buffer(plan: []u32, word_count: u32, flags: u32) u32 {
     if (word_count == 0 or word_count > SIMPLE_BLOCK_MAX_WORDS or (word_count % SIMPLE_BLOCK_RECORD_WORDS) != 0) {
         simple_block_last_flags = flags;
         return 0;
@@ -577,11 +603,11 @@ pub export fn execute_simple_block_exec(word_count: u32, flags: u32) u32 {
     var next_flags = flags;
     var index: u32 = 0;
     while (index < word_count) : (index += SIMPLE_BLOCK_RECORD_WORDS) {
-        const kind = simple_block_plan[index];
-        const a = simple_block_plan[index + 1];
-        const b = simple_block_plan[index + 2];
-        const c = simple_block_plan[index + 3];
-        const d = simple_block_plan[index + 4];
+        const kind = plan[index];
+        const a = plan[index + 1];
+        const b = plan[index + 2];
+        const c = plan[index + 3];
+        const d = plan[index + 4];
         switch (kind) {
             SIMPLE_BLOCK_OP_NOP => {},
             SIMPLE_BLOCK_OP_INC_R32 => {
@@ -633,6 +659,37 @@ pub export fn execute_simple_block_exec(word_count: u32, flags: u32) u32 {
                 }
                 next_flags = alu_last_flags;
             },
+            SIMPLE_BLOCK_OP_MOV_R8_R8 => {
+                simpleBlockWriteReg8(a, simpleBlockReadReg8(b));
+            },
+            SIMPLE_BLOCK_OP_ALU_R8_IMM8 => {
+                const dst = a & 7;
+                alu_binary_width_exec(c, simpleBlockReadReg8(dst), b & 0xff, 8, next_flags);
+                if ((d & 1) != 0) {
+                    simpleBlockWriteReg8(dst, alu_last_result & 0xff);
+                }
+                next_flags = alu_last_flags;
+            },
+            SIMPLE_BLOCK_OP_SHIFT_R32_IMM => {
+                const dst = a & 7;
+                const shift = b & 0x1f;
+                simple_block_regs[dst] = if ((c & 1) != 0)
+                    shr32(simple_block_regs[dst], shift)
+                else
+                    shl32(simple_block_regs[dst], shift);
+            },
+            SIMPLE_BLOCK_OP_SHIFT_R8_IMM => {
+                const dst = a & 7;
+                const shift = b & 0x1f;
+                const value = simpleBlockReadReg8(dst);
+                simpleBlockWriteReg8(
+                    dst,
+                    if ((c & 1) != 0)
+                        (shr32(value, shift) & 0xff)
+                    else
+                        (shl32(value, shift) & 0xff),
+                );
+            },
             else => {
                 simple_block_last_flags = next_flags;
                 return 0;
@@ -641,6 +698,29 @@ pub export fn execute_simple_block_exec(word_count: u32, flags: u32) u32 {
     }
     simple_block_last_flags = next_flags;
     return 1;
+}
+
+pub export fn simple_block_slot_count() u32 {
+    return SIMPLE_BLOCK_SLOT_COUNT;
+}
+
+pub export fn get_simple_block_slot_plan_ptr(slot: u32) u32 {
+    if (slot >= SIMPLE_BLOCK_SLOT_COUNT) {
+        return 0;
+    }
+    return @intFromPtr(&simple_block_slot_plans[slot][0]);
+}
+
+pub export fn execute_simple_block_exec(word_count: u32, flags: u32) u32 {
+    return execute_simple_block_buffer(simple_block_plan[0..], word_count, flags);
+}
+
+pub export fn execute_simple_block_slot_exec(slot: u32, word_count: u32, flags: u32) u32 {
+    if (slot >= SIMPLE_BLOCK_SLOT_COUNT) {
+        simple_block_last_flags = flags;
+        return 0;
+    }
+    return execute_simple_block_buffer(simple_block_slot_plans[slot][0..], word_count, flags);
 }
 
 pub export fn eval_jcc_condition(cc: u32, flags: u32) u32 {

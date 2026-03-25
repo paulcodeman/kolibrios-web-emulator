@@ -92,6 +92,7 @@ test("launcher CPU backend selector updates session mode and launches apps in wa
   expect(launched.wasmAvailable).toBe(true);
   expect(launched.maxSliceMs).toBe(16);
   expect(launched.backgroundMaxSliceMs).toBe(20);
+  expect(launched.preDisplayMaxSliceMs).toBe(8);
   expect(launched.basicBlockMaxEntries).toBe(48);
   expect(launched.basicBlockImmediateCacheEntries).toBe(2);
   expect(launched.basicBlockHotThreshold).toBe(2);

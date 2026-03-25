@@ -42,7 +42,11 @@ const SIMPLE_BLOCK_OPS = {
   MOV_R32_IMM32: 5,
   ALU_R32_R32: 6,
   ALU_R32_IMM32: 7,
-  ALU_AL_IMM8: 8
+  ALU_AL_IMM8: 8,
+  MOV_R8_R8: 9,
+  ALU_R8_IMM8: 10,
+  SHIFT_R32_IMM: 11,
+  SHIFT_R8_IMM: 12
 };
 
 let activeCpuHelperBackend = null;
@@ -1332,6 +1336,23 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags) {
     return { ok: false, flags: flags >>> 0 };
   }
   let nextFlags = flags >>> 0;
+  const readReg8 = (index) => {
+    const idx = index & 7;
+    if (idx <= 3) {
+      return regs[idx] & 0xff;
+    }
+    return (regs[idx - 4] >>> 8) & 0xff;
+  };
+  const writeReg8 = (index, value) => {
+    const idx = index & 7;
+    const v = value & 0xff;
+    if (idx <= 3) {
+      regs[idx] = ((regs[idx] & 0xffffff00) | v) >>> 0;
+      return;
+    }
+    const base = idx - 4;
+    regs[base] = ((regs[base] & 0xffff00ff) | (v << 8)) >>> 0;
+  };
   for (let offset = 0; offset < totalWords; offset += SIMPLE_BLOCK_RECORD_WORDS) {
     const kind = words[offset] >>> 0;
     const a = words[offset + 1] >>> 0;
@@ -1397,6 +1418,34 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags) {
           regs[REG.EAX] = ((eax & 0xffffff00) | (alu.result & 0xff)) >>> 0;
         }
         nextFlags = alu.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.MOV_R8_R8:
+        writeReg8(a >>> 0, readReg8(b >>> 0));
+        break;
+      case SIMPLE_BLOCK_OPS.ALU_R8_IMM8: {
+        const reg = a & 7;
+        const writeResult = (d & 1) !== 0;
+        const alu = aluBinaryWidthJs(c >>> 0, readReg8(reg), b & 0xff, 8, nextFlags);
+        if (writeResult) {
+          writeReg8(reg, alu.result & 0xff);
+        }
+        nextFlags = alu.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.SHIFT_R32_IMM: {
+        const reg = a & 7;
+        const shift = b & 0x1f;
+        regs[reg] = (c & 1) !== 0
+          ? ((regs[reg] >>> shift) >>> 0)
+          : ((regs[reg] << shift) >>> 0);
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.SHIFT_R8_IMM: {
+        const reg = a & 7;
+        const shift = b & 0x1f;
+        const value = readReg8(reg);
+        writeReg8(reg, (c & 1) !== 0 ? ((value >>> shift) & 0xff) : ((value << shift) & 0xff));
         break;
       }
       default:
@@ -2287,18 +2336,21 @@ function getCpuSliceProfile(isBrowserMainThread, backend) {
   if (!isBrowserMainThread) {
     return {
       maxSliceMs: 0,
-      backgroundMaxSliceMs: 0
+      backgroundMaxSliceMs: 0,
+      preDisplayMaxSliceMs: 0
     };
   }
   if (normalizeCpuBackendMode(backend) === "wasm") {
     return {
       maxSliceMs: 16,
-      backgroundMaxSliceMs: 20
+      backgroundMaxSliceMs: 20,
+      preDisplayMaxSliceMs: 8
     };
   }
   return {
     maxSliceMs: 8,
-    backgroundMaxSliceMs: 12
+    backgroundMaxSliceMs: 12,
+    preDisplayMaxSliceMs: 0
   };
 }
 
@@ -2385,6 +2437,7 @@ class Emulator {
     this.backgroundMaxInstructions = isWorkerContext ? 8000000 : 6000000;
     this.maxSliceMs = 0;
     this.backgroundMaxSliceMs = 0;
+    this.preDisplayMaxSliceMs = 0;
     this.sliceDeadlineAt = 0;
     this.sliceTimeCheckInterval = 2048;
     this.sliceTimeCheckCounter = 2048;
@@ -2497,6 +2550,7 @@ class Emulator {
     this.basicBlockImmediateCacheEntries = 4;
     this.basicBlockHotThreshold = 3;
     this.basicBlockHotCountMax = 50000;
+    this.softSimpleBlockPrewarmMaxStarts = 256;
     this.basicBlockHits = 0;
     this.basicBlockMisses = 0;
     this.basicBlockBuilds = 0;
@@ -2551,6 +2605,7 @@ class Emulator {
     const profile = getCpuSliceProfile(this.isBrowserMainThread, mode);
     this.maxSliceMs = profile.maxSliceMs | 0;
     this.backgroundMaxSliceMs = profile.backgroundMaxSliceMs | 0;
+    this.preDisplayMaxSliceMs = profile.preDisplayMaxSliceMs | 0;
     const blockProfile = getCpuBlockProfile(mode);
     this.basicBlockMaxEntries = blockProfile.basicBlockMaxEntries | 0;
     this.basicBlockImmediateCacheEntries = blockProfile.basicBlockImmediateCacheEntries | 0;
@@ -2577,6 +2632,7 @@ class Emulator {
       wasmAvailable: !!availability.wasm,
       maxSliceMs: this.maxSliceMs | 0,
       backgroundMaxSliceMs: this.backgroundMaxSliceMs | 0,
+      preDisplayMaxSliceMs: this.preDisplayMaxSliceMs | 0,
       basicBlockMaxEntries: this.basicBlockMaxEntries | 0,
       basicBlockImmediateCacheEntries: this.basicBlockImmediateCacheEntries | 0,
       basicBlockHotThreshold: this.basicBlockHotThreshold | 0
@@ -2921,6 +2977,15 @@ class Emulator {
         }
         const detail = parts.length ? ` (${parts.join(", ")})` : "";
         this.log(`Found ${result.sites.size} soft op sites${detail}.`);
+      }
+      if (typeof this.prewarmSoftBasicBlocks === "function") {
+        const prepared = this.prewarmSoftBasicBlocks(
+          result.sites,
+          this.softSimpleBlockPrewarmMaxStarts | 0
+        );
+        if (prepared > 0) {
+          this.log(`Prewarmed ${prepared} soft basic blocks.`);
+        }
       }
       if (result.warnings.length) {
         this.log(`Soft scan warnings: ${result.warnings.join(", ")}`);

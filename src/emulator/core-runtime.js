@@ -29,6 +29,12 @@
       getInterpreterSliceBudgetMs() {
         const foreground = Math.max(0, this.maxSliceMs | 0) | 0;
         if (this.windowDefined) {
+          if (!this.displayReady) {
+            const preDisplay = Math.max(0, this.preDisplayMaxSliceMs | 0) | 0;
+            if (preDisplay > 0) {
+              return preDisplay;
+            }
+          }
           return foreground;
         }
         return Math.max(foreground, this.backgroundMaxSliceMs | 0) | 0;
@@ -508,6 +514,10 @@
       },
 
       cacheBasicBlock(entries) {
+        return this.cacheBasicBlockWithPlan(entries, null);
+      },
+
+      cacheBasicBlockWithPlan(entries, precomputedSimplePlan) {
         if (!entries || entries.length < 2) {
           return false;
         }
@@ -527,8 +537,19 @@
           end,
           entries,
           pages: [],
-          simplePlan: this.buildSimpleBasicBlockPlan(entries)
+          simplePlan: precomputedSimplePlan || this.buildSimpleBasicBlockPlan(entries)
         };
+        if (
+          this.cpuBackend === "wasm" &&
+          block.simplePlan &&
+          this.cpuHelperBackend &&
+          typeof this.cpuHelperBackend.prepareSimpleBlockPlan === "function"
+        ) {
+          block.simplePlan.prepared = this.cpuHelperBackend.prepareSimpleBlockPlan(
+            block.simplePlan.words,
+            block.simplePlan.wordCount
+          );
+        }
         const startPage = start >>> 12;
         const endPage = (Math.max(start, end - 1) >>> 12);
         for (let page = startPage; page <= endPage; page += 1) {
@@ -545,8 +566,301 @@
         return true;
       },
 
+      canSoftSiteFallThrough(site) {
+        if (!site || !site.type) {
+          return false;
+        }
+        return !(
+          site.type === "loop" ||
+          site.type === "call-rel32" ||
+          site.type === "ret" ||
+          site.type === "jcc" ||
+          site.type === "jmp"
+        );
+      },
+
+      prewarmSoftBasicBlocks(siteMap, limit) {
+        if (!(siteMap instanceof Map) || !siteMap.size) {
+          return 0;
+        }
+        const maxStarts = Math.max(0, limit | 0) | 0;
+        if (!maxStarts) {
+          return 0;
+        }
+        const fallthroughTargets = new Set();
+        for (const [addr, site] of siteMap.entries()) {
+          if (!this.canSoftSiteFallThrough(site) || !(site.len > 0)) {
+            continue;
+          }
+          fallthroughTargets.add(((addr >>> 0) + (site.len >>> 0)) >>> 0);
+        }
+        let prepared = 0;
+        for (const [addr] of siteMap.entries()) {
+          if (prepared >= maxStarts) {
+            break;
+          }
+          const start = addr >>> 0;
+          if (fallthroughTargets.has(start) || this.basicBlockCache.has(start)) {
+            continue;
+          }
+          const entries = [];
+          const words = [];
+          let current = start;
+          while (
+            entries.length < (this.basicBlockMaxEntries | 0) &&
+            siteMap.has(current)
+          ) {
+            const site = siteMap.get(current);
+            if (
+              !this.canExecuteSoftInstructionInBasicBlock(site) ||
+              !(site && site.len > 0) ||
+              !this.canSoftSiteFallThrough(site)
+            ) {
+              break;
+            }
+            const next = (current + (site.len >>> 0)) >>> 0;
+            if (!this.appendSimpleBlockRecordForSoftSite(site, words)) {
+              break;
+            }
+            entries.push({
+              addr: current >>> 0,
+              next
+            });
+            current = next >>> 0;
+          }
+          if (entries.length < 2) {
+            continue;
+          }
+          const plan = {
+            words: Uint32Array.from(words),
+            wordCount: words.length >>> 0
+          };
+          if (this.cacheBasicBlockWithPlan(entries, plan)) {
+            prepared += 1;
+          }
+        }
+        return prepared;
+      },
+
       appendSimpleBlockRecord(target, kind, a, b, c, d) {
         target.push(kind >>> 0, a >>> 0, b >>> 0, c >>> 0, d >>> 0);
+      },
+
+      appendSimpleBlockRecordForSoftSite(site, target) {
+        if (!site || !site.type || !target) {
+          return false;
+        }
+        const bytes = site.bytes;
+        if (!bytes || !bytes.length) {
+          return false;
+        }
+        if (site.type === "inc-r32") {
+          this.appendSimpleBlockRecord(target, SIMPLE_BLOCK_OPS.INC_R32, site.reg & 7, 0, 0, 0);
+          return true;
+        }
+        if (site.type === "dec-r32") {
+          this.appendSimpleBlockRecord(target, SIMPLE_BLOCK_OPS.DEC_R32, site.reg & 7, 0, 0, 0);
+          return true;
+        }
+        if (site.type === "bswap") {
+          this.appendSimpleBlockRecord(target, SIMPLE_BLOCK_OPS.BSWAP_R32, site.reg & 7, 0, 0, 0);
+          return true;
+        }
+        if (site.type === "and-al-imm8") {
+          if ((site.len | 0) !== 2 || bytes.length < 2) {
+            return false;
+          }
+          this.appendSimpleBlockRecord(target, SIMPLE_BLOCK_OPS.ALU_AL_IMM8, 4, bytes[1] & 0xff, 1, 0);
+          return true;
+        }
+        if (
+          site.type === "mov8-rm-r" ||
+          site.type === "mov8-r-rm"
+        ) {
+          if ((site.len | 0) !== 2 || bytes.length < 2) {
+            return false;
+          }
+          const modrm = bytes[1] & 0xff;
+          const mod = (modrm >>> 6) & 3;
+          const reg = (modrm >>> 3) & 7;
+          const rm = modrm & 7;
+          if (mod !== 3) {
+            return false;
+          }
+          this.appendSimpleBlockRecord(
+            target,
+            SIMPLE_BLOCK_OPS.MOV_R8_R8,
+            site.type === "mov8-rm-r" ? rm : reg,
+            site.type === "mov8-rm-r" ? reg : rm,
+            0,
+            0
+          );
+          return true;
+        }
+        if (site.type === "testb-imm8") {
+          if ((site.len | 0) !== 3 || bytes.length < 3) {
+            return false;
+          }
+          const modrm = bytes[1] & 0xff;
+          const mod = (modrm >>> 6) & 3;
+          const rm = modrm & 7;
+          if (mod !== 3) {
+            return false;
+          }
+          this.appendSimpleBlockRecord(target, SIMPLE_BLOCK_OPS.ALU_R8_IMM8, rm, bytes[2] & 0xff, 8, 0);
+          return true;
+        }
+        if (site.type === "shlb-mem1") {
+          if ((site.len | 0) !== 2 || bytes.length < 2) {
+            return false;
+          }
+          const modrm = bytes[1] & 0xff;
+          const mod = (modrm >>> 6) & 3;
+          const rm = modrm & 7;
+          if (mod !== 3) {
+            return false;
+          }
+          this.appendSimpleBlockRecord(target, SIMPLE_BLOCK_OPS.SHIFT_R8_IMM, rm, 1, 0, 0);
+          return true;
+        }
+        if (site.type === "shrb-mem-imm") {
+          if ((site.len | 0) < 3 || bytes.length < 3) {
+            return false;
+          }
+          const modrm = bytes[1] & 0xff;
+          const mod = (modrm >>> 6) & 3;
+          const rm = modrm & 7;
+          if (mod !== 3) {
+            return false;
+          }
+          this.appendSimpleBlockRecord(
+            target,
+            SIMPLE_BLOCK_OPS.SHIFT_R8_IMM,
+            rm,
+            bytes[bytes.length - 1] & 0x1f,
+            1,
+            0
+          );
+          return true;
+        }
+        if (site.type === "shl32-imm" || site.type === "shr32-imm") {
+          if ((site.len | 0) < 3 || bytes.length < 3) {
+            return false;
+          }
+          const modrm = bytes[1] & 0xff;
+          const mod = (modrm >>> 6) & 3;
+          const rm = modrm & 7;
+          if (mod !== 3) {
+            return false;
+          }
+          this.appendSimpleBlockRecord(
+            target,
+            SIMPLE_BLOCK_OPS.SHIFT_R32_IMM,
+            rm,
+            bytes[bytes.length - 1] & 0x1f,
+            site.type === "shr32-imm" ? 1 : 0,
+            0
+          );
+          return true;
+        }
+        if (
+          site.type === "mov32-rm-r" ||
+          site.type === "mov32-r-rm" ||
+          site.type === "xor32-rm-r" ||
+          site.type === "or32-rm-r"
+        ) {
+          if ((site.len | 0) !== 2 || bytes.length < 2) {
+            return false;
+          }
+          const modrm = bytes[1] & 0xff;
+          const mod = (modrm >>> 6) & 3;
+          const reg = (modrm >>> 3) & 7;
+          const rm = modrm & 7;
+          if (mod !== 3) {
+            return false;
+          }
+          if (site.type === "mov32-rm-r") {
+            this.appendSimpleBlockRecord(target, SIMPLE_BLOCK_OPS.MOV_R32_R32, rm, reg, 0, 0);
+            return true;
+          }
+          if (site.type === "mov32-r-rm") {
+            this.appendSimpleBlockRecord(target, SIMPLE_BLOCK_OPS.MOV_R32_R32, reg, rm, 0, 0);
+            return true;
+          }
+          this.appendSimpleBlockRecord(
+            target,
+            SIMPLE_BLOCK_OPS.ALU_R32_R32,
+            rm,
+            reg,
+            site.type === "xor32-rm-r" ? 6 : 1,
+            1
+          );
+          return true;
+        }
+        if (site.type === "alu-imm") {
+          const opcode = site.opcode & 0xff;
+          const regField = site.regField & 7;
+          if (opcode === 0x80 || opcode === 0x82) {
+            if (
+              (regField !== 0 && regField !== 1 && regField !== 4 && regField !== 5 && regField !== 7) ||
+              (site.len | 0) < 3 ||
+              bytes.length < 3
+            ) {
+              return false;
+            }
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const rm = modrm & 7;
+            if (mod !== 3) {
+              return false;
+            }
+            this.appendSimpleBlockRecord(
+              target,
+              SIMPLE_BLOCK_OPS.ALU_R8_IMM8,
+              rm,
+              bytes[bytes.length - 1] & 0xff,
+              regField,
+              regField === 7 ? 0 : 1
+            );
+            return true;
+          }
+          if (
+            (opcode !== 0x81 && opcode !== 0x83) ||
+            (regField !== 0 && regField !== 1 && regField !== 4 && regField !== 5 && regField !== 7)
+          ) {
+            return false;
+          }
+          if (
+            (opcode === 0x81 && ((site.len | 0) !== 6 || bytes.length < 6)) ||
+            (opcode === 0x83 && ((site.len | 0) !== 3 || bytes.length < 3))
+          ) {
+            return false;
+          }
+          const modrm = bytes[1] & 0xff;
+          const mod = (modrm >>> 6) & 3;
+          const rm = modrm & 7;
+          if (mod !== 3) {
+            return false;
+          }
+          const imm = opcode === 0x81
+            ? (
+              (bytes[2] & 0xff) |
+              ((bytes[3] & 0xff) << 8) |
+              ((bytes[4] & 0xff) << 16) |
+              ((bytes[5] & 0xff) << 24)
+            ) >>> 0
+            : ((bytes[2] << 24) >> 24) >>> 0;
+          this.appendSimpleBlockRecord(
+            target,
+            SIMPLE_BLOCK_OPS.ALU_R32_IMM32,
+            rm,
+            imm,
+            regField,
+            regField === 7 ? 0 : 1
+          );
+          return true;
+        }
+        return false;
       },
 
       buildSimpleBasicBlockPlan(entries) {
@@ -565,6 +879,20 @@
           const len = (next - addr) >>> 0;
           if (!len || len > 8) {
             return null;
+          }
+          if (
+            this.softInstructionSites &&
+            this.softInstructionSites.has(addr)
+          ) {
+            const site = this.softInstructionSites.get(addr);
+            if (
+              site &&
+              (site.len >>> 0) === len &&
+              this.canExecuteSoftInstructionInBasicBlock(site) &&
+              this.appendSimpleBlockRecordForSoftSite(site, words)
+            ) {
+              continue;
+            }
           }
           const bytes = this.readMemBlock(addr, len);
           if (!bytes || bytes.length < len) {
@@ -635,6 +963,27 @@
             push(SIMPLE_BLOCK_OPS.ALU_AL_IMM8, op, bytes[1] & 0xff, opcode === 0x3c ? 0 : 1, 0);
             continue;
           }
+          if ((opcode === 0x80 || opcode === 0x82 || opcode === 0xf6) && len === 3) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const regField = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3) {
+              return null;
+            }
+            if (opcode === 0xf6) {
+              if (regField !== 0) {
+                return null;
+              }
+              push(SIMPLE_BLOCK_OPS.ALU_R8_IMM8, rm, bytes[2] & 0xff, 8, 0);
+              continue;
+            }
+            if (regField !== 0 && regField !== 1 && regField !== 4 && regField !== 5 && regField !== 7) {
+              return null;
+            }
+            push(SIMPLE_BLOCK_OPS.ALU_R8_IMM8, rm, bytes[2] & 0xff, regField, regField === 7 ? 0 : 1);
+            continue;
+          }
           if (
             (opcode === 0x05 ||
               opcode === 0x0d ||
@@ -679,6 +1028,56 @@
               ) >>> 0
               : ((bytes[2] << 24) >> 24) >>> 0;
             push(SIMPLE_BLOCK_OPS.ALU_R32_IMM32, rm, imm, regField, regField === 7 ? 0 : 1);
+            continue;
+          }
+          if (
+            opcode === 0x88 ||
+            opcode === 0x8a
+          ) {
+            if (len !== 2) {
+              return null;
+            }
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const reg = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3) {
+              return null;
+            }
+            push(SIMPLE_BLOCK_OPS.MOV_R8_R8, opcode === 0x88 ? rm : reg, opcode === 0x88 ? reg : rm, 0, 0);
+            continue;
+          }
+          if (opcode === 0xd0 && len === 2) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const regField = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3 || regField !== 4) {
+              return null;
+            }
+            push(SIMPLE_BLOCK_OPS.SHIFT_R8_IMM, rm, 1, 0, 0);
+            continue;
+          }
+          if (opcode === 0xc0 && len === 3) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const regField = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3 || regField !== 5) {
+              return null;
+            }
+            push(SIMPLE_BLOCK_OPS.SHIFT_R8_IMM, rm, bytes[2] & 0x1f, 1, 0);
+            continue;
+          }
+          if (opcode === 0xc1 && len === 3) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const regField = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3 || (regField !== 4 && regField !== 5)) {
+              return null;
+            }
+            push(SIMPLE_BLOCK_OPS.SHIFT_R32_IMM, rm, bytes[2] & 0x1f, regField === 5 ? 1 : 0, 0);
             continue;
           }
           if (
@@ -769,13 +1168,29 @@
         for (let i = 0; i < 8; i += 1) {
           scratch[i] = regs[i] >>> 0;
         }
-        const result = backend.executeSimpleBlock(
-          block.simplePlan.words,
-          block.simplePlan.wordCount,
-          scratch,
-          regs[REG.EFLAGS] >>> 0
-        );
+        if (
+          !block.simplePlan.prepared &&
+          typeof backend.prepareSimpleBlockPlan === "function"
+        ) {
+          block.simplePlan.prepared = backend.prepareSimpleBlockPlan(
+            block.simplePlan.words,
+            block.simplePlan.wordCount
+          );
+        }
+        const result = block.simplePlan.prepared && typeof backend.executePreparedSimpleBlock === "function"
+          ? backend.executePreparedSimpleBlock(
+            block.simplePlan.prepared,
+            scratch,
+            regs[REG.EFLAGS] >>> 0
+          )
+          : backend.executeSimpleBlock(
+            block.simplePlan.words,
+            block.simplePlan.wordCount,
+            scratch,
+            regs[REG.EFLAGS] >>> 0
+          );
         if (!result || !result.ok) {
+          block.simplePlan.prepared = null;
           return 0;
         }
         for (let i = 0; i < 8; i += 1) {
