@@ -6528,7 +6528,9 @@
           this.fastLoopCache.set(addr >>> 0, null);
           return null;
         }
-        const rel = (site.bytes[1] << 24) >> 24;
+        const rel = site.rel !== undefined
+          ? (site.rel | 0)
+          : ((site.bytes[1] << 24) >> 24);
         const target = (addr + site.len + rel) >>> 0;
         if (target >= addr) {
           this.fastLoopCache.set(addr >>> 0, null);

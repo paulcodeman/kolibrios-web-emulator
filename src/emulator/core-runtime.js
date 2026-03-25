@@ -351,8 +351,14 @@
         };
         if (this.basicBlockStartCache.size >= (this.basicBlockStartCacheMax | 0)) {
           this.basicBlockStartCache.clear();
+          if (this.basicBlockStartPageSet) {
+            this.basicBlockStartPageSet.clear();
+          }
         }
         this.basicBlockStartCache.set(start, state);
+        if (this.basicBlockStartPageSet) {
+          this.basicBlockStartPageSet.add(start >>> 12);
+        }
         this.basicBlockStartMisses = ((this.basicBlockStartMisses | 0) + 1) | 0;
         return state;
       },
@@ -1993,16 +1999,40 @@
             return;
           }
           const extra = 16;
-          if (byteCount > 512) {
-            this.basicBlockStartCache.clear();
-          } else {
-            const invalidateStart = start > extra ? (start - extra) >>> 0 : 0;
-            const invalidateEnd = (start + byteCount + extra) >>> 0;
+          const invalidateStart = start > extra ? (start - extra) >>> 0 : 0;
+          const invalidateEnd = (start + byteCount + extra) >>> 0;
+          let touchesStartPages = true;
+          if (this.basicBlockStartPageSet && this.basicBlockStartPageSet.size) {
+            touchesStartPages = false;
             if (invalidateEnd < invalidateStart) {
-              this.basicBlockStartCache.clear();
+              touchesStartPages = true;
             } else {
-              for (let cursor = invalidateStart; cursor <= invalidateEnd; cursor += 1) {
-                this.basicBlockStartCache.delete(cursor >>> 0);
+              const firstPage = invalidateStart >>> 12;
+              const lastPage = invalidateEnd >>> 12;
+              for (let page = firstPage; page <= lastPage; page += 1) {
+                if (this.basicBlockStartPageSet.has(page >>> 0)) {
+                  touchesStartPages = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (touchesStartPages) {
+            if (byteCount > 512) {
+              this.basicBlockStartCache.clear();
+              if (this.basicBlockStartPageSet) {
+                this.basicBlockStartPageSet.clear();
+              }
+            } else {
+              if (invalidateEnd < invalidateStart) {
+                this.basicBlockStartCache.clear();
+                if (this.basicBlockStartPageSet) {
+                  this.basicBlockStartPageSet.clear();
+                }
+              } else {
+                for (let cursor = invalidateStart; cursor <= invalidateEnd; cursor += 1) {
+                  this.basicBlockStartCache.delete(cursor >>> 0);
+                }
               }
             }
           }

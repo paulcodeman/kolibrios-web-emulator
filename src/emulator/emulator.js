@@ -3181,6 +3181,7 @@ class Emulator {
     this.decodeCacheHits = 0;
     this.decodeCacheMisses = 0;
     this.basicBlockStartCache = new Map();
+    this.basicBlockStartPageSet = new Set();
     this.basicBlockStartCacheMax = 20000;
     this.basicBlockStartHits = 0;
     this.basicBlockStartMisses = 0;
@@ -3456,6 +3457,7 @@ class Emulator {
     this.decodeCacheHits = 0;
     this.decodeCacheMisses = 0;
     this.basicBlockStartCache.clear();
+    this.basicBlockStartPageSet.clear();
     this.basicBlockStartHits = 0;
     this.basicBlockStartMisses = 0;
     this.fastLoopCache.clear();

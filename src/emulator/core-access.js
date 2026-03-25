@@ -293,71 +293,63 @@
         ) {
           return entry.softSite;
         }
-        const readRel8 = () => {
-          if ((start + 1) >= memLen) {
-            return null;
-          }
-          return (mem[start + 1] << 24) >> 24;
-        };
-        const readRel32 = (offset) => {
-          if ((start + offset + 3) >= memLen) {
-            return null;
-          }
-          return (
-            (mem[start + offset] & 0xff) |
-            ((mem[start + offset + 1] & 0xff) << 8) |
-            ((mem[start + offset + 2] & 0xff) << 16) |
-            ((mem[start + offset + 3] & 0xff) << 24)
-          ) | 0;
-        };
         const opcode = mem[start] & 0xff;
         let site = null;
         if (opcode >= 0x70 && opcode <= 0x7f) {
-          const rel = readRel8();
-          if (rel !== null) {
+          if ((start + 1) < memLen) {
+            const rel = (mem[start + 1] << 24) >> 24;
             site = { type: "jcc", cc: opcode & 0x0f, rel, len: 2 };
           }
         } else if (opcode === 0xeb) {
-          const rel = readRel8();
-          if (rel !== null) {
+          if ((start + 1) < memLen) {
+            const rel = (mem[start + 1] << 24) >> 24;
             site = { type: "jmp", rel, len: 2 };
           }
         } else if (opcode === 0xe9) {
-          const rel = readRel32(1);
-          if (rel !== null) {
+          if ((start + 4) < memLen) {
+            const rel =
+              (mem[start + 1] & 0xff) |
+              ((mem[start + 2] & 0xff) << 8) |
+              ((mem[start + 3] & 0xff) << 16) |
+              ((mem[start + 4] & 0xff) << 24);
             site = { type: "jmp", rel, len: 5 };
           }
         } else if (opcode === 0xe8) {
-          const rel = readRel32(1);
-          if (rel !== null) {
+          if ((start + 4) < memLen) {
+            const rel =
+              (mem[start + 1] & 0xff) |
+              ((mem[start + 2] & 0xff) << 8) |
+              ((mem[start + 3] & 0xff) << 16) |
+              ((mem[start + 4] & 0xff) << 24);
             site = { type: "call-rel32", rel, len: 5 };
           }
         } else if (opcode === 0xc3) {
           site = { type: "ret", len: 1 };
         } else if (opcode === 0xe3) {
-          const rel = readRel8();
-          if (rel !== null) {
+          if ((start + 1) < memLen) {
+            const rel = (mem[start + 1] << 24) >> 24;
             site = { type: "jecxz", rel, len: 2 };
           }
         } else if (opcode === 0xe0 || opcode === 0xe1 || opcode === 0xe2) {
-          const rel = readRel8();
-          if (rel !== null) {
+          if ((start + 1) < memLen) {
+            const rel = (mem[start + 1] << 24) >> 24;
             site = {
               type: "loop",
               opcode,
               rel,
-              len: 2,
-              bytes: Uint8Array.of(opcode, mem[start + 1] & 0xff)
+              len: 2
             };
           }
         } else if (opcode === 0x0f) {
-          if ((start + 1) < memLen) {
+          if ((start + 5) < memLen) {
             const op2 = mem[start + 1] & 0xff;
             if (op2 >= 0x80 && op2 <= 0x8f) {
-              const rel = readRel32(2);
-              if (rel !== null) {
-                site = { type: "jcc", cc: op2 & 0x0f, rel, len: 6 };
-              }
+              const rel =
+                (mem[start + 2] & 0xff) |
+                ((mem[start + 3] & 0xff) << 8) |
+                ((mem[start + 4] & 0xff) << 16) |
+                ((mem[start + 5] & 0xff) << 24);
+              site = { type: "jcc", cc: op2 & 0x0f, rel, len: 6 };
             }
           }
         }
