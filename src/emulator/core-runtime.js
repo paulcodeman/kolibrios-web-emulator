@@ -540,11 +540,18 @@
           entries
         );
         const precomputedSimplePlan = entries.length > 0 ? this.buildSimpleBasicBlockPlan(entries) : null;
-        const canCacheSingleEntry = entries.length === 1 && !!precomputedSimplePlan;
+        const canCacheSingleEntry = entries.length === 1;
         if (entries.length < 2 && !canCacheSingleEntry) {
           return executed;
         }
-        let shouldCache = canCacheSingleEntry || entries.length >= this.basicBlockImmediateCacheEntries;
+        const preferImmediateGenericSingleEntry =
+          entries.length === 1 &&
+          !precomputedSimplePlan &&
+          this.cpuBackend === "js";
+        let shouldCache =
+          preferImmediateGenericSingleEntry ||
+          (entries.length === 1 && !!precomputedSimplePlan) ||
+          entries.length >= this.basicBlockImmediateCacheEntries;
         if (!shouldCache) {
           const hotCount = this.noteBasicBlockHotness(start);
           shouldCache = hotCount >= this.basicBlockHotThreshold;
@@ -566,7 +573,7 @@
 
       cacheBasicBlockWithPlan(entries, precomputedSimplePlan) {
         const plan = precomputedSimplePlan || this.buildSimpleBasicBlockPlan(entries);
-        if (!entries || (!plan && entries.length < 2) || !entries.length) {
+        if (!entries || !entries.length) {
           return false;
         }
         const start = entries[0].addr >>> 0;

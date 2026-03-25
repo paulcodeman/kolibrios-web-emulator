@@ -1433,6 +1433,28 @@ try {
   assertDeepEq(jsOnlyAutoBlock.cachedState, jsOnlyAutoBlock.linearState, "auto js-only simple block replay should match linear execution");
   assert(!jsOnlyWasmBlock.hasSimplePlan, "wasm mode should not compile js-only simple blocks into wasm plans");
 
+  const genericSingleEntryBytes = [
+    0xc6, 0xc0, 0x12,
+    0xc3
+  ];
+  const genericSingleEntrySetup = (emulator) => {
+    emulator.writeReg(REG_EAX, 0xabcdef00);
+    emulator.writeReg(REG_EFLAGS, 0x203);
+  };
+  const jsGenericSingleEntryBlock = runHotSingleEntryCacheScenario("js", genericSingleEntryBytes, genericSingleEntrySetup);
+  const wasmGenericSingleEntryBlock = runHotSingleEntryCacheScenario("wasm", genericSingleEntryBytes, genericSingleEntrySetup);
+  assertEq(jsGenericSingleEntryBlock.builtFirst, 1, "js generic hot single-entry scenario should execute one instruction on first build");
+  assertEq(jsGenericSingleEntryBlock.builtSecond, 1, "js generic hot single-entry scenario should execute one instruction on second build");
+  assert(jsGenericSingleEntryBlock.hasBlock, "js generic hot single-entry scenario should promote a cached block after warming");
+  assert(!jsGenericSingleEntryBlock.hasSimplePlan, "js generic hot single-entry scenario should stay on the generic cached-block path");
+  assertEq(jsGenericSingleEntryBlock.cached, 1, "js generic hot single-entry cached block should replay the single instruction");
+  assert(wasmGenericSingleEntryBlock.hasBlock, "wasm generic hot single-entry scenario should promote a cached block after warming");
+  assert(!wasmGenericSingleEntryBlock.hasSimplePlan, "wasm generic hot single-entry scenario should stay on the generic cached-block path");
+  assert(!wasmGenericSingleEntryBlock.hasPreparedPlan, "wasm generic hot single-entry scenario should not allocate a prepared simple plan");
+  assertEq(wasmGenericSingleEntryBlock.cached, 1, "wasm generic hot single-entry cached block should replay the single instruction");
+  assertDeepEq(wasmGenericSingleEntryBlock.linearState, jsGenericSingleEntryBlock.linearState, "generic hot single-entry linear execution should match between js and wasm");
+  assertDeepEq(wasmGenericSingleEntryBlock.cachedState, jsGenericSingleEntryBlock.cachedState, "generic hot single-entry cached replay should match between js and wasm");
+
   const cachedByteRegRegBlockBytes = [
     0xb0, 0x5a,
     0xb3, 0x7b,
