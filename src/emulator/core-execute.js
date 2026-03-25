@@ -6763,14 +6763,25 @@
         }
         if (site && site.type === "shlb-mem1") {
           const modrmInfo = this.getCachedModRmInfo(addr, site.bytes, 1);
+          const flags = this.readReg(REG.EFLAGS);
           if (modrmInfo.mod === 3) {
-            const value = (this.readReg8ByIndex(modrmInfo.rm) << 1) & 0xff;
-            this.writeReg8ByIndex(modrmInfo.rm, value);
+            const value = this.readReg8ByIndex(modrmInfo.rm);
+            const res = shiftRotate(value, 1, 8, 4, flags);
+            if (!res.ok) {
+              return false;
+            }
+            this.writeReg8ByIndex(modrmInfo.rm, res.result & 0xff);
+            this.writeReg(REG.EFLAGS, res.flags >>> 0);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea !== null) {
-              const value = (this.readMem8(ea) << 1) & 0xff;
-              this.writeMem8(ea, value);
+              const value = this.readMem8(ea);
+              const res = shiftRotate(value, 1, 8, 4, flags);
+              if (!res.ok) {
+                return false;
+              }
+              this.writeMem8(ea, res.result & 0xff);
+              this.writeReg(REG.EFLAGS, res.flags >>> 0);
             }
           }
           this.writeReg(REG.EIP, (addr + site.len) >>> 0);
@@ -6780,14 +6791,25 @@
           const modrmInfo = this.getCachedModRmInfo(addr, site.bytes, 1);
           const imm = site.bytes[site.bytes.length - 1] & 0xff;
           const shift = imm & 0x1f;
+          const flags = this.readReg(REG.EFLAGS);
           if (modrmInfo.mod === 3) {
-            const value = (this.readReg8ByIndex(modrmInfo.rm) >>> shift) & 0xff;
-            this.writeReg8ByIndex(modrmInfo.rm, value);
+            const value = this.readReg8ByIndex(modrmInfo.rm);
+            const res = shiftRotate(value, shift, 8, 5, flags);
+            if (!res.ok) {
+              return false;
+            }
+            this.writeReg8ByIndex(modrmInfo.rm, res.result & 0xff);
+            this.writeReg(REG.EFLAGS, res.flags >>> 0);
           } else {
             const ea = this.calcEffectiveAddress(modrmInfo);
             if (ea !== null) {
-              const value = (this.readMem8(ea) >>> shift) & 0xff;
-              this.writeMem8(ea, value);
+              const value = this.readMem8(ea);
+              const res = shiftRotate(value, shift, 8, 5, flags);
+              if (!res.ok) {
+                return false;
+              }
+              this.writeMem8(ea, res.result & 0xff);
+              this.writeReg(REG.EFLAGS, res.flags >>> 0);
             }
           }
           this.writeReg(REG.EIP, (addr + site.len) >>> 0);
@@ -6806,9 +6828,11 @@
               value = this.readMem32(ea);
             }
           }
-          const result = site.type === "shl32-imm"
-            ? (value << shift) >>> 0
-            : (value >>> shift) >>> 0;
+          const res = shiftRotate(value, shift, 32, site.type === "shl32-imm" ? 4 : 5, this.readReg(REG.EFLAGS));
+          if (!res.ok) {
+            return false;
+          }
+          const result = res.result >>> 0;
           if (modrmInfo.mod === 3) {
             const regIdx = modrmInfo.rm & 7;
             switch (regIdx) {
@@ -6828,6 +6852,7 @@
               this.writeMem32(ea, result);
             }
           }
+          this.writeReg(REG.EFLAGS, res.flags >>> 0);
           this.writeReg(REG.EIP, (addr + site.len) >>> 0);
           return true;
         }

@@ -4559,7 +4559,16 @@
     getCpuBackendMode() {
       this.cpuBackendMode = typeof Emulator.normalizeCpuBackendMode === "function"
         ? Emulator.normalizeCpuBackendMode(this.cpuBackendMode)
-        : (String(this.cpuBackendMode || "").trim().toLowerCase() === "wasm" ? "wasm" : "js");
+        : ((() => {
+          const normalized = String(this.cpuBackendMode || "").trim().toLowerCase();
+          if (normalized === "wasm") {
+            return "wasm";
+          }
+          if (normalized === "auto") {
+            return "auto";
+          }
+          return "js";
+        })());
       return this.cpuBackendMode;
     }
 
@@ -4567,7 +4576,16 @@
       const previous = this.getCpuBackendMode();
       const next = typeof Emulator.normalizeCpuBackendMode === "function"
         ? Emulator.normalizeCpuBackendMode(mode)
-        : (String(mode || "").trim().toLowerCase() === "wasm" ? "wasm" : "js");
+        : ((() => {
+          const normalized = String(mode || "").trim().toLowerCase();
+          if (normalized === "wasm") {
+            return "wasm";
+          }
+          if (normalized === "auto") {
+            return "auto";
+          }
+          return "js";
+        })());
       this.cpuBackendMode = next;
       return {
         mode: next,

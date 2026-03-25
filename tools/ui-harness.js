@@ -164,7 +164,14 @@ function clampCodePoint(value) {
 }
 
 function normalizeCpuBackendMode(value) {
-  return String(value || "").trim().toLowerCase() === "wasm" ? "wasm" : "js";
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "wasm") {
+    return "wasm";
+  }
+  if (normalized === "auto") {
+    return "auto";
+  }
+  return "js";
 }
 
 function unpackSignedHigh16(value) {

@@ -35,8 +35,8 @@ test("launcher CPU backend selector updates session mode and launches apps in wa
       : ""
   }));
 
-  expect(initial.appMode).toBe("wasm");
-  expect(initial.sessionMode).toBe("wasm");
+  expect(initial.appMode).toBe("js");
+  expect(initial.sessionMode).toBe("js");
   expect(initial.wasmLabel).toContain("WASM CPU");
   expect(initial.wasmLabel).not.toContain("not built");
 
@@ -113,9 +113,9 @@ test("launcher persists selected CPU backend across reloads", async ({ page }) =
     appMode: window.__app.currentCpuBackendConfig(),
     sessionMode: window.__app.sessionManager.getCpuBackendMode()
   }));
-  expect(initial.selectValue).toBe("wasm");
-  expect(initial.appMode).toBe("wasm");
-  expect(initial.sessionMode).toBe("wasm");
+  expect(initial.selectValue).toBe("js");
+  expect(initial.appMode).toBe("js");
+  expect(initial.sessionMode).toBe("js");
 
   await page.evaluate(() => {
     const select = window.__app.cpuBackendSelect;

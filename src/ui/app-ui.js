@@ -1251,7 +1251,14 @@
       if (EmulatorClass && typeof EmulatorClass.normalizeCpuBackendMode === "function") {
         return EmulatorClass.normalizeCpuBackendMode(mode);
       }
-      return String(mode || "").trim().toLowerCase() === "wasm" ? "wasm" : "js";
+      const normalized = String(mode || "").trim().toLowerCase();
+      if (normalized === "wasm") {
+        return "wasm";
+      }
+      if (normalized === "auto") {
+        return "auto";
+      }
+      return "js";
     }
 
     resolveInitialCpuBackendMode() {

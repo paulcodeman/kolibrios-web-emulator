@@ -23,6 +23,22 @@ const SIMPLE_BLOCK_OP_MOV_R8_R8: u32 = 9;
 const SIMPLE_BLOCK_OP_ALU_R8_IMM8: u32 = 10;
 const SIMPLE_BLOCK_OP_SHIFT_R32_IMM: u32 = 11;
 const SIMPLE_BLOCK_OP_SHIFT_R8_IMM: u32 = 12;
+const SIMPLE_BLOCK_OP_MOV_R8_IMM8: u32 = 13;
+const SIMPLE_BLOCK_OP_ALU_R8_R8: u32 = 14;
+const SIMPLE_BLOCK_OP_XCHG_R32_R32: u32 = 15;
+const SIMPLE_BLOCK_OP_XCHG_R8_R8: u32 = 16;
+const SIMPLE_BLOCK_OP_UNARY_R32: u32 = 17;
+const SIMPLE_BLOCK_OP_UNARY_R8: u32 = 18;
+const SIMPLE_BLOCK_OP_MOVX_R32_R: u32 = 19;
+const SIMPLE_BLOCK_OP_SETCC_R8: u32 = 20;
+const SIMPLE_BLOCK_OP_BITSCAN_R32_R32: u32 = 21;
+const SIMPLE_BLOCK_OP_BITTEST_R32_R32: u32 = 22;
+const SIMPLE_BLOCK_OP_BITTEST_R32_IMM: u32 = 23;
+const SIMPLE_BLOCK_OP_XADD_R32_R32: u32 = 24;
+const SIMPLE_BLOCK_OP_XADD_R8_R8: u32 = 25;
+const SIMPLE_BLOCK_OP_CMPXCHG_R32_R32: u32 = 26;
+const SIMPLE_BLOCK_OP_CMOVCC_R32_R32: u32 = 27;
+const SIMPLE_BLOCK_OP_IMUL_R32_R32: u32 = 28;
 
 var shift_rotate_last_result: u32 = 0;
 var shift_rotate_last_flags: u32 = 0;
@@ -672,23 +688,160 @@ fn execute_simple_block_buffer(plan: []u32, word_count: u32, flags: u32) u32 {
             },
             SIMPLE_BLOCK_OP_SHIFT_R32_IMM => {
                 const dst = a & 7;
-                const shift = b & 0x1f;
-                simple_block_regs[dst] = if ((c & 1) != 0)
-                    shr32(simple_block_regs[dst], shift)
-                else
-                    shl32(simple_block_regs[dst], shift);
+                const shift = if ((d & 1) != 0) (simpleBlockReadReg8(1) & 0x1f) else (b & 0x1f);
+                shift_rotate_exec(simple_block_regs[dst], shift, 32, c, next_flags);
+                if (shift_rotate_last_ok == 0) {
+                    simple_block_last_flags = next_flags;
+                    return 0;
+                }
+                simple_block_regs[dst] = shift_rotate_last_result;
+                next_flags = shift_rotate_last_flags;
             },
             SIMPLE_BLOCK_OP_SHIFT_R8_IMM => {
                 const dst = a & 7;
-                const shift = b & 0x1f;
+                const shift = if ((d & 1) != 0) (simpleBlockReadReg8(1) & 0x1f) else (b & 0x1f);
+                shift_rotate_exec(simpleBlockReadReg8(dst), shift, 8, c, next_flags);
+                if (shift_rotate_last_ok == 0) {
+                    simple_block_last_flags = next_flags;
+                    return 0;
+                }
+                simpleBlockWriteReg8(dst, shift_rotate_last_result & 0xff);
+                next_flags = shift_rotate_last_flags;
+            },
+            SIMPLE_BLOCK_OP_MOV_R8_IMM8 => {
+                simpleBlockWriteReg8(a, b);
+            },
+            SIMPLE_BLOCK_OP_ALU_R8_R8 => {
+                const dst = a & 7;
+                alu_binary_width_exec(c, simpleBlockReadReg8(dst), simpleBlockReadReg8(b & 7), 8, next_flags);
+                if ((d & 1) != 0) {
+                    simpleBlockWriteReg8(dst, alu_last_result & 0xff);
+                }
+                next_flags = alu_last_flags;
+            },
+            SIMPLE_BLOCK_OP_XCHG_R32_R32 => {
+                const left = a & 7;
+                const right = b & 7;
+                const temp = simple_block_regs[left];
+                simple_block_regs[left] = simple_block_regs[right];
+                simple_block_regs[right] = temp;
+            },
+            SIMPLE_BLOCK_OP_XCHG_R8_R8 => {
+                const left = a & 7;
+                const right = b & 7;
+                const temp = simpleBlockReadReg8(left);
+                simpleBlockWriteReg8(left, simpleBlockReadReg8(right));
+                simpleBlockWriteReg8(right, temp);
+            },
+            SIMPLE_BLOCK_OP_UNARY_R32 => {
+                const dst = a & 7;
+                const op = b & 3;
+                if (op == 0) {
+                    simple_block_regs[dst] = ~simple_block_regs[dst];
+                } else if (op == 1) {
+                    alu_binary_width_exec(5, 0, simple_block_regs[dst], 32, next_flags);
+                    simple_block_regs[dst] = alu_last_result;
+                    next_flags = alu_last_flags;
+                } else if (op == 2 or op == 3) {
+                    const prev_cf = next_flags & FLAG_CF;
+                    alu_binary_width_exec(if (op == 2) 0 else 5, simple_block_regs[dst], 1, 32, next_flags);
+                    simple_block_regs[dst] = alu_last_result;
+                    next_flags = (alu_last_flags & ~FLAG_CF) | prev_cf;
+                } else {
+                    simple_block_last_flags = next_flags;
+                    return 0;
+                }
+            },
+            SIMPLE_BLOCK_OP_UNARY_R8 => {
+                const dst = a & 7;
+                const op = b & 3;
                 const value = simpleBlockReadReg8(dst);
-                simpleBlockWriteReg8(
-                    dst,
-                    if ((c & 1) != 0)
-                        (shr32(value, shift) & 0xff)
-                    else
-                        (shl32(value, shift) & 0xff),
-                );
+                if (op == 0) {
+                    simpleBlockWriteReg8(dst, (~value) & 0xff);
+                } else if (op == 1) {
+                    alu_binary_width_exec(5, 0, value, 8, next_flags);
+                    simpleBlockWriteReg8(dst, alu_last_result & 0xff);
+                    next_flags = alu_last_flags;
+                } else if (op == 2 or op == 3) {
+                    const prev_cf = next_flags & FLAG_CF;
+                    alu_binary_width_exec(if (op == 2) 0 else 5, value, 1, 8, next_flags);
+                    simpleBlockWriteReg8(dst, alu_last_result & 0xff);
+                    next_flags = (alu_last_flags & ~FLAG_CF) | prev_cf;
+                } else {
+                    simple_block_last_flags = next_flags;
+                    return 0;
+                }
+            },
+            SIMPLE_BLOCK_OP_MOVX_R32_R => {
+                const dst = a & 7;
+                const src = b & 7;
+                simple_block_regs[dst] = switch (c & 3) {
+                    0 => simpleBlockReadReg8(src) & 0xff,
+                    1 => simple_block_regs[src] & 0xffff,
+                    2 => @bitCast(@as(i32, @as(i8, @bitCast(@as(u8, @truncate(simpleBlockReadReg8(src) & 0xff)))))),
+                    3 => @bitCast(@as(i32, @as(i16, @bitCast(@as(u16, @truncate(simple_block_regs[src] & 0xffff)))))),
+                    else => {
+                        simple_block_last_flags = next_flags;
+                        return 0;
+                    },
+                };
+            },
+            SIMPLE_BLOCK_OP_SETCC_R8 => {
+                simpleBlockWriteReg8(a, if (eval_jcc_condition(b, next_flags) != 0) 1 else 0);
+            },
+            SIMPLE_BLOCK_OP_BITSCAN_R32_R32 => {
+                bit_scan_exec(simple_block_regs[b & 7], c & 1, 32);
+                if (bit_scan_last_zero != 0) {
+                    next_flags |= FLAG_ZF;
+                } else {
+                    next_flags &= ~FLAG_ZF;
+                    simple_block_regs[a & 7] = bit_scan_last_index;
+                }
+            },
+            SIMPLE_BLOCK_OP_BITTEST_R32_R32 => {
+                bit_test_modify_exec(simple_block_regs[a & 7], simple_block_regs[b & 7], 32, c, next_flags);
+                if (c != 4) {
+                    simple_block_regs[a & 7] = bit_test_last_result;
+                }
+                next_flags = bit_test_last_flags;
+            },
+            SIMPLE_BLOCK_OP_BITTEST_R32_IMM => {
+                bit_test_modify_exec(simple_block_regs[a & 7], b, 32, c, next_flags);
+                if (c != 4) {
+                    simple_block_regs[a & 7] = bit_test_last_result;
+                }
+                next_flags = bit_test_last_flags;
+            },
+            SIMPLE_BLOCK_OP_XADD_R32_R32 => {
+                xadd_width_exec(simple_block_regs[a & 7], simple_block_regs[b & 7], 32, next_flags);
+                simple_block_regs[a & 7] = xadd_last_dst;
+                simple_block_regs[b & 7] = xadd_last_src;
+                next_flags = xadd_last_flags;
+            },
+            SIMPLE_BLOCK_OP_XADD_R8_R8 => {
+                xadd_width_exec(simpleBlockReadReg8(a), simpleBlockReadReg8(b), 8, next_flags);
+                simpleBlockWriteReg8(a, xadd_last_dst & 0xff);
+                simpleBlockWriteReg8(b, xadd_last_src & 0xff);
+                next_flags = xadd_last_flags;
+            },
+            SIMPLE_BLOCK_OP_CMPXCHG_R32_R32 => {
+                cmpxchg_width_exec(simple_block_regs[0], simple_block_regs[a & 7], simple_block_regs[b & 7], 32, next_flags);
+                if (cmpxchg_last_exchanged != 0) {
+                    simple_block_regs[a & 7] = cmpxchg_last_result;
+                } else {
+                    simple_block_regs[0] = cmpxchg_last_accumulator;
+                }
+                next_flags = cmpxchg_last_flags;
+            },
+            SIMPLE_BLOCK_OP_CMOVCC_R32_R32 => {
+                if (eval_jcc_condition(c, next_flags) != 0) {
+                    simple_block_regs[a & 7] = simple_block_regs[b & 7];
+                }
+            },
+            SIMPLE_BLOCK_OP_IMUL_R32_R32 => {
+                imul_signed_width_exec(simple_block_regs[a & 7], simple_block_regs[b & 7], 32, next_flags);
+                simple_block_regs[a & 7] = imul_last_result;
+                next_flags = imul_last_flags;
             },
             else => {
                 simple_block_last_flags = next_flags;

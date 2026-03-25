@@ -140,6 +140,8 @@ function runInstructionScenario(cpuBackend, bytes, setup) {
 }
 
 function captureBlockState(emulator, block) {
+  const esp = emulator.readReg(REG_ESP) >>> 0;
+  const stackPrev = esp >= 4 ? emulator.readMem32((esp - 4) >>> 0) >>> 0 : 0;
   return {
     eip: emulator.readReg(REG_EIP) >>> 0,
     eflags: emulator.readReg(REG_EFLAGS) >>> 0,
@@ -147,8 +149,10 @@ function captureBlockState(emulator, block) {
     ecx: emulator.readReg(REG_ECX) >>> 0,
     edx: emulator.readReg(REG_EDX) >>> 0,
     ebx: emulator.readReg(REG_EBX) >>> 0,
+    esp,
     esi: emulator.readReg(REG_ESI) >>> 0,
     edi: emulator.readReg(REG_EDI) >>> 0,
+    stackPrev,
     entries: block && block.entries ? block.entries.length >>> 0 : 0,
     simplePlanWords: block && block.simplePlan ? block.simplePlan.wordCount >>> 0 : 0
   };
@@ -218,12 +222,50 @@ function runPrewarmedSoftBlockScenario(cpuBackend, bytes, setup) {
   };
 }
 
+function runHotSingleEntryCacheScenario(cpuBackend, bytes, setup) {
+  const emulator = createInstructionEmulator(cpuBackend);
+  for (let i = 0; i < bytes.length; i += 1) {
+    emulator.writeMem8(i, bytes[i] & 0xff);
+  }
+  if (loaderApi && typeof loaderApi.scanSoftOps === "function") {
+    const scan = loaderApi.scanSoftOps(emulator.cpu.mem, 0, bytes.length);
+    emulator.softInstructionSites = scan && scan.sites instanceof Map ? scan.sites : new Map();
+  }
+  if (typeof setup === "function") {
+    setup(emulator);
+  }
+  const initialRegs = Array.from(emulator.cpu.regs);
+  emulator.writeReg(REG_EIP, 0);
+  const builtFirst = emulator.executeAndBuildBasicBlock(0, 64);
+  emulator.cpu.regs.set(initialRegs);
+  emulator.writeReg(REG_EIP, 0);
+  const builtSecond = emulator.executeAndBuildBasicBlock(0, 64);
+  const block = emulator.basicBlockCache.get(0) || null;
+  const linearState = captureBlockState(emulator, block);
+  emulator.cpu.regs.set(initialRegs);
+  emulator.writeReg(REG_EIP, 0);
+  const cached = emulator.executeCachedBasicBlock(0, 64);
+  const cachedState = captureBlockState(emulator, block);
+  return {
+    builtFirst: builtFirst >>> 0,
+    builtSecond: builtSecond >>> 0,
+    cached: cached >>> 0,
+    hasBlock: !!block,
+    hasSimplePlan: !!(block && block.simplePlan),
+    hasPreparedPlan: !!(block && block.simplePlan && block.simplePlan.prepared),
+    linearState,
+    cachedState
+  };
+}
+
 try {
   assertEq(Emulator.normalizeCpuBackendMode("js"), "js", "js mode should stay js");
+  assertEq(Emulator.normalizeCpuBackendMode("AUTO"), "auto", "auto mode should normalize case-insensitively");
   assertEq(Emulator.normalizeCpuBackendMode("WASM"), "wasm", "wasm mode should normalize case-insensitively");
   assertEq(Emulator.normalizeCpuBackendMode("weird"), "js", "unknown backend should normalize to js");
 
   const availability = Emulator.getCpuBackendAvailability();
+  assert(availability && availability.auto === true, "auto backend mode should always be available");
   assert(availability && availability.js === true, "js backend should always be available");
   assert(availability && availability.wasm === true, "wasm backend should be available after build");
   assert(emuApi && typeof emuApi.createJsCpuHelperBackend === "function", "js helper backend factory should be exposed");
@@ -1285,6 +1327,7 @@ try {
   assert(jsBlock.built >= 2, "cached block scenario should build a multi-entry block");
   assertEq(jsBlock.cached, jsBlock.built, "js cached block should replay the full block");
   assertEq(jsBlock.cachedAgain, jsBlock.built, "js cached block should replay the full block on repeated hit");
+  assert(jsBlock.hasSimplePlan, "js cached block should compile a simple block plan");
   assertEq(wasmBlock.cached, wasmBlock.built, "wasm cached block should replay the full block");
   assertEq(wasmBlock.cachedAgain, wasmBlock.built, "wasm cached block should replay the full block on repeated hit");
   assert(wasmBlock.hasSimplePlan, "wasm cached block should compile a simple block plan");
@@ -1343,8 +1386,215 @@ try {
   assertDeepEq(wasmByteBlock.cachedState, jsByteBlock.cachedState, "8-bit cached block replay should match between js and wasm");
   assertDeepEq(wasmByteBlock.cachedAgainState, jsByteBlock.cachedAgainState, "8-bit cached block repeated replay should match between js and wasm");
 
+  const hotSingleEntryBytes = [
+    0x40,
+    0xc3
+  ];
+  const hotSingleEntrySetup = (emulator) => {
+    emulator.writeReg(REG_EAX, 0x0000005a);
+    emulator.writeReg(REG_EFLAGS, 0x203);
+  };
+  const jsSingleEntryBlock = runHotSingleEntryCacheScenario("js", hotSingleEntryBytes, hotSingleEntrySetup);
+  const wasmSingleEntryBlock = runHotSingleEntryCacheScenario("wasm", hotSingleEntryBytes, hotSingleEntrySetup);
+  assertEq(jsSingleEntryBlock.builtFirst, 1, "js hot single-entry scenario should execute one instruction on first build");
+  assertEq(jsSingleEntryBlock.builtSecond, 1, "js hot single-entry scenario should execute one instruction on second build");
+  assert(jsSingleEntryBlock.hasBlock, "js hot single-entry scenario should promote a cached block after warming");
+  assert(jsSingleEntryBlock.hasSimplePlan, "js hot single-entry scenario should compile a simple block plan");
+  assertEq(jsSingleEntryBlock.cached, 1, "js hot single-entry cached block should replay the single instruction");
+  assert(wasmSingleEntryBlock.hasBlock, "wasm hot single-entry scenario should promote a cached block after warming");
+  assert(wasmSingleEntryBlock.hasSimplePlan, "wasm hot single-entry scenario should compile a simple block plan");
+  assert(wasmSingleEntryBlock.hasPreparedPlan, "wasm hot single-entry scenario should prepare a wasm slot-backed plan");
+  assertEq(wasmSingleEntryBlock.cached, 1, "wasm hot single-entry cached block should replay the single instruction");
+  assertDeepEq(wasmSingleEntryBlock.linearState, jsSingleEntryBlock.linearState, "hot single-entry linear execution should match between js and wasm");
+  assertDeepEq(wasmSingleEntryBlock.cachedState, jsSingleEntryBlock.cachedState, "hot single-entry cached replay should match between js and wasm");
+
+  const jsOnlySimpleBlockBytes = [
+    0x50,
+    0x59,
+    0xf9,
+    0xf8,
+    0xa8, 0x01,
+    0xc3
+  ];
+  const jsOnlySimpleBlockSetup = (emulator) => {
+    emulator.writeReg(REG_EAX, 0x12345679);
+    emulator.writeReg(REG_ECX, 0);
+    emulator.writeReg(REG_ESP, 0x1800);
+    emulator.writeReg(REG_EFLAGS, 0x202);
+  };
+  const jsOnlyJsBlock = runCachedBlockScenario("js", jsOnlySimpleBlockBytes, jsOnlySimpleBlockSetup);
+  const jsOnlyAutoBlock = runCachedBlockScenario("auto", jsOnlySimpleBlockBytes, jsOnlySimpleBlockSetup);
+  const jsOnlyWasmBlock = runCachedBlockScenario("wasm", jsOnlySimpleBlockBytes, jsOnlySimpleBlockSetup);
+  assert(jsOnlyJsBlock.hasSimplePlan, "js-only simple block scenario should compile a JS simple plan");
+  assertEq(jsOnlyJsBlock.cached, jsOnlyJsBlock.built, "js-only simple block cached replay should cover the same entry count");
+  assertDeepEq(jsOnlyJsBlock.cachedState, jsOnlyJsBlock.linearState, "js-only simple block cached replay should match linear execution");
+  assert(jsOnlyAutoBlock.hasSimplePlan, "auto mode should still cache js-only simple blocks through the JS backend");
+  assert(!jsOnlyAutoBlock.hasPreparedPlan, "auto mode should not prepare js-only simple blocks for WASM");
+  assertDeepEq(jsOnlyAutoBlock.cachedState, jsOnlyAutoBlock.linearState, "auto js-only simple block replay should match linear execution");
+  assert(!jsOnlyWasmBlock.hasSimplePlan, "wasm mode should not compile js-only simple blocks into wasm plans");
+
+  const cachedByteRegRegBlockBytes = [
+    0xb0, 0x5a,
+    0xb3, 0x7b,
+    0x30, 0xd8,
+    0x88, 0xd9,
+    0x02, 0xcb,
+    0x84, 0xc9,
+    0x38, 0xd8,
+    0xc3
+  ];
+  const cachedByteRegRegSetup = (emulator) => {
+    emulator.writeReg(REG_EFLAGS, 0x203);
+  };
+  const jsByteRegRegBlock = runCachedBlockScenario("js", cachedByteRegRegBlockBytes, cachedByteRegRegSetup);
+  const wasmByteRegRegBlock = runCachedBlockScenario("wasm", cachedByteRegRegBlockBytes, cachedByteRegRegSetup);
+  assert(jsByteRegRegBlock.built >= 2, "8-bit reg/reg cached block scenario should build a multi-entry block");
+  assertEq(jsByteRegRegBlock.cached, jsByteRegRegBlock.built, "js 8-bit reg/reg cached block should replay the full block");
+  assertEq(wasmByteRegRegBlock.cached, wasmByteRegRegBlock.built, "wasm 8-bit reg/reg cached block should replay the full block");
+  assertEq(wasmByteRegRegBlock.cachedAgain, wasmByteRegRegBlock.built, "wasm 8-bit reg/reg cached block should replay on repeated hit");
+  assert(wasmByteRegRegBlock.hasSimplePlan, "wasm 8-bit reg/reg cached block should compile a simple block plan");
+  assert(wasmByteRegRegBlock.hasPreparedPlan, "wasm 8-bit reg/reg cached block should prepare a wasm slot-backed plan");
+  assertDeepEq(wasmByteRegRegBlock.linearState, jsByteRegRegBlock.linearState, "8-bit reg/reg cached block linear execution should match between js and wasm");
+  assertDeepEq(wasmByteRegRegBlock.cachedState, jsByteRegRegBlock.cachedState, "8-bit reg/reg cached block replay should match between js and wasm");
+  assertDeepEq(wasmByteRegRegBlock.cachedAgainState, jsByteRegRegBlock.cachedAgainState, "8-bit reg/reg cached block repeated replay should match between js and wasm");
+
+  const cachedByteMixedBlockBytes = [
+    0xb1, 0x02,
+    0xb0, 0x5a,
+    0xb3, 0x7b,
+    0x10, 0xd8,
+    0x18, 0xc3,
+    0x86, 0xd9,
+    0xd2, 0xe3,
+    0xfe, 0xcb,
+    0xf6, 0xd3,
+    0xf6, 0xdb,
+    0xc3
+  ];
+  const cachedByteMixedSetup = (emulator) => {
+    emulator.writeReg(REG_EFLAGS, 0x203);
+  };
+  const jsByteMixedBlock = runCachedBlockScenario("js", cachedByteMixedBlockBytes, cachedByteMixedSetup);
+  const wasmByteMixedBlock = runCachedBlockScenario("wasm", cachedByteMixedBlockBytes, cachedByteMixedSetup);
+  assert(jsByteMixedBlock.built >= 2, "8-bit mixed cached block scenario should build a multi-entry block");
+  assertEq(jsByteMixedBlock.cached, jsByteMixedBlock.built, "js 8-bit mixed cached block should replay the full block");
+  assertEq(wasmByteMixedBlock.cached, wasmByteMixedBlock.built, "wasm 8-bit mixed cached block should replay the full block");
+  assertEq(wasmByteMixedBlock.cachedAgain, wasmByteMixedBlock.built, "wasm 8-bit mixed cached block should replay on repeated hit");
+  assert(wasmByteMixedBlock.hasSimplePlan, "wasm 8-bit mixed cached block should compile a simple block plan");
+  assert(wasmByteMixedBlock.hasPreparedPlan, "wasm 8-bit mixed cached block should prepare a wasm slot-backed plan");
+  assertDeepEq(wasmByteMixedBlock.linearState, jsByteMixedBlock.linearState, "8-bit mixed cached block linear execution should match between js and wasm");
+  assertDeepEq(wasmByteMixedBlock.cachedState, jsByteMixedBlock.cachedState, "8-bit mixed cached block replay should match between js and wasm");
+  assertDeepEq(wasmByteMixedBlock.cachedAgainState, jsByteMixedBlock.cachedAgainState, "8-bit mixed cached block repeated replay should match between js and wasm");
+
+  const cachedDwordMixedBlockBytes = [
+    0xb8, 0x11, 0x22, 0x33, 0x44,
+    0xbb, 0x05, 0x06, 0x07, 0x08,
+    0xb1, 0x04,
+    0x11, 0xd8,
+    0x19, 0xd8,
+    0x87, 0xd8,
+    0xd3, 0xe0,
+    0xff, 0xc8,
+    0xf7, 0xd0,
+    0xf7, 0xdb,
+    0xc3
+  ];
+  const cachedDwordMixedSetup = (emulator) => {
+    emulator.writeReg(REG_EFLAGS, 0x203);
+  };
+  const jsDwordMixedBlock = runCachedBlockScenario("js", cachedDwordMixedBlockBytes, cachedDwordMixedSetup);
+  const wasmDwordMixedBlock = runCachedBlockScenario("wasm", cachedDwordMixedBlockBytes, cachedDwordMixedSetup);
+  assert(jsDwordMixedBlock.built >= 2, "32-bit mixed cached block scenario should build a multi-entry block");
+  assertEq(jsDwordMixedBlock.cached, jsDwordMixedBlock.built, "js 32-bit mixed cached block should replay the full block");
+  assertEq(wasmDwordMixedBlock.cached, wasmDwordMixedBlock.built, "wasm 32-bit mixed cached block should replay the full block");
+  assertEq(wasmDwordMixedBlock.cachedAgain, wasmDwordMixedBlock.built, "wasm 32-bit mixed cached block should replay on repeated hit");
+  assert(wasmDwordMixedBlock.hasSimplePlan, "wasm 32-bit mixed cached block should compile a simple block plan");
+  assert(wasmDwordMixedBlock.hasPreparedPlan, "wasm 32-bit mixed cached block should prepare a wasm slot-backed plan");
+  assertDeepEq(wasmDwordMixedBlock.linearState, jsDwordMixedBlock.linearState, "32-bit mixed cached block linear execution should match between js and wasm");
+  assertDeepEq(wasmDwordMixedBlock.cachedState, jsDwordMixedBlock.cachedState, "32-bit mixed cached block replay should match between js and wasm");
+  assertDeepEq(wasmDwordMixedBlock.cachedAgainState, jsDwordMixedBlock.cachedAgainState, "32-bit mixed cached block repeated replay should match between js and wasm");
+
+  const cached0fFlagBlockBytes = [
+    0xb0, 0x80,
+    0xb2, 0x7f,
+    0x0f, 0xbe, 0xd8,
+    0x0f, 0xb6, 0xca,
+    0x0f, 0xbc, 0xd9,
+    0x0f, 0x95, 0xc0,
+    0x0f, 0xba, 0xf9, 0x04,
+    0x0f, 0xa3, 0xd9,
+    0xc3
+  ];
+  const cached0fFlagSetup = (emulator) => {
+    emulator.writeReg(REG_EFLAGS, 0x203);
+  };
+  const js0fFlagBlock = runCachedBlockScenario("js", cached0fFlagBlockBytes, cached0fFlagSetup);
+  const wasm0fFlagBlock = runCachedBlockScenario("wasm", cached0fFlagBlockBytes, cached0fFlagSetup);
+  assert(js0fFlagBlock.built >= 2, "0F flag cached block scenario should build a multi-entry block");
+  assertEq(js0fFlagBlock.cached, js0fFlagBlock.built, "js 0F flag cached block should replay the full block");
+  assertEq(wasm0fFlagBlock.cached, wasm0fFlagBlock.built, "wasm 0F flag cached block should replay the full block");
+  assertEq(wasm0fFlagBlock.cachedAgain, wasm0fFlagBlock.built, "wasm 0F flag cached block should replay on repeated hit");
+  assert(wasm0fFlagBlock.hasSimplePlan, "wasm 0F flag cached block should compile a simple block plan");
+  assert(wasm0fFlagBlock.hasPreparedPlan, "wasm 0F flag cached block should prepare a wasm slot-backed plan");
+  assertDeepEq(wasm0fFlagBlock.linearState, js0fFlagBlock.linearState, "0F flag cached block linear execution should match between js and wasm");
+  assertDeepEq(wasm0fFlagBlock.cachedState, js0fFlagBlock.cachedState, "0F flag cached block replay should match between js and wasm");
+  assertDeepEq(wasm0fFlagBlock.cachedAgainState, js0fFlagBlock.cachedAgainState, "0F flag cached block repeated replay should match between js and wasm");
+
+  const cached0fArithBlockBytes = [
+    0xb8, 0x05, 0x00, 0x00, 0x00,
+    0xb9, 0x05, 0x00, 0x00, 0x00,
+    0xba, 0x09, 0x00, 0x00, 0x00,
+    0xbb, 0x03, 0x00, 0x00, 0x00,
+    0x0f, 0xb1, 0xd1,
+    0x0f, 0x44, 0xd9,
+    0x0f, 0xaf, 0xd9,
+    0x0f, 0xc1, 0xd9,
+    0xc3
+  ];
+  const cached0fArithSetup = (emulator) => {
+    emulator.writeReg(REG_EFLAGS, 0x203);
+  };
+  const js0fArithBlock = runCachedBlockScenario("js", cached0fArithBlockBytes, cached0fArithSetup);
+  const wasm0fArithBlock = runCachedBlockScenario("wasm", cached0fArithBlockBytes, cached0fArithSetup);
+  assert(js0fArithBlock.built >= 2, "0F arithmetic cached block scenario should build a multi-entry block");
+  assertEq(js0fArithBlock.cached, js0fArithBlock.built, "js 0F arithmetic cached block should replay the full block");
+  assertEq(wasm0fArithBlock.cached, wasm0fArithBlock.built, "wasm 0F arithmetic cached block should replay the full block");
+  assertEq(wasm0fArithBlock.cachedAgain, wasm0fArithBlock.built, "wasm 0F arithmetic cached block should replay on repeated hit");
+  assert(wasm0fArithBlock.hasSimplePlan, "wasm 0F arithmetic cached block should compile a simple block plan");
+  assert(wasm0fArithBlock.hasPreparedPlan, "wasm 0F arithmetic cached block should prepare a wasm slot-backed plan");
+  assertDeepEq(wasm0fArithBlock.linearState, js0fArithBlock.linearState, "0F arithmetic cached block linear execution should match between js and wasm");
+  assertDeepEq(wasm0fArithBlock.cachedState, js0fArithBlock.cachedState, "0F arithmetic cached block replay should match between js and wasm");
+  assertDeepEq(wasm0fArithBlock.cachedAgainState, js0fArithBlock.cachedAgainState, "0F arithmetic cached block repeated replay should match between js and wasm");
+
+  const cached0fXadd8BlockBytes = [
+    0xb0, 0x05,
+    0xb1, 0x07,
+    0x0f, 0xc0, 0xc8,
+    0x84, 0xc0,
+    0xc3
+  ];
+  const cached0fXadd8Setup = (emulator) => {
+    emulator.writeReg(REG_EFLAGS, 0x203);
+  };
+  const js0fXadd8Block = runCachedBlockScenario("js", cached0fXadd8BlockBytes, cached0fXadd8Setup);
+  const wasm0fXadd8Block = runCachedBlockScenario("wasm", cached0fXadd8BlockBytes, cached0fXadd8Setup);
+  assert(js0fXadd8Block.built >= 2, "0F xadd8 cached block scenario should build a multi-entry block");
+  assertEq(js0fXadd8Block.cached, js0fXadd8Block.built, "js 0F xadd8 cached block should replay the full block");
+  assertEq(wasm0fXadd8Block.cached, wasm0fXadd8Block.built, "wasm 0F xadd8 cached block should replay the full block");
+  assertEq(wasm0fXadd8Block.cachedAgain, wasm0fXadd8Block.built, "wasm 0F xadd8 cached block should replay on repeated hit");
+  assert(wasm0fXadd8Block.hasSimplePlan, "wasm 0F xadd8 cached block should compile a simple block plan");
+  assert(wasm0fXadd8Block.hasPreparedPlan, "wasm 0F xadd8 cached block should prepare a wasm slot-backed plan");
+  assertDeepEq(wasm0fXadd8Block.linearState, js0fXadd8Block.linearState, "0F xadd8 cached block linear execution should match between js and wasm");
+  assertDeepEq(wasm0fXadd8Block.cachedState, js0fXadd8Block.cachedState, "0F xadd8 cached block replay should match between js and wasm");
+  assertDeepEq(wasm0fXadd8Block.cachedAgainState, js0fXadd8Block.cachedAgainState, "0F xadd8 cached block repeated replay should match between js and wasm");
+
   const jsEmulator = new Emulator(createHeadlessSurface(8, 8), () => {}, { cpuBackend: "js" });
   assertEq(jsEmulator.getCpuBackendInfo().requested, "js", "constructor should store requested js backend");
+  assertEq(jsEmulator.ensureCpuBackendReady(), "js", "js backend should become active");
+  assert(jsEmulator.cpuHelperBackend && jsEmulator.cpuHelperBackend.kind === "js", "emulator should bind js helper backend");
+  assertEq(jsEmulator.getCpuBackendInfo().basicBlockMaxEntries, 48, "js backend should use the larger basic block window");
+  assertEq(jsEmulator.getCpuBackendInfo().basicBlockImmediateCacheEntries, 2, "js backend should cache short blocks earlier");
+  assertEq(jsEmulator.getCpuBackendInfo().basicBlockHotThreshold, 2, "js backend should promote hot blocks earlier");
   assertEq(jsEmulator.setCpuBackend("wasm"), "wasm", "setCpuBackend should accept wasm requests before launch");
   assertEq(jsEmulator.ensureCpuBackendReady(), "wasm", "wasm backend should become active");
   assert(jsEmulator.cpuHelperBackend && jsEmulator.cpuHelperBackend.kind === "wasm", "emulator should bind wasm helper backend");
@@ -1352,6 +1602,11 @@ try {
   assertEq(jsEmulator.getCpuBackendInfo().basicBlockImmediateCacheEntries, 2, "wasm backend should cache short blocks immediately");
   assertEq(jsEmulator.getCpuBackendInfo().basicBlockHotThreshold, 2, "wasm backend should promote hot blocks earlier");
   assertEq(jsEmulator.setCpuBackend("js"), "js", "backend should switch back to js before launch");
+
+  const autoEmulator = new Emulator(createHeadlessSurface(8, 8), () => {}, { cpuBackend: "auto" });
+  assertEq(autoEmulator.ensureCpuBackendReady(), "auto", "auto backend should become active");
+  assert(autoEmulator.cpuHelperBackend && autoEmulator.cpuHelperBackend.kind === "js", "auto backend should use js helpers for the base interpreter path");
+  assert(autoEmulator.cpuWasmHelperBackend && autoEmulator.cpuWasmHelperBackend.kind === "wasm", "auto backend should keep a wasm helper backend for promoted blocks");
 
   const startCacheEmulator = createInstructionEmulator("wasm");
   startCacheEmulator.writeMem8(0, 0x40); // inc eax

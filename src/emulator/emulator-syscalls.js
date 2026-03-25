@@ -2893,11 +2893,27 @@
 
       getProcessMemoryCapacity() {
         const current = this.memLimit >>> 0;
-        const growMax = this.memGrowMax >>> 0;
+        const growMax = typeof this.getEffectiveMemGrowMax === "function"
+          ? (this.getEffectiveMemGrowMax() >>> 0)
+          : (this.memGrowMax >>> 0);
         if (growMax > current) {
           return growMax >>> 0;
         }
         return current >>> 0;
+      },
+
+      getEffectiveMemGrowMax() {
+        let max = this.memGrowMax >>> 0;
+        if (this.hostSession && typeof this.hostSession.getReportedTotalRamBytes === "function") {
+          const hostTotal = Number(this.hostSession.getReportedTotalRamBytes());
+          if (hostTotal > 0) {
+            const bounded = align4k(Math.max(0, Math.min(0xffffffff, Math.floor(hostTotal)))) >>> 0;
+            if (bounded > max) {
+              max = bounded >>> 0;
+            }
+          }
+        }
+        return max >>> 0;
       },
 
       getHeapBaseForMemoryCapacity(memoryCap) {

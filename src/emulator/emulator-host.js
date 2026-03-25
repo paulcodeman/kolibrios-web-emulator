@@ -2558,7 +2558,9 @@
           nextSize = Math.max(nextSize * 2, needed);
         }
         nextSize = align4k(nextSize);
-        const max = this.memGrowMax >>> 0;
+        const max = typeof this.getEffectiveMemGrowMax === "function"
+          ? (this.getEffectiveMemGrowMax() >>> 0)
+          : (this.memGrowMax >>> 0);
         if (max && nextSize > max) {
           return false;
         }

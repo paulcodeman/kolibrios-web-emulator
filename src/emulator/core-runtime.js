@@ -346,6 +346,52 @@
         return !!(state && state.canStart);
       },
 
+      getBasicBlockEntryLength(addr, next) {
+        const start = addr >>> 0;
+        if (!this.cpu || !this.cpu.mem || start >= (this.cpu.mem.length >>> 0)) {
+          return 0;
+        }
+        const mem = this.cpu.mem;
+        const opcode = mem[start] & 0xff;
+        if (
+          opcode === 0x90 ||
+          opcode === 0xc3 ||
+          opcode === 0xf8 ||
+          opcode === 0xf9 ||
+          opcode === 0xaa ||
+          opcode === 0xac ||
+          opcode === 0xd7 ||
+          (opcode >= 0x40 && opcode <= 0x5f)
+        ) {
+          return 1;
+        }
+        if (
+          opcode === 0xa8 ||
+          opcode === 0xeb ||
+          (opcode >= 0x70 && opcode <= 0x7f)
+        ) {
+          return 2;
+        }
+        if (opcode === 0xe8 || opcode === 0xe9) {
+          return 5;
+        }
+        if (
+          opcode === 0x0f &&
+          (start + 1) < (mem.length >>> 0)
+        ) {
+          const op2 = mem[(start + 1) >>> 0] & 0xff;
+          if (op2 >= 0x80 && op2 <= 0x8f) {
+            return 6;
+          }
+        }
+        const end = next >>> 0;
+        if (end < start) {
+          return 0;
+        }
+        const len = (end - start) >>> 0;
+        return len > 0 && len <= 8 ? len : 0;
+      },
+
       noteBasicBlockHotness(start) {
         const key = start >>> 0;
         if (this.basicBlockCache.has(key)) {
@@ -448,7 +494,6 @@
         }
         this.basicBlockHits += 1;
         if (
-          this.cpuBackend === "wasm" &&
           block.simplePlan &&
           (block.entries.length >>> 0) <= (budget >>> 0)
         ) {
@@ -494,15 +539,17 @@
           this.basicBlockMaxEntries,
           entries
         );
-        if (entries.length < 2) {
+        const precomputedSimplePlan = entries.length > 0 ? this.buildSimpleBasicBlockPlan(entries) : null;
+        const canCacheSingleEntry = entries.length === 1 && !!precomputedSimplePlan;
+        if (entries.length < 2 && !canCacheSingleEntry) {
           return executed;
         }
-        let shouldCache = entries.length >= this.basicBlockImmediateCacheEntries;
+        let shouldCache = canCacheSingleEntry || entries.length >= this.basicBlockImmediateCacheEntries;
         if (!shouldCache) {
           const hotCount = this.noteBasicBlockHotness(start);
           shouldCache = hotCount >= this.basicBlockHotThreshold;
         }
-        if (shouldCache && this.cacheBasicBlock(entries)) {
+        if (shouldCache && this.cacheBasicBlockWithPlan(entries, precomputedSimplePlan)) {
           this.basicBlockPromotions += 1;
         }
         return executed;
@@ -518,7 +565,8 @@
       },
 
       cacheBasicBlockWithPlan(entries, precomputedSimplePlan) {
-        if (!entries || entries.length < 2) {
+        const plan = precomputedSimplePlan || this.buildSimpleBasicBlockPlan(entries);
+        if (!entries || (!plan && entries.length < 2) || !entries.length) {
           return false;
         }
         const start = entries[0].addr >>> 0;
@@ -537,15 +585,27 @@
           end,
           entries,
           pages: [],
-          simplePlan: precomputedSimplePlan || this.buildSimpleBasicBlockPlan(entries)
+          simplePlan: plan,
+          preferWasmSimpleBackend: false
         };
         if (
-          this.cpuBackend === "wasm" &&
+          this.cpuBackend === "auto" &&
           block.simplePlan &&
-          this.cpuHelperBackend &&
-          typeof this.cpuHelperBackend.prepareSimpleBlockPlan === "function"
+          !block.simplePlan.jsOnly &&
+          this.constructor &&
+          typeof this.constructor.shouldPreferWasmSimpleBlock === "function"
         ) {
-          block.simplePlan.prepared = this.cpuHelperBackend.prepareSimpleBlockPlan(
+          block.preferWasmSimpleBackend = !!this.constructor.shouldPreferWasmSimpleBlock(block.simplePlan, entries.length);
+        }
+        if (
+          (this.cpuBackend === "wasm" || (this.cpuBackend === "auto" && block.preferWasmSimpleBackend)) &&
+          block.simplePlan &&
+          !block.simplePlan.jsOnly &&
+          (this.cpuBackend === "wasm" ? this.cpuHelperBackend : this.cpuWasmHelperBackend) &&
+          typeof (this.cpuBackend === "wasm" ? this.cpuHelperBackend : this.cpuWasmHelperBackend).prepareSimpleBlockPlan === "function"
+        ) {
+          const prepareBackend = this.cpuBackend === "wasm" ? this.cpuHelperBackend : this.cpuWasmHelperBackend;
+          block.simplePlan.prepared = prepareBackend.prepareSimpleBlockPlan(
             block.simplePlan.words,
             block.simplePlan.wordCount
           );
@@ -720,7 +780,7 @@
           if (mod !== 3) {
             return false;
           }
-          this.appendSimpleBlockRecord(target, SIMPLE_BLOCK_OPS.SHIFT_R8_IMM, rm, 1, 0, 0);
+          this.appendSimpleBlockRecord(target, SIMPLE_BLOCK_OPS.SHIFT_R8_IMM, rm, 1, 4, 0);
           return true;
         }
         if (site.type === "shrb-mem-imm") {
@@ -738,7 +798,7 @@
             SIMPLE_BLOCK_OPS.SHIFT_R8_IMM,
             rm,
             bytes[bytes.length - 1] & 0x1f,
-            1,
+            5,
             0
           );
           return true;
@@ -758,7 +818,7 @@
             SIMPLE_BLOCK_OPS.SHIFT_R32_IMM,
             rm,
             bytes[bytes.length - 1] & 0x1f,
-            site.type === "shr32-imm" ? 1 : 0,
+            site.type === "shr32-imm" ? 5 : 4,
             0
           );
           return true;
@@ -802,7 +862,7 @@
           const regField = site.regField & 7;
           if (opcode === 0x80 || opcode === 0x82) {
             if (
-              (regField !== 0 && regField !== 1 && regField !== 4 && regField !== 5 && regField !== 7) ||
+              (regField !== 0 && regField !== 1 && regField !== 2 && regField !== 3 && regField !== 4 && regField !== 5 && regField !== 6 && regField !== 7) ||
               (site.len | 0) < 3 ||
               bytes.length < 3
             ) {
@@ -826,7 +886,7 @@
           }
           if (
             (opcode !== 0x81 && opcode !== 0x83) ||
-            (regField !== 0 && regField !== 1 && regField !== 4 && regField !== 5 && regField !== 7)
+            (regField !== 0 && regField !== 1 && regField !== 2 && regField !== 3 && regField !== 4 && regField !== 5 && regField !== 6 && regField !== 7)
           ) {
             return false;
           }
@@ -868,15 +928,19 @@
           return null;
         }
         const words = [];
+        let jsOnly = false;
         const push = (kind, a, b, c, d) => this.appendSimpleBlockRecord(words, kind, a, b, c, d);
+        const pushJsOnly = (kind, a, b, c, d) => {
+          jsOnly = true;
+          push(kind, a, b, c, d);
+        };
+        const allowJsOnlyOps = this.cpuBackend !== "wasm";
         for (let i = 0; i < entries.length; i += 1) {
           const entry = entries[i];
           const addr = entry.addr >>> 0;
           const next = entry.next >>> 0;
-          if (next < addr) {
-            return null;
-          }
-          const len = (next - addr) >>> 0;
+          const isLastEntry = i === (entries.length - 1);
+          const len = this.getBasicBlockEntryLength(addr, next) >>> 0;
           if (!len || len > 8) {
             return null;
           }
@@ -903,6 +967,88 @@
             push(SIMPLE_BLOCK_OPS.NOP, 0, 0, 0, 0);
             continue;
           }
+          if (opcode >= 0x70 && opcode <= 0x7f && len === 2) {
+            if (!allowJsOnlyOps || !isLastEntry) {
+              return null;
+            }
+            const fallthrough = next >>> 0;
+            const taken = (fallthrough + ((bytes[1] << 24) >> 24)) >>> 0;
+            pushJsOnly(SIMPLE_BLOCK_OPS.JCC, opcode & 0x0f, taken, fallthrough, 0);
+            continue;
+          }
+          if (opcode === 0xeb && len === 2) {
+            if (!allowJsOnlyOps || !isLastEntry) {
+              return null;
+            }
+            pushJsOnly(SIMPLE_BLOCK_OPS.JMP, (next + ((bytes[1] << 24) >> 24)) >>> 0, 0, 0, 0);
+            continue;
+          }
+          if (opcode === 0xe9 && len === 5) {
+            if (!allowJsOnlyOps || !isLastEntry) {
+              return null;
+            }
+            const rel =
+              (bytes[1] & 0xff) |
+              ((bytes[2] & 0xff) << 8) |
+              ((bytes[3] & 0xff) << 16) |
+              ((bytes[4] & 0xff) << 24);
+            pushJsOnly(SIMPLE_BLOCK_OPS.JMP, (next + rel) >>> 0, 0, 0, 0);
+            continue;
+          }
+          if (opcode === 0xe8 && len === 5) {
+            if (!allowJsOnlyOps || !isLastEntry) {
+              return null;
+            }
+            const rel =
+              (bytes[1] & 0xff) |
+              ((bytes[2] & 0xff) << 8) |
+              ((bytes[3] & 0xff) << 16) |
+              ((bytes[4] & 0xff) << 24);
+            pushJsOnly(SIMPLE_BLOCK_OPS.CALL_REL32, (next + rel) >>> 0, next >>> 0, 0, 0);
+            continue;
+          }
+          if (opcode === 0xc3 && len === 1) {
+            if (!allowJsOnlyOps || !isLastEntry) {
+              return null;
+            }
+            pushJsOnly(SIMPLE_BLOCK_OPS.RET, 0, 0, 0, 0);
+            continue;
+          }
+          if (opcode === 0xac && len === 1) {
+            if (!allowJsOnlyOps) {
+              return null;
+            }
+            pushJsOnly(SIMPLE_BLOCK_OPS.LODSB, 0, 0, 0, 0);
+            continue;
+          }
+          if (opcode === 0xaa && len === 1) {
+            if (!allowJsOnlyOps) {
+              return null;
+            }
+            pushJsOnly(SIMPLE_BLOCK_OPS.STOSB, 0, 0, 0, 0);
+            continue;
+          }
+          if (opcode === 0xd7 && len === 1) {
+            if (!allowJsOnlyOps) {
+              return null;
+            }
+            pushJsOnly(SIMPLE_BLOCK_OPS.XLAT, 0, 0, 0, 0);
+            continue;
+          }
+          if (opcode >= 0x50 && opcode <= 0x57 && len === 1) {
+            if (!allowJsOnlyOps) {
+              return null;
+            }
+            pushJsOnly(SIMPLE_BLOCK_OPS.PUSH_R32, opcode & 7, 0, 0, 0);
+            continue;
+          }
+          if (opcode >= 0x58 && opcode <= 0x5f && len === 1) {
+            if (!allowJsOnlyOps) {
+              return null;
+            }
+            pushJsOnly(SIMPLE_BLOCK_OPS.POP_R32, opcode & 7, 0, 0, 0);
+            continue;
+          }
           if (opcode >= 0x40 && opcode <= 0x47 && len === 1) {
             push(SIMPLE_BLOCK_OPS.INC_R32, opcode & 7, 0, 0, 0);
             continue;
@@ -918,6 +1064,14 @@
               ((bytes[3] & 0xff) << 16) |
               ((bytes[4] & 0xff) << 24);
             push(SIMPLE_BLOCK_OPS.MOV_R32_IMM32, opcode & 7, imm, 0, 0);
+            continue;
+          }
+          if (opcode >= 0xb0 && opcode <= 0xb7 && len === 2) {
+            push(SIMPLE_BLOCK_OPS.MOV_R8_IMM8, opcode & 7, bytes[1] & 0xff, 0, 0);
+            continue;
+          }
+          if (opcode === 0xa8 && len === 2) {
+            push(SIMPLE_BLOCK_OPS.ALU_AL_IMM8, 8, bytes[1] & 0xff, 0, 0);
             continue;
           }
           if (opcode === 0xc7 && len === 6) {
@@ -940,6 +1094,88 @@
             const op2 = bytes[1] & 0xff;
             if (op2 >= 0xc8 && op2 <= 0xcf) {
               push(SIMPLE_BLOCK_OPS.BSWAP_R32, op2 & 7, 0, 0, 0);
+              continue;
+            }
+            return null;
+          }
+          if (opcode === 0xf8 && len === 1) {
+            if (!allowJsOnlyOps) {
+              return null;
+            }
+            pushJsOnly(SIMPLE_BLOCK_OPS.CLC, 0, 0, 0, 0);
+            continue;
+          }
+          if (opcode === 0xf9 && len === 1) {
+            if (!allowJsOnlyOps) {
+              return null;
+            }
+            pushJsOnly(SIMPLE_BLOCK_OPS.STC, 0, 0, 0, 0);
+            continue;
+          }
+          if (opcode === 0x0f && len >= 3) {
+            const op2 = bytes[1] & 0xff;
+            const modrm = bytes[2] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const reg = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (op2 >= 0x80 && op2 <= 0x8f && len === 6) {
+              if (!allowJsOnlyOps || !isLastEntry) {
+                return null;
+              }
+              const rel =
+                (bytes[2] & 0xff) |
+                ((bytes[3] & 0xff) << 8) |
+                ((bytes[4] & 0xff) << 16) |
+                ((bytes[5] & 0xff) << 24);
+              pushJsOnly(SIMPLE_BLOCK_OPS.JCC, op2 & 0x0f, (next + rel) >>> 0, next >>> 0, 0);
+              continue;
+            }
+            if (mod !== 3) {
+              return null;
+            }
+            if (op2 >= 0x40 && op2 <= 0x4f && len === 3) {
+              push(SIMPLE_BLOCK_OPS.CMOVCC_R32_R32, reg, rm, op2 & 0x0f, 0);
+              continue;
+            }
+            if (op2 >= 0x90 && op2 <= 0x9f && len === 3) {
+              push(SIMPLE_BLOCK_OPS.SETCC_R8, rm, op2 & 0x0f, 0, 0);
+              continue;
+            }
+            if (op2 === 0xaf && len === 3) {
+              push(SIMPLE_BLOCK_OPS.IMUL_R32_R32, reg, rm, 0, 0);
+              continue;
+            }
+            if ((op2 === 0xb6 || op2 === 0xb7 || op2 === 0xbe || op2 === 0xbf) && len === 3) {
+              const mode = op2 === 0xb6 ? 0 : (op2 === 0xb7 ? 1 : (op2 === 0xbe ? 2 : 3));
+              push(SIMPLE_BLOCK_OPS.MOVX_R32_R, reg, rm, mode, 0);
+              continue;
+            }
+            if ((op2 === 0xbc || op2 === 0xbd) && len === 3) {
+              push(SIMPLE_BLOCK_OPS.BITSCAN_R32_R32, reg, rm, op2 === 0xbd ? 1 : 0, 0);
+              continue;
+            }
+            if ((op2 === 0xa3 || op2 === 0xab || op2 === 0xb3 || op2 === 0xbb) && len === 3) {
+              const op = op2 === 0xa3 ? 4 : (op2 === 0xab ? 5 : (op2 === 0xb3 ? 6 : 7));
+              push(SIMPLE_BLOCK_OPS.BITTEST_R32_R32, rm, reg, op, 0);
+              continue;
+            }
+            if (op2 === 0xba && len === 4) {
+              if (reg !== 4 && reg !== 5 && reg !== 6 && reg !== 7) {
+                return null;
+              }
+              push(SIMPLE_BLOCK_OPS.BITTEST_R32_IMM, rm, bytes[3] & 0xff, reg, 0);
+              continue;
+            }
+            if (op2 === 0xb1 && len === 3) {
+              push(SIMPLE_BLOCK_OPS.CMPXCHG_R32_R32, rm, reg, 0, 0);
+              continue;
+            }
+            if (op2 === 0xc0 && len === 3) {
+              push(SIMPLE_BLOCK_OPS.XADD_R8_R8, rm, reg, 0, 0);
+              continue;
+            }
+            if (op2 === 0xc1 && len === 3) {
+              push(SIMPLE_BLOCK_OPS.XADD_R32_R32, rm, reg, 0, 0);
               continue;
             }
             return null;
@@ -978,7 +1214,7 @@
               push(SIMPLE_BLOCK_OPS.ALU_R8_IMM8, rm, bytes[2] & 0xff, 8, 0);
               continue;
             }
-            if (regField !== 0 && regField !== 1 && regField !== 4 && regField !== 5 && regField !== 7) {
+            if (regField !== 0 && regField !== 1 && regField !== 2 && regField !== 3 && regField !== 4 && regField !== 5 && regField !== 6 && regField !== 7) {
               return null;
             }
             push(SIMPLE_BLOCK_OPS.ALU_R8_IMM8, rm, bytes[2] & 0xff, regField, regField === 7 ? 0 : 1);
@@ -1016,7 +1252,7 @@
             if (mod !== 3) {
               return null;
             }
-            if (regField !== 0 && regField !== 1 && regField !== 4 && regField !== 5 && regField !== 7) {
+            if (regField !== 0 && regField !== 1 && regField !== 2 && regField !== 3 && regField !== 4 && regField !== 5 && regField !== 6 && regField !== 7) {
               return null;
             }
             const imm = opcode === 0x81
@@ -1052,10 +1288,21 @@
             const mod = (modrm >>> 6) & 3;
             const regField = (modrm >>> 3) & 7;
             const rm = modrm & 7;
-            if (mod !== 3 || regField !== 4) {
+            if (mod !== 3 || regField === 6) {
               return null;
             }
-            push(SIMPLE_BLOCK_OPS.SHIFT_R8_IMM, rm, 1, 0, 0);
+            push(SIMPLE_BLOCK_OPS.SHIFT_R8_IMM, rm, 1, regField, 0);
+            continue;
+          }
+          if (opcode === 0xd2 && len === 2) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const regField = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3 || regField === 6) {
+              return null;
+            }
+            push(SIMPLE_BLOCK_OPS.SHIFT_R8_IMM, rm, 0, regField, 1);
             continue;
           }
           if (opcode === 0xc0 && len === 3) {
@@ -1063,10 +1310,21 @@
             const mod = (modrm >>> 6) & 3;
             const regField = (modrm >>> 3) & 7;
             const rm = modrm & 7;
-            if (mod !== 3 || regField !== 5) {
+            if (mod !== 3 || regField === 6) {
               return null;
             }
-            push(SIMPLE_BLOCK_OPS.SHIFT_R8_IMM, rm, bytes[2] & 0x1f, 1, 0);
+            push(SIMPLE_BLOCK_OPS.SHIFT_R8_IMM, rm, bytes[2] & 0x1f, regField, 0);
+            continue;
+          }
+          if (opcode === 0xd1 && len === 2) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const regField = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3 || regField === 6) {
+              return null;
+            }
+            push(SIMPLE_BLOCK_OPS.SHIFT_R32_IMM, rm, 1, regField, 0);
             continue;
           }
           if (opcode === 0xc1 && len === 3) {
@@ -1074,10 +1332,89 @@
             const mod = (modrm >>> 6) & 3;
             const regField = (modrm >>> 3) & 7;
             const rm = modrm & 7;
-            if (mod !== 3 || (regField !== 4 && regField !== 5)) {
+            if (mod !== 3 || regField === 6) {
               return null;
             }
-            push(SIMPLE_BLOCK_OPS.SHIFT_R32_IMM, rm, bytes[2] & 0x1f, regField === 5 ? 1 : 0, 0);
+            push(SIMPLE_BLOCK_OPS.SHIFT_R32_IMM, rm, bytes[2] & 0x1f, regField, 0);
+            continue;
+          }
+          if (opcode === 0xd3 && len === 2) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const regField = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3 || regField === 6) {
+              return null;
+            }
+            push(SIMPLE_BLOCK_OPS.SHIFT_R32_IMM, rm, 0, regField, 1);
+            continue;
+          }
+          if (
+            opcode === 0x00 ||
+            opcode === 0x02 ||
+            opcode === 0x08 ||
+            opcode === 0x0a ||
+            opcode === 0x10 ||
+            opcode === 0x12 ||
+            opcode === 0x18 ||
+            opcode === 0x1a ||
+            opcode === 0x20 ||
+            opcode === 0x22 ||
+            opcode === 0x28 ||
+            opcode === 0x2a ||
+            opcode === 0x30 ||
+            opcode === 0x32 ||
+            opcode === 0x38 ||
+            opcode === 0x3a ||
+            opcode === 0x84
+          ) {
+            if (len !== 2) {
+              return null;
+            }
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const reg = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3) {
+              return null;
+            }
+            if (opcode === 0x84) {
+              push(SIMPLE_BLOCK_OPS.ALU_R8_R8, rm, reg, 8, 0);
+              continue;
+            }
+            const op = opcode === 0x00 || opcode === 0x02 ? 0
+              : (opcode === 0x08 || opcode === 0x0a ? 1
+                : (opcode === 0x10 || opcode === 0x12 ? 2
+                  : (opcode === 0x18 || opcode === 0x1a ? 3
+                    : (opcode === 0x20 || opcode === 0x22 ? 4
+                      : (opcode === 0x28 || opcode === 0x2a ? 5
+                        : (opcode === 0x30 || opcode === 0x32 ? 6 : 7))))));
+            const writeResult = opcode !== 0x38 && opcode !== 0x3a;
+            if (
+              opcode === 0x00 ||
+              opcode === 0x08 ||
+              opcode === 0x10 ||
+              opcode === 0x18 ||
+              opcode === 0x20 ||
+              opcode === 0x28 ||
+              opcode === 0x30 ||
+              opcode === 0x38
+            ) {
+              push(SIMPLE_BLOCK_OPS.ALU_R8_R8, rm, reg, op, writeResult ? 1 : 0);
+            } else {
+              push(SIMPLE_BLOCK_OPS.ALU_R8_R8, reg, rm, op, writeResult ? 1 : 0);
+            }
+            continue;
+          }
+          if (opcode === 0x86 && len === 2) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const reg = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3) {
+              return null;
+            }
+            push(SIMPLE_BLOCK_OPS.XCHG_R8_R8, rm, reg, 0, 0);
             continue;
           }
           if (
@@ -1087,6 +1424,10 @@
             opcode === 0x03 ||
             opcode === 0x09 ||
             opcode === 0x0b ||
+            opcode === 0x11 ||
+            opcode === 0x13 ||
+            opcode === 0x19 ||
+            opcode === 0x1b ||
             opcode === 0x21 ||
             opcode === 0x23 ||
             opcode === 0x29 ||
@@ -1129,11 +1470,15 @@
             }
             const op = opcode === 0x01 || opcode === 0x03 ? 0
               : (opcode === 0x09 || opcode === 0x0b ? 1
-                : (opcode === 0x21 || opcode === 0x23 ? 4
-                  : (opcode === 0x29 || opcode === 0x2b ? 5 : 6)));
+                : (opcode === 0x11 || opcode === 0x13 ? 2
+                  : (opcode === 0x19 || opcode === 0x1b ? 3
+                    : (opcode === 0x21 || opcode === 0x23 ? 4
+                      : (opcode === 0x29 || opcode === 0x2b ? 5 : 6)))));
             if (
               opcode === 0x01 ||
               opcode === 0x09 ||
+              opcode === 0x11 ||
+              opcode === 0x19 ||
               opcode === 0x21 ||
               opcode === 0x29 ||
               opcode === 0x31
@@ -1144,6 +1489,57 @@
             }
             continue;
           }
+          if (opcode === 0x87 && len === 2) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const reg = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3) {
+              return null;
+            }
+            push(SIMPLE_BLOCK_OPS.XCHG_R32_R32, rm, reg, 0, 0);
+            continue;
+          }
+          if ((opcode === 0xfe || opcode === 0xff || opcode === 0xf6 || opcode === 0xf7) && len === 2) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const regField = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3) {
+              return null;
+            }
+            if (opcode === 0xfe) {
+              if (regField === 0) {
+                push(SIMPLE_BLOCK_OPS.UNARY_R8, rm, 2, 0, 0);
+                continue;
+              }
+              if (regField === 1) {
+                push(SIMPLE_BLOCK_OPS.UNARY_R8, rm, 3, 0, 0);
+                continue;
+              }
+              return null;
+            }
+            if (opcode === 0xff) {
+              if (regField === 0) {
+                push(SIMPLE_BLOCK_OPS.UNARY_R32, rm, 2, 0, 0);
+                continue;
+              }
+              if (regField === 1) {
+                push(SIMPLE_BLOCK_OPS.UNARY_R32, rm, 3, 0, 0);
+                continue;
+              }
+              return null;
+            }
+            if (regField === 2) {
+              push(opcode === 0xf6 ? SIMPLE_BLOCK_OPS.UNARY_R8 : SIMPLE_BLOCK_OPS.UNARY_R32, rm, 0, 0, 0);
+              continue;
+            }
+            if (regField === 3) {
+              push(opcode === 0xf6 ? SIMPLE_BLOCK_OPS.UNARY_R8 : SIMPLE_BLOCK_OPS.UNARY_R32, rm, 1, 0, 0);
+              continue;
+            }
+            return null;
+          }
           return null;
         }
         if (!words.length) {
@@ -1151,7 +1547,8 @@
         }
         return {
           words: Uint32Array.from(words),
-          wordCount: words.length >>> 0
+          wordCount: words.length >>> 0,
+          jsOnly
         };
       },
 
@@ -1159,7 +1556,12 @@
         if (!block || !block.simplePlan || !this.cpu || !this.cpu.regs) {
           return 0;
         }
-        const backend = this.cpuHelperBackend;
+        const backend =
+          this.cpuBackend === "wasm"
+            ? this.cpuHelperBackend
+            : (this.cpuBackend === "auto" && block.preferWasmSimpleBackend
+              ? (this.cpuWasmHelperBackend || this.cpuHelperBackend)
+              : this.cpuHelperBackend);
         if (!backend || typeof backend.executeSimpleBlock !== "function") {
           return 0;
         }
@@ -1181,13 +1583,15 @@
           ? backend.executePreparedSimpleBlock(
             block.simplePlan.prepared,
             scratch,
-            regs[REG.EFLAGS] >>> 0
+            regs[REG.EFLAGS] >>> 0,
+            this
           )
           : backend.executeSimpleBlock(
             block.simplePlan.words,
             block.simplePlan.wordCount,
             scratch,
-            regs[REG.EFLAGS] >>> 0
+            regs[REG.EFLAGS] >>> 0,
+            this
           );
         if (!result || !result.ok) {
           block.simplePlan.prepared = null;
@@ -1197,7 +1601,7 @@
           regs[i] = scratch[i] >>> 0;
         }
         regs[REG.EFLAGS] = (result.flags >>> 0) || 0;
-        regs[REG.EIP] = block.end >>> 0;
+        regs[REG.EIP] = result.nextEip !== undefined ? (result.nextEip >>> 0) : (block.end >>> 0);
         return block.entries.length >>> 0;
       },
 

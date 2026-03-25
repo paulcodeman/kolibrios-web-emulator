@@ -46,7 +46,34 @@ const SIMPLE_BLOCK_OPS = {
   MOV_R8_R8: 9,
   ALU_R8_IMM8: 10,
   SHIFT_R32_IMM: 11,
-  SHIFT_R8_IMM: 12
+  SHIFT_R8_IMM: 12,
+  MOV_R8_IMM8: 13,
+  ALU_R8_R8: 14,
+  XCHG_R32_R32: 15,
+  XCHG_R8_R8: 16,
+  UNARY_R32: 17,
+  UNARY_R8: 18,
+  MOVX_R32_R: 19,
+  SETCC_R8: 20,
+  BITSCAN_R32_R32: 21,
+  BITTEST_R32_R32: 22,
+  BITTEST_R32_IMM: 23,
+  XADD_R32_R32: 24,
+  XADD_R8_R8: 25,
+  CMPXCHG_R32_R32: 26,
+  CMOVCC_R32_R32: 27,
+  IMUL_R32_R32: 28,
+  CLC: 29,
+  STC: 30,
+  PUSH_R32: 31,
+  POP_R32: 32,
+  JCC: 33,
+  JMP: 34,
+  LODSB: 35,
+  STOSB: 36,
+  XLAT: 37,
+  CALL_REL32: 38,
+  RET: 39
 };
 
 let activeCpuHelperBackend = null;
@@ -1326,7 +1353,7 @@ function doubleShift(value, source, count, widthBits, leftShift, flags) {
   return doubleShiftJs(value, source, count, widthBits, leftShift, flags);
 }
 
-function executeSimpleBlockJs(planWords, wordCount, regs, flags) {
+function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
   const words = planWords instanceof Uint32Array ? planWords : new Uint32Array(planWords || 0);
   if (!regs || typeof regs.length !== "number" || regs.length < 8) {
     return { ok: false, flags: flags >>> 0 };
@@ -1336,6 +1363,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags) {
     return { ok: false, flags: flags >>> 0 };
   }
   let nextFlags = flags >>> 0;
+  let nextEip = null;
   const readReg8 = (index) => {
     const idx = index & 7;
     if (idx <= 3) {
@@ -1435,24 +1463,280 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags) {
       }
       case SIMPLE_BLOCK_OPS.SHIFT_R32_IMM: {
         const reg = a & 7;
-        const shift = b & 0x1f;
-        regs[reg] = (c & 1) !== 0
-          ? ((regs[reg] >>> shift) >>> 0)
-          : ((regs[reg] << shift) >>> 0);
+        const shift = (d & 1) !== 0 ? readReg8(1) & 0x1f : (b & 0x1f);
+        const res = shiftRotate(regs[reg] >>> 0, shift, 32, c >>> 0, nextFlags);
+        if (!res.ok) {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        regs[reg] = res.result >>> 0;
+        nextFlags = res.flags >>> 0;
         break;
       }
       case SIMPLE_BLOCK_OPS.SHIFT_R8_IMM: {
         const reg = a & 7;
-        const shift = b & 0x1f;
+        const shift = (d & 1) !== 0 ? readReg8(1) & 0x1f : (b & 0x1f);
+        const res = shiftRotate(readReg8(reg), shift, 8, c >>> 0, nextFlags);
+        if (!res.ok) {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        writeReg8(reg, res.result & 0xff);
+        nextFlags = res.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.MOV_R8_IMM8:
+        writeReg8(a >>> 0, b >>> 0);
+        break;
+      case SIMPLE_BLOCK_OPS.ALU_R8_R8: {
+        const dst = a & 7;
+        const src = b & 7;
+        const writeResult = (d & 1) !== 0;
+        const alu = aluBinaryWidthJs(c >>> 0, readReg8(dst), readReg8(src), 8, nextFlags);
+        if (writeResult) {
+          writeReg8(dst, alu.result & 0xff);
+        }
+        nextFlags = alu.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.XCHG_R32_R32: {
+        const left = a & 7;
+        const right = b & 7;
+        const temp = regs[left] >>> 0;
+        regs[left] = regs[right] >>> 0;
+        regs[right] = temp;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.XCHG_R8_R8: {
+        const left = a & 7;
+        const right = b & 7;
+        const temp = readReg8(left);
+        writeReg8(left, readReg8(right));
+        writeReg8(right, temp);
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.UNARY_R32: {
+        const reg = a & 7;
+        const op = b & 3;
+        if (op === 0) {
+          regs[reg] = (~regs[reg]) >>> 0;
+          break;
+        }
+        if (op === 1) {
+          const alu = aluBinaryWidthJs(5, 0, regs[reg] >>> 0, 32, nextFlags);
+          regs[reg] = alu.result >>> 0;
+          nextFlags = alu.flags >>> 0;
+          break;
+        }
+        if (op === 2 || op === 3) {
+          const prevCf = nextFlags & FLAG_CF;
+          const alu = aluBinaryWidthJs(op === 2 ? 0 : 5, regs[reg] >>> 0, 1, 32, nextFlags);
+          regs[reg] = alu.result >>> 0;
+          nextFlags = ((alu.flags & ~FLAG_CF) | prevCf) >>> 0;
+          break;
+        }
+        return { ok: false, flags: flags >>> 0 };
+      }
+      case SIMPLE_BLOCK_OPS.UNARY_R8: {
+        const reg = a & 7;
+        const op = b & 3;
         const value = readReg8(reg);
-        writeReg8(reg, (c & 1) !== 0 ? ((value >>> shift) & 0xff) : ((value << shift) & 0xff));
+        if (op === 0) {
+          writeReg8(reg, (~value) & 0xff);
+          break;
+        }
+        if (op === 1) {
+          const alu = aluBinaryWidthJs(5, 0, value, 8, nextFlags);
+          writeReg8(reg, alu.result & 0xff);
+          nextFlags = alu.flags >>> 0;
+          break;
+        }
+        if (op === 2 || op === 3) {
+          const prevCf = nextFlags & FLAG_CF;
+          const alu = aluBinaryWidthJs(op === 2 ? 0 : 5, value, 1, 8, nextFlags);
+          writeReg8(reg, alu.result & 0xff);
+          nextFlags = ((alu.flags & ~FLAG_CF) | prevCf) >>> 0;
+          break;
+        }
+        return { ok: false, flags: flags >>> 0 };
+      }
+      case SIMPLE_BLOCK_OPS.MOVX_R32_R: {
+        const dst = a & 7;
+        const src = b & 7;
+        let value = 0;
+        switch (c & 3) {
+          case 0:
+            value = readReg8(src) & 0xff;
+            break;
+          case 1:
+            value = regs[src] & 0xffff;
+            break;
+          case 2:
+            value = ((readReg8(src) << 24) >> 24) >>> 0;
+            break;
+          case 3:
+            value = (((regs[src] & 0xffff) << 16) >> 16) >>> 0;
+            break;
+          default:
+            return { ok: false, flags: flags >>> 0 };
+        }
+        regs[dst] = value >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.SETCC_R8:
+        writeReg8(a >>> 0, evalJccConditionJs(b >>> 0, nextFlags) ? 1 : 0);
+        break;
+      case SIMPLE_BLOCK_OPS.BITSCAN_R32_R32: {
+        const scan = bitScanJs(regs[b & 7] >>> 0, (c & 1) !== 0, 32);
+        if (scan.zero) {
+          nextFlags |= FLAG_ZF;
+        } else {
+          nextFlags &= ~FLAG_ZF;
+          regs[a & 7] = scan.index >>> 0;
+        }
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.BITTEST_R32_R32: {
+        const op = c >>> 0;
+        const result = bitTestModifyJs(regs[a & 7] >>> 0, regs[b & 7] >>> 0, 32, op, nextFlags);
+        if (op !== 4) {
+          regs[a & 7] = result.result >>> 0;
+        }
+        nextFlags = result.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.BITTEST_R32_IMM: {
+        const op = c >>> 0;
+        const result = bitTestModifyJs(regs[a & 7] >>> 0, b >>> 0, 32, op, nextFlags);
+        if (op !== 4) {
+          regs[a & 7] = result.result >>> 0;
+        }
+        nextFlags = result.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.XADD_R32_R32: {
+        const result = xaddWidthJs(regs[a & 7] >>> 0, regs[b & 7] >>> 0, 32, nextFlags);
+        regs[a & 7] = result.dst >>> 0;
+        regs[b & 7] = result.src >>> 0;
+        nextFlags = result.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.XADD_R8_R8: {
+        const result = xaddWidthJs(readReg8(a), readReg8(b), 8, nextFlags);
+        writeReg8(a, result.dst & 0xff);
+        writeReg8(b, result.src & 0xff);
+        nextFlags = result.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.CMPXCHG_R32_R32: {
+        const result = cmpxchgWidthJs(regs[REG.EAX] >>> 0, regs[a & 7] >>> 0, regs[b & 7] >>> 0, 32, nextFlags);
+        if (result.exchanged) {
+          regs[a & 7] = result.result >>> 0;
+        } else {
+          regs[REG.EAX] = result.accumulator >>> 0;
+        }
+        nextFlags = result.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.CMOVCC_R32_R32:
+        if (evalJccConditionJs(c >>> 0, nextFlags)) {
+          regs[a & 7] = regs[b & 7] >>> 0;
+        }
+        break;
+      case SIMPLE_BLOCK_OPS.IMUL_R32_R32: {
+        const result = imulSignedWidthJs(regs[a & 7] >>> 0, regs[b & 7] >>> 0, 32, nextFlags);
+        regs[a & 7] = result.result >>> 0;
+        nextFlags = result.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.CLC:
+        nextFlags &= ~FLAG_CF;
+        break;
+      case SIMPLE_BLOCK_OPS.STC:
+        nextFlags |= FLAG_CF;
+        break;
+      case SIMPLE_BLOCK_OPS.PUSH_R32: {
+        if (!emu || typeof emu.writeMem32 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const reg = a & 7;
+        const value = regs[reg] >>> 0;
+        const nextEsp = (regs[REG.ESP] - 4) >>> 0;
+        emu.writeMem32(nextEsp, value);
+        regs[REG.ESP] = nextEsp >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.POP_R32: {
+        if (!emu || typeof emu.readMem32 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const reg = a & 7;
+        const esp = regs[REG.ESP] >>> 0;
+        const value = emu.readMem32(esp) >>> 0;
+        regs[REG.ESP] = (esp + 4) >>> 0;
+        regs[reg] = value >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.JCC:
+        nextEip = evalJccConditionJs(a >>> 0, nextFlags) ? (b >>> 0) : (c >>> 0);
+        break;
+      case SIMPLE_BLOCK_OPS.JMP:
+        nextEip = a >>> 0;
+        break;
+      case SIMPLE_BLOCK_OPS.LODSB: {
+        if (!emu || typeof emu.readMem8 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const esi = regs[REG.ESI] >>> 0;
+        const value = emu.readMem8(esi) & 0xff;
+        regs[REG.EAX] = ((regs[REG.EAX] & 0xffffff00) | value) >>> 0;
+        regs[REG.ESI] = (esi + ((nextFlags & FLAG_DF) ? -1 : 1)) >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.STOSB: {
+        if (!emu || typeof emu.writeMem8 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const edi = regs[REG.EDI] >>> 0;
+        emu.writeMem8(edi, regs[REG.EAX] & 0xff);
+        regs[REG.EDI] = (edi + ((nextFlags & FLAG_DF) ? -1 : 1)) >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.XLAT: {
+        if (!emu || typeof emu.readMem8 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const addr = ((regs[REG.EBX] >>> 0) + (regs[REG.EAX] & 0xff)) >>> 0;
+        const value = emu.readMem8(addr) & 0xff;
+        regs[REG.EAX] = ((regs[REG.EAX] & 0xffffff00) | value) >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.CALL_REL32: {
+        if (!emu || typeof emu.writeMem32 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const nextEsp = (regs[REG.ESP] - 4) >>> 0;
+        emu.writeMem32(nextEsp, b >>> 0);
+        regs[REG.ESP] = nextEsp >>> 0;
+        nextEip = a >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.RET: {
+        if (!emu || typeof emu.readMem32 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const esp = regs[REG.ESP] >>> 0;
+        nextEip = emu.readMem32(esp) >>> 0;
+        regs[REG.ESP] = (esp + 4) >>> 0;
         break;
       }
       default:
         return { ok: false, flags: flags >>> 0 };
     }
   }
-  return { ok: true, flags: nextFlags >>> 0 };
+  return {
+    ok: true,
+    flags: nextFlags >>> 0,
+    nextEip: nextEip === null ? undefined : (nextEip >>> 0)
+  };
 }
 
 function getJsCpuHelperBackend() {
@@ -1669,8 +1953,8 @@ function getJsCpuHelperBackend() {
       cmpxchgWidth(accumulator, source, replacement, widthBits, flags) {
         return cmpxchgWidthJs(accumulator, source, replacement, widthBits, flags);
       },
-      executeSimpleBlock(planWords, wordCount, regs, flags) {
-        return executeSimpleBlockJs(planWords, wordCount, regs, flags);
+      executeSimpleBlock(planWords, wordCount, regs, flags, emu) {
+        return executeSimpleBlockJs(planWords, wordCount, regs, flags, emu);
       },
       evalJccCondition(cc, flags) {
         return evalJccConditionJs(cc, flags);
@@ -2329,7 +2613,14 @@ function cmpxchgWidth(accumulator, source, replacement, widthBits, flags) {
 }
 
 function normalizeCpuBackendMode(mode) {
-  return String(mode || "").trim().toLowerCase() === "wasm" ? "wasm" : "js";
+  const normalized = String(mode || "").trim().toLowerCase();
+  if (normalized === "wasm") {
+    return "wasm";
+  }
+  if (normalized === "auto") {
+    return "auto";
+  }
+  return "js";
 }
 
 function getCpuSliceProfile(isBrowserMainThread, backend) {
@@ -2363,18 +2654,81 @@ function getCpuBlockProfile(backend) {
     };
   }
   return {
-    basicBlockMaxEntries: 32,
-    basicBlockImmediateCacheEntries: 4,
-    basicBlockHotThreshold: 3
+    basicBlockMaxEntries: 48,
+    basicBlockImmediateCacheEntries: 2,
+    basicBlockHotThreshold: 2
   };
 }
 
 function getCpuBackendAvailability() {
   const emu = KosEmu && KosEmu.emu ? KosEmu.emu : null;
   return {
+    auto: true,
     js: true,
     wasm: !!(emu && typeof emu.createWasmCpuBackend === "function")
   };
+}
+
+function shouldPreferWasmSimpleBlock(plan, entryCount) {
+  if (!plan || !(plan.wordCount > 0)) {
+    return false;
+  }
+  if (plan.jsOnly) {
+    return false;
+  }
+  const entries = Math.max(0, entryCount | 0);
+  if (entries >= 8) {
+    return true;
+  }
+  const words = plan.words;
+  const totalWords = Math.min(words.length >>> 0, plan.wordCount >>> 0);
+  let score = 0;
+  for (let i = 0; i + (SIMPLE_BLOCK_RECORD_WORDS - 1) < totalWords; i += SIMPLE_BLOCK_RECORD_WORDS) {
+    switch (words[i] >>> 0) {
+      case SIMPLE_BLOCK_OPS.IMUL_R32_R32:
+        score += 8;
+        break;
+      case SIMPLE_BLOCK_OPS.CMPXCHG_R32_R32:
+        score += 6;
+        break;
+      case SIMPLE_BLOCK_OPS.XADD_R32_R32:
+      case SIMPLE_BLOCK_OPS.XADD_R8_R8:
+        score += 5;
+        break;
+      case SIMPLE_BLOCK_OPS.BITSCAN_R32_R32:
+        score += 5;
+        break;
+      case SIMPLE_BLOCK_OPS.BITTEST_R32_R32:
+      case SIMPLE_BLOCK_OPS.BITTEST_R32_IMM:
+        score += 4;
+        break;
+      case SIMPLE_BLOCK_OPS.CMOVCC_R32_R32:
+      case SIMPLE_BLOCK_OPS.SHIFT_R32_IMM:
+      case SIMPLE_BLOCK_OPS.SHIFT_R8_IMM:
+        score += 3;
+        break;
+      case SIMPLE_BLOCK_OPS.MOVX_R32_R:
+      case SIMPLE_BLOCK_OPS.SETCC_R8:
+        score += 2;
+        break;
+      case SIMPLE_BLOCK_OPS.ALU_R32_R32:
+      case SIMPLE_BLOCK_OPS.ALU_R32_IMM32:
+      case SIMPLE_BLOCK_OPS.ALU_R8_R8:
+      case SIMPLE_BLOCK_OPS.ALU_R8_IMM8:
+      case SIMPLE_BLOCK_OPS.UNARY_R32:
+      case SIMPLE_BLOCK_OPS.UNARY_R8:
+      case SIMPLE_BLOCK_OPS.XCHG_R32_R32:
+      case SIMPLE_BLOCK_OPS.XCHG_R8_R8:
+        score += 1;
+        break;
+      default:
+        break;
+    }
+  }
+  if (entries >= 6 && score >= 8) {
+    return true;
+  }
+  return score >= 12;
 }
 
 
@@ -2386,6 +2740,7 @@ class Emulator {
     this.requestedCpuBackend = normalizeCpuBackendMode(opts.cpuBackend);
     this.cpuBackend = this.requestedCpuBackend;
     this.cpuHelperBackend = null;
+    this.cpuWasmHelperBackend = null;
     this.image = null;
     this.imageData = null;
     this.imageDataRaw = null;
@@ -2545,10 +2900,10 @@ class Emulator {
     this.basicBlockCache = new Map();
     this.basicBlockPageMap = new Map();
     this.basicBlockHotCounts = new Map();
-    this.basicBlockMaxEntries = 32;
+    this.basicBlockMaxEntries = 48;
     this.basicBlockCacheMax = 10000;
-    this.basicBlockImmediateCacheEntries = 4;
-    this.basicBlockHotThreshold = 3;
+    this.basicBlockImmediateCacheEntries = 2;
+    this.basicBlockHotThreshold = 2;
     this.basicBlockHotCountMax = 50000;
     this.softSimpleBlockPrewarmMaxStarts = 256;
     this.basicBlockHits = 0;
@@ -2620,6 +2975,7 @@ class Emulator {
     this.requestedCpuBackend = next;
     this.cpuBackend = next;
     this.cpuHelperBackend = null;
+    this.cpuWasmHelperBackend = null;
     this.applyCpuBackendRuntimeProfile(next);
     return next;
   }
@@ -2651,8 +3007,17 @@ class Emulator {
         throw new Error("WASM CPU backend is not available in this build.");
       }
       this.cpuHelperBackend = emu.createWasmCpuBackend();
+      this.cpuWasmHelperBackend = this.cpuHelperBackend;
+    } else if (next === "auto") {
+      const emu = KosEmu && KosEmu.emu ? KosEmu.emu : null;
+      this.cpuHelperBackend = getJsCpuHelperBackend();
+      this.cpuWasmHelperBackend =
+        emu && typeof emu.createWasmCpuBackend === "function"
+          ? emu.createWasmCpuBackend()
+          : null;
     } else {
-      this.cpuHelperBackend = null;
+      this.cpuHelperBackend = getJsCpuHelperBackend();
+      this.cpuWasmHelperBackend = null;
     }
     this.cpuBackend = next;
     this.applyCpuBackendRuntimeProfile(next);
@@ -3008,6 +3373,8 @@ class Emulator {
     this.log(
       this.cpuBackend === "wasm"
         ? "Emulation started (JS interpreter with WASM CPU helpers)."
+        : this.cpuBackend === "auto"
+          ? "Emulation started (JS interpreter with AUTO CPU backend)."
         : "Emulation started (JS interpreter)."
     );
   }
@@ -3387,8 +3754,9 @@ class Emulator {
     toBcd,
     align4k
   });
-  Emulator.normalizeCpuBackendMode = normalizeCpuBackendMode;
+    Emulator.normalizeCpuBackendMode = normalizeCpuBackendMode;
   Emulator.getCpuBackendAvailability = getCpuBackendAvailability;
+  Emulator.shouldPreferWasmSimpleBlock = shouldPreferWasmSimpleBlock;
   KosEmu.emu.createJsCpuHelperBackend = getJsCpuHelperBackend;
   KosEmu.emu.Emulator = Emulator;
 })();
