@@ -1670,14 +1670,17 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
     regs[base] = ((regs[base] & 0xffff00ff) | (v << 8)) >>> 0;
   };
   const calcSimpleMem32Address = (packedRegs, disp) => {
-    let base = 0;
     const basePlus = packedRegs & 0xff;
+    const indexPlus = (packedRegs >>> 8) & 0xff;
+    const disp32 = disp | 0;
+    if (!indexPlus && ((packedRegs >>> 16) & 0xff) === 1) {
+      return ((basePlus ? (regs[(basePlus - 1) & 7] >>> 0) : 0) + disp32) >>> 0;
+    }
+    let base = 0;
     if (basePlus) {
       base = regs[(basePlus - 1) & 7] >>> 0;
     }
     let index = 0;
-    const indexPlus = (packedRegs >>> 8) & 0xff;
-    const disp32 = disp | 0;
     if (indexPlus) {
       const value = regs[(indexPlus - 1) & 7] >>> 0;
       switch ((packedRegs >>> 16) & 0xff) {
