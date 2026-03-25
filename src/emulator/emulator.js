@@ -79,7 +79,18 @@ const SIMPLE_BLOCK_OPS = {
   CMP_R32_MEM32: 42,
   ALU_MEM32_IMM8: 43,
   ALU_MEM8_IMM8: 44,
-  MOV_MEM8_IMM8: 45
+  MOV_MEM8_IMM8: 45,
+  UNARY_MEM8: 46,
+  UNARY_MEM32: 47,
+  ALU_MEM32_IMM32: 48,
+  LEA_R32_MEM32: 49,
+  ALU_MEM32_R32: 50,
+  ALU_R32_MEM32: 51,
+  MOV_R8_MEM8: 52,
+  MOV_MEM8_R8: 53,
+  ALU_MEM8_R8: 54,
+  ALU_R8_MEM8: 55,
+  MOVX_R32_MEM: 56
 };
 
 let activeCpuHelperBackend = null;
@@ -1782,7 +1793,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         const lhs = emu.readMem32(ea) >>> 0;
         const imm = (d << 24) >> 24;
         const alu = aluBinaryWidthJs(a >>> 0, lhs >>> 0, imm >>> 0, 32, nextFlags);
-        if ((a >>> 0) !== 7) {
+        if ((a >>> 0) !== 7 && (a >>> 0) !== 8) {
           emu.writeMem32(ea, alu.result >>> 0);
         }
         nextFlags = alu.flags >>> 0;
@@ -1795,7 +1806,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const lhs = emu.readMem8(ea) & 0xff;
         const alu = aluBinaryWidthJs(a >>> 0, lhs >>> 0, d & 0xff, 8, nextFlags);
-        if ((a >>> 0) !== 7) {
+        if ((a >>> 0) !== 7 && (a >>> 0) !== 8) {
           emu.writeMem8(ea, alu.result & 0xff);
         }
         nextFlags = alu.flags >>> 0;
@@ -1807,6 +1818,166 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         emu.writeMem8(ea, d & 0xff);
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.UNARY_MEM8: {
+        if (!emu || typeof emu.readMem8 !== "function" || typeof emu.writeMem8 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const value = emu.readMem8(ea) & 0xff;
+        const op = a >>> 0;
+        if (op === 0) {
+          emu.writeMem8(ea, (~value) & 0xff);
+          break;
+        }
+        if (op === 1) {
+          const alu = aluBinaryWidthJs(5, 0, value, 8, nextFlags);
+          emu.writeMem8(ea, alu.result & 0xff);
+          nextFlags = alu.flags >>> 0;
+          break;
+        }
+        if (op === 2 || op === 3) {
+          const prevCf = nextFlags & FLAG_CF;
+          const alu = aluBinaryWidthJs(op === 2 ? 0 : 5, value, 1, 8, nextFlags);
+          emu.writeMem8(ea, alu.result & 0xff);
+          nextFlags = ((alu.flags & ~FLAG_CF) | prevCf) >>> 0;
+          break;
+        }
+        return { ok: false, flags: flags >>> 0 };
+      }
+      case SIMPLE_BLOCK_OPS.UNARY_MEM32: {
+        if (!emu || typeof emu.readMem32 !== "function" || typeof emu.writeMem32 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const value = emu.readMem32(ea) >>> 0;
+        const op = a >>> 0;
+        if (op === 0) {
+          emu.writeMem32(ea, (~value) >>> 0);
+          break;
+        }
+        if (op === 1) {
+          const alu = aluBinaryWidthJs(5, 0, value >>> 0, 32, nextFlags);
+          emu.writeMem32(ea, alu.result >>> 0);
+          nextFlags = alu.flags >>> 0;
+          break;
+        }
+        return { ok: false, flags: flags >>> 0 };
+      }
+      case SIMPLE_BLOCK_OPS.ALU_MEM32_IMM32: {
+        if (!emu || typeof emu.readMem32 !== "function" || typeof emu.writeMem32 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const lhs = emu.readMem32(ea) >>> 0;
+        const alu = aluBinaryWidthJs(a >>> 0, lhs >>> 0, d >>> 0, 32, nextFlags);
+        if ((a >>> 0) !== 7 && (a >>> 0) !== 8) {
+          emu.writeMem32(ea, alu.result >>> 0);
+        }
+        nextFlags = alu.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.LEA_R32_MEM32:
+        regs[a & 7] = calcSimpleMem32Address(b >>> 0, c >>> 0) >>> 0;
+        break;
+      case SIMPLE_BLOCK_OPS.ALU_MEM32_R32: {
+        if (!emu || typeof emu.readMem32 !== "function" || typeof emu.writeMem32 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const lhs = emu.readMem32(ea) >>> 0;
+        const alu = aluBinaryWidthJs(d >>> 0, lhs >>> 0, regs[a & 7] >>> 0, 32, nextFlags);
+        if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
+          emu.writeMem32(ea, alu.result >>> 0);
+        }
+        nextFlags = alu.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.ALU_R32_MEM32: {
+        if (!emu || typeof emu.readMem32 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const rhs = emu.readMem32(ea) >>> 0;
+        const alu = aluBinaryWidthJs(d >>> 0, regs[a & 7] >>> 0, rhs >>> 0, 32, nextFlags);
+        if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
+          regs[a & 7] = alu.result >>> 0;
+        }
+        nextFlags = alu.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.MOV_R8_MEM8: {
+        if (!emu || typeof emu.readMem8 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        writeReg8(a & 7, emu.readMem8(ea) & 0xff);
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.MOV_MEM8_R8: {
+        if (!emu || typeof emu.writeMem8 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        emu.writeMem8(ea, readReg8(a & 7) & 0xff);
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.ALU_MEM8_R8: {
+        if (!emu || typeof emu.readMem8 !== "function" || typeof emu.writeMem8 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const lhs = emu.readMem8(ea) & 0xff;
+        const alu = aluBinaryWidthJs(d >>> 0, lhs >>> 0, readReg8(a & 7) & 0xff, 8, nextFlags);
+        if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
+          emu.writeMem8(ea, alu.result & 0xff);
+        }
+        nextFlags = alu.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.ALU_R8_MEM8: {
+        if (!emu || typeof emu.readMem8 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const rhs = emu.readMem8(ea) & 0xff;
+        const alu = aluBinaryWidthJs(d >>> 0, readReg8(a & 7) & 0xff, rhs >>> 0, 8, nextFlags);
+        if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
+          writeReg8(a & 7, alu.result & 0xff);
+        }
+        nextFlags = alu.flags >>> 0;
+        break;
+      }
+      case SIMPLE_BLOCK_OPS.MOVX_R32_MEM: {
+        if (!emu || typeof emu.readMem8 !== "function") {
+          return { ok: false, flags: flags >>> 0 };
+        }
+        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        let value = 0;
+        switch (d & 3) {
+          case 0:
+            value = emu.readMem8(ea) & 0xff;
+            break;
+          case 1:
+            if (typeof emu.readMem16 !== "function") {
+              return { ok: false, flags: flags >>> 0 };
+            }
+            value = emu.readMem16(ea) & 0xffff;
+            break;
+          case 2:
+            value = ((emu.readMem8(ea) & 0xff) << 24 >> 24) >>> 0;
+            break;
+          case 3:
+            if (typeof emu.readMem16 !== "function") {
+              return { ok: false, flags: flags >>> 0 };
+            }
+            value = (((emu.readMem16(ea) & 0xffff) << 16) >> 16) >>> 0;
+            break;
+          default:
+            return { ok: false, flags: flags >>> 0 };
+        }
+        regs[a & 7] = value >>> 0;
         break;
       }
       default:

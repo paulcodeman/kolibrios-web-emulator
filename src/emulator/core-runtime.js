@@ -1111,11 +1111,101 @@
           }
           if (
             allowJsOnlyOps &&
-            (opcode === 0x8b || opcode === 0x89 || opcode === 0x3b || opcode === 0x80 || opcode === 0x82 || opcode === 0x83 || opcode === 0xc6)
+            (
+              opcode === 0x01 ||
+              opcode === 0x02 ||
+              opcode === 0x03 ||
+              opcode === 0x08 ||
+              opcode === 0x09 ||
+              opcode === 0x0a ||
+              opcode === 0x0b ||
+              opcode === 0x20 ||
+              opcode === 0x21 ||
+              opcode === 0x22 ||
+              opcode === 0x23 ||
+              opcode === 0x28 ||
+              opcode === 0x29 ||
+              opcode === 0x2a ||
+              opcode === 0x2b ||
+              opcode === 0x30 ||
+              opcode === 0x31 ||
+              opcode === 0x32 ||
+              opcode === 0x33 ||
+              opcode === 0x38 ||
+              opcode === 0x39 ||
+              opcode === 0x3a ||
+              opcode === 0x8b ||
+              opcode === 0x88 ||
+              opcode === 0x89 ||
+              opcode === 0x8a ||
+              opcode === 0x8d ||
+              opcode === 0x3b ||
+              opcode === 0x80 ||
+              opcode === 0x82 ||
+              opcode === 0x83 ||
+              opcode === 0xc6 ||
+              opcode === 0xfe ||
+              opcode === 0xf6 ||
+              opcode === 0xf7
+            )
           ) {
             const modrmInfo = this.getCachedModRmInfo(addr, bytes, 1);
             const packedMem = packSimpleMem32Operand(modrmInfo);
             if (packedMem !== null) {
+              const aluOp =
+                (opcode === 0x01 || opcode === 0x03) ? 0
+                  : ((opcode === 0x09 || opcode === 0x0b) ? 1
+                    : ((opcode === 0x21 || opcode === 0x23) ? 4
+                      : ((opcode === 0x29 || opcode === 0x2b) ? 5
+                        : ((opcode === 0x31 || opcode === 0x33) ? 6
+                          : ((opcode === 0x39 || opcode === 0x3b) ? 7 : -1)))));
+              if (opcode === 0x8d && len === (1 + modrmInfo.size)) {
+                pushJsOnly(SIMPLE_BLOCK_OPS.LEA_R32_MEM32, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, 0);
+                continue;
+              }
+              if (
+                len === (1 + modrmInfo.size) &&
+                (opcode === 0x01 || opcode === 0x09 || opcode === 0x21 || opcode === 0x29 || opcode === 0x31 || opcode === 0x39)
+              ) {
+                pushJsOnly(SIMPLE_BLOCK_OPS.ALU_MEM32_R32, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, aluOp);
+                continue;
+              }
+              if (
+                len === (1 + modrmInfo.size) &&
+                (opcode === 0x03 || opcode === 0x0b || opcode === 0x23 || opcode === 0x2b || opcode === 0x33)
+              ) {
+                pushJsOnly(SIMPLE_BLOCK_OPS.ALU_R32_MEM32, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, aluOp);
+                continue;
+              }
+              const byteAluOp =
+                (opcode === 0x00 || opcode === 0x02) ? 0
+                  : ((opcode === 0x08 || opcode === 0x0a) ? 1
+                    : ((opcode === 0x20 || opcode === 0x22) ? 4
+                      : ((opcode === 0x28 || opcode === 0x2a) ? 5
+                        : ((opcode === 0x30 || opcode === 0x32) ? 6
+                          : ((opcode === 0x38 || opcode === 0x3a) ? 7 : -1)))));
+              if (opcode === 0x88 && len === (1 + modrmInfo.size)) {
+                pushJsOnly(SIMPLE_BLOCK_OPS.MOV_MEM8_R8, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, 0);
+                continue;
+              }
+              if (opcode === 0x8a && len === (1 + modrmInfo.size)) {
+                pushJsOnly(SIMPLE_BLOCK_OPS.MOV_R8_MEM8, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, 0);
+                continue;
+              }
+              if (
+                len === (1 + modrmInfo.size) &&
+                (opcode === 0x00 || opcode === 0x08 || opcode === 0x20 || opcode === 0x28 || opcode === 0x30 || opcode === 0x38)
+              ) {
+                pushJsOnly(SIMPLE_BLOCK_OPS.ALU_MEM8_R8, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, byteAluOp);
+                continue;
+              }
+              if (
+                len === (1 + modrmInfo.size) &&
+                (opcode === 0x02 || opcode === 0x0a || opcode === 0x22 || opcode === 0x2a || opcode === 0x32 || opcode === 0x3a)
+              ) {
+                pushJsOnly(SIMPLE_BLOCK_OPS.ALU_R8_MEM8, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, byteAluOp);
+                continue;
+              }
               if ((opcode === 0x8b || opcode === 0x89 || opcode === 0x3b) && len === (1 + modrmInfo.size)) {
                 if (opcode === 0x8b) {
                   pushJsOnly(SIMPLE_BLOCK_OPS.MOV_R32_MEM32, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, 0);
@@ -1143,6 +1233,52 @@
                 }
                 pushJsOnly(SIMPLE_BLOCK_OPS.ALU_MEM8_IMM8, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, imm8);
                 continue;
+              }
+              if (opcode === 0xfe) {
+                const regField = modrmInfo.reg & 7;
+                if (regField === 0 && len === (1 + modrmInfo.size)) {
+                  pushJsOnly(SIMPLE_BLOCK_OPS.UNARY_MEM8, 2, packedMem, modrmInfo.disp >>> 0, 0);
+                  continue;
+                }
+                if (regField === 1 && len === (1 + modrmInfo.size)) {
+                  pushJsOnly(SIMPLE_BLOCK_OPS.UNARY_MEM8, 3, packedMem, modrmInfo.disp >>> 0, 0);
+                  continue;
+                }
+              }
+              if (opcode === 0xf6) {
+                const regField = modrmInfo.reg & 7;
+                if ((regField === 0 || regField === 1) && len === (1 + modrmInfo.size + 1)) {
+                  pushJsOnly(SIMPLE_BLOCK_OPS.ALU_MEM8_IMM8, 8, packedMem, modrmInfo.disp >>> 0, bytes[1 + modrmInfo.size] & 0xff);
+                  continue;
+                }
+                if (regField === 2 && len === (1 + modrmInfo.size)) {
+                  pushJsOnly(SIMPLE_BLOCK_OPS.UNARY_MEM8, 0, packedMem, modrmInfo.disp >>> 0, 0);
+                  continue;
+                }
+                if (regField === 3 && len === (1 + modrmInfo.size)) {
+                  pushJsOnly(SIMPLE_BLOCK_OPS.UNARY_MEM8, 1, packedMem, modrmInfo.disp >>> 0, 0);
+                  continue;
+                }
+              }
+              if (opcode === 0xf7) {
+                const regField = modrmInfo.reg & 7;
+                if ((regField === 0 || regField === 1) && len === (1 + modrmInfo.size + 4)) {
+                  const imm =
+                    (bytes[1 + modrmInfo.size] & 0xff) |
+                    ((bytes[2 + modrmInfo.size] & 0xff) << 8) |
+                    ((bytes[3 + modrmInfo.size] & 0xff) << 16) |
+                    ((bytes[4 + modrmInfo.size] & 0xff) << 24);
+                  pushJsOnly(SIMPLE_BLOCK_OPS.ALU_MEM32_IMM32, 8, packedMem, modrmInfo.disp >>> 0, imm >>> 0);
+                  continue;
+                }
+                if (regField === 2 && len === (1 + modrmInfo.size)) {
+                  pushJsOnly(SIMPLE_BLOCK_OPS.UNARY_MEM32, 0, packedMem, modrmInfo.disp >>> 0, 0);
+                  continue;
+                }
+                if (regField === 3 && len === (1 + modrmInfo.size)) {
+                  pushJsOnly(SIMPLE_BLOCK_OPS.UNARY_MEM32, 1, packedMem, modrmInfo.disp >>> 0, 0);
+                  continue;
+                }
               }
             }
           }
@@ -1185,6 +1321,15 @@
                 ((bytes[5] & 0xff) << 24);
               pushJsOnly(SIMPLE_BLOCK_OPS.JCC, op2 & 0x0f, (next + rel) >>> 0, next >>> 0, 0);
               continue;
+            }
+            if (allowJsOnlyOps && (op2 === 0xb6 || op2 === 0xb7 || op2 === 0xbe || op2 === 0xbf) && mod !== 3) {
+              const modrmInfo = this.getCachedModRmInfo(addr, bytes, 2);
+              const packedMem = packSimpleMem32Operand(modrmInfo);
+              if (packedMem !== null && len === (2 + modrmInfo.size)) {
+                const mode = op2 === 0xb6 ? 0 : (op2 === 0xb7 ? 1 : (op2 === 0xbe ? 2 : 3));
+                pushJsOnly(SIMPLE_BLOCK_OPS.MOVX_R32_MEM, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, mode);
+                continue;
+              }
             }
             if (mod !== 3) {
               return null;
@@ -1616,15 +1761,19 @@
           this.cpuBackend === "wasm"
             ? this.cpuHelperBackend
             : (this.cpuBackend === "auto" && block.preferWasmSimpleBackend
-              ? (this.cpuWasmHelperBackend || this.cpuHelperBackend)
+            ? (this.cpuWasmHelperBackend || this.cpuHelperBackend)
               : this.cpuHelperBackend);
         if (!backend || typeof backend.executeSimpleBlock !== "function") {
           return 0;
         }
-        const scratch = this.simpleBlockRegsScratch || (this.simpleBlockRegsScratch = new Uint32Array(8));
         const regs = this.cpu.regs;
-        for (let i = 0; i < 8; i += 1) {
-          scratch[i] = regs[i] >>> 0;
+        let execRegs = regs;
+        if (!(backend.kind === "js")) {
+          const scratch = this.simpleBlockRegsScratch || (this.simpleBlockRegsScratch = new Uint32Array(8));
+          for (let i = 0; i < 8; i += 1) {
+            scratch[i] = regs[i] >>> 0;
+          }
+          execRegs = scratch;
         }
         if (
           !block.simplePlan.prepared &&
@@ -1638,14 +1787,14 @@
         const result = block.simplePlan.prepared && typeof backend.executePreparedSimpleBlock === "function"
           ? backend.executePreparedSimpleBlock(
             block.simplePlan.prepared,
-            scratch,
+            execRegs,
             regs[REG.EFLAGS] >>> 0,
             this
           )
           : backend.executeSimpleBlock(
             block.simplePlan.words,
             block.simplePlan.wordCount,
-            scratch,
+            execRegs,
             regs[REG.EFLAGS] >>> 0,
             this
           );
@@ -1653,8 +1802,10 @@
           block.simplePlan.prepared = null;
           return 0;
         }
-        for (let i = 0; i < 8; i += 1) {
-          regs[i] = scratch[i] >>> 0;
+        if (execRegs !== regs) {
+          for (let i = 0; i < 8; i += 1) {
+            regs[i] = execRegs[i] >>> 0;
+          }
         }
         regs[REG.EFLAGS] = (result.flags >>> 0) || 0;
         regs[REG.EIP] = result.nextEip !== undefined ? (result.nextEip >>> 0) : (block.end >>> 0);
