@@ -299,19 +299,31 @@
           return null;
         }
         const start = addr >>> 0;
-        const bytes = this.readMemBlock(start, 8);
-        if (!bytes) {
+        const mem = this.cpu.mem;
+        if (!mem) {
           return null;
         }
-        const sig = this.getDecodeSignature(bytes);
+        if ((start + 8) > (mem.length >>> 0) && !this.checkInterpreterMem(start, 8)) {
+          return null;
+        }
+        const sig0 =
+          (mem[start] & 0xff) |
+          ((mem[(start + 1) >>> 0] & 0xff) << 8) |
+          ((mem[(start + 2) >>> 0] & 0xff) << 16) |
+          ((mem[(start + 3) >>> 0] & 0xff) << 24);
+        const sig1 =
+          (mem[(start + 4) >>> 0] & 0xff) |
+          ((mem[(start + 5) >>> 0] & 0xff) << 8) |
+          ((mem[(start + 6) >>> 0] & 0xff) << 16) |
+          ((mem[(start + 7) >>> 0] & 0xff) << 24);
         const cached = this.basicBlockStartCache.get(start);
-        if (cached && cached.sig0 === sig.sig0 && cached.sig1 === sig.sig1) {
+        if (cached && cached.sig0 === (sig0 >>> 0) && cached.sig1 === (sig1 >>> 0)) {
           this.basicBlockStartHits = ((this.basicBlockStartHits | 0) + 1) | 0;
           return cached;
         }
         const state = {
-          sig0: sig.sig0 >>> 0,
-          sig1: sig.sig1 >>> 0,
+          sig0: sig0 >>> 0,
+          sig1: sig1 >>> 0,
           canStart: !this.isBasicBlockTerminatorAt(start, 0)
         };
         if (this.basicBlockStartCache.size >= (this.basicBlockStartCacheMax | 0)) {

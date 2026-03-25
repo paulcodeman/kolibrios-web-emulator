@@ -484,14 +484,19 @@
       },
 
       readMem8(addr) {
-        if (!this.cpu) {
+        const cpu = this.cpu;
+        if (!cpu) {
           return 0;
         }
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, 1)) {
+        const mem = cpu.mem;
+        if (!mem) {
           return 0;
         }
-        return this.cpu.mem[start] >>> 0;
+        if ((start + 1) > (mem.length >>> 0) && !this.checkInterpreterMem(start, 1)) {
+          return 0;
+        }
+        return mem[start] >>> 0;
       },
 
       writeMem8(addr, value) {
@@ -507,14 +512,19 @@
       },
 
       readMem32(addr) {
-        if (!this.cpu) {
+        const cpu = this.cpu;
+        if (!cpu) {
           return 0;
         }
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, 4)) {
+        const mem = cpu.mem;
+        if (!mem) {
           return 0;
         }
-        return this.cpu.view.getUint32(start, true) >>> 0;
+        if ((start + 4) > (mem.length >>> 0) && !this.checkInterpreterMem(start, 4)) {
+          return 0;
+        }
+        return cpu.view.getUint32(start, true) >>> 0;
       },
 
       readMemFloat32(addr) {
@@ -564,14 +574,19 @@
       },
 
       readMem16(addr) {
-        if (!this.cpu) {
+        const cpu = this.cpu;
+        if (!cpu) {
           return 0;
         }
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, 2)) {
+        const mem = cpu.mem;
+        if (!mem) {
           return 0;
         }
-        return this.cpu.view.getUint16(start, true) & 0xffff;
+        if ((start + 2) > (mem.length >>> 0) && !this.checkInterpreterMem(start, 2)) {
+          return 0;
+        }
+        return cpu.view.getUint16(start, true) & 0xffff;
       },
 
       writeMem16(addr, value) {
@@ -618,14 +633,54 @@
       },
 
       readMemBlock(addr, size) {
-        if (!this.cpu) {
+        const cpu = this.cpu;
+        if (!cpu) {
+          return null;
+        }
+        const mem = cpu.mem;
+        if (!mem) {
           return null;
         }
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, size)) {
+        const blockSize = size >>> 0;
+        if ((start + blockSize) > (mem.length >>> 0) && !this.checkInterpreterMem(start, blockSize)) {
           return null;
         }
-        return this.cpu.mem.subarray(start, start + size);
+        const cacheMem0 = this.memBlockCacheMem0;
+        if (
+          cacheMem0 === mem &&
+          (this.memBlockCacheStart0 >>> 0) === start &&
+          (this.memBlockCacheSize0 >>> 0) === blockSize
+        ) {
+          return this.memBlockCacheView0;
+        }
+        const cacheMem1 = this.memBlockCacheMem1;
+        if (
+          cacheMem1 === mem &&
+          (this.memBlockCacheStart1 >>> 0) === start &&
+          (this.memBlockCacheSize1 >>> 0) === blockSize
+        ) {
+          const view1 = this.memBlockCacheView1;
+          this.memBlockCacheMem1 = cacheMem0;
+          this.memBlockCacheStart1 = this.memBlockCacheStart0 >>> 0;
+          this.memBlockCacheSize1 = this.memBlockCacheSize0 >>> 0;
+          this.memBlockCacheView1 = this.memBlockCacheView0 || null;
+          this.memBlockCacheMem0 = mem;
+          this.memBlockCacheStart0 = start >>> 0;
+          this.memBlockCacheSize0 = blockSize >>> 0;
+          this.memBlockCacheView0 = view1;
+          return view1;
+        }
+        const view = mem.subarray(start, start + blockSize);
+        this.memBlockCacheMem1 = cacheMem0;
+        this.memBlockCacheStart1 = this.memBlockCacheStart0 >>> 0;
+        this.memBlockCacheSize1 = this.memBlockCacheSize0 >>> 0;
+        this.memBlockCacheView1 = this.memBlockCacheView0 || null;
+        this.memBlockCacheMem0 = mem;
+        this.memBlockCacheStart0 = start >>> 0;
+        this.memBlockCacheSize0 = blockSize >>> 0;
+        this.memBlockCacheView0 = view;
+        return view;
       },
 
       readMem64U32(addr, out) {
