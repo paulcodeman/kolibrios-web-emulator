@@ -158,12 +158,13 @@ function captureBlockState(emulator, block) {
   };
 }
 
-function runCachedBlockScenario(cpuBackend, bytes, setup) {
+function runCachedBlockScenario(cpuBackend, bytes, setup, options) {
   const emulator = createInstructionEmulator(cpuBackend);
   for (let i = 0; i < bytes.length; i += 1) {
     emulator.writeMem8(i, bytes[i] & 0xff);
   }
-  if (loaderApi && typeof loaderApi.scanSoftOps === "function") {
+  const opts = options || {};
+  if (!opts.skipSoftScan && loaderApi && typeof loaderApi.scanSoftOps === "function") {
     const scan = loaderApi.scanSoftOps(emulator.cpu.mem, 0, bytes.length);
     emulator.softInstructionSites = scan && scan.sites instanceof Map ? scan.sites : new Map();
   }
@@ -176,10 +177,16 @@ function runCachedBlockScenario(cpuBackend, bytes, setup) {
   const block = emulator.basicBlockCache.get(0) || null;
   const linearState = captureBlockState(emulator, block);
   emulator.cpu.regs.set(initialRegs);
+  if (typeof opts.reset === "function") {
+    opts.reset(emulator);
+  }
   emulator.writeReg(REG_EIP, 0);
   const cached = emulator.executeCachedBasicBlock(0, 64);
   const cachedState = captureBlockState(emulator, block);
   emulator.cpu.regs.set(initialRegs);
+  if (typeof opts.reset === "function") {
+    opts.reset(emulator);
+  }
   emulator.writeReg(REG_EIP, 0);
   const cachedAgain = emulator.executeCachedBasicBlock(0, 64);
   const cachedAgainState = captureBlockState(emulator, block);
@@ -1432,6 +1439,43 @@ try {
   assert(!jsOnlyAutoBlock.hasPreparedPlan, "auto mode should not prepare js-only simple blocks for WASM");
   assertDeepEq(jsOnlyAutoBlock.cachedState, jsOnlyAutoBlock.linearState, "auto js-only simple block replay should match linear execution");
   assert(!jsOnlyWasmBlock.hasSimplePlan, "wasm mode should not compile js-only simple blocks into wasm plans");
+
+  const jsOnlyMemoryBlockBytes = [
+    0x8b, 0x43, 0x04,
+    0x89, 0x46, 0x08,
+    0x3b, 0x4a, 0x0c,
+    0x83, 0x45, 0x10, 0x05,
+    0x80, 0x43, 0x11, 0x0f,
+    0xc6, 0x43, 0x12, 0xaa,
+    0xc3
+  ];
+  const jsOnlyMemoryBlockReset = (emulator) => {
+    emulator.writeMem32(0x204, 0x89abcdef);
+    emulator.writeMem32(0x40c, 0x12345679);
+    emulator.writeMem32(0x510, 0x00000010);
+    emulator.writeMem8(0x211, 0x20);
+    emulator.writeMem8(0x212, 0x00);
+  };
+  const jsOnlyMemoryBlockSetup = (emulator) => {
+    emulator.writeReg(REG_EAX, 0x11111111);
+    emulator.writeReg(REG_EBX, 0x00000200);
+    emulator.writeReg(REG_ECX, 0x12345678);
+    emulator.writeReg(REG_EDX, 0x00000400);
+    emulator.writeReg(REG_ESI, 0x00000300);
+    emulator.writeReg(5, 0x00000500);
+    emulator.writeReg(REG_EFLAGS, 0x202);
+    jsOnlyMemoryBlockReset(emulator);
+  };
+  const jsOnlyMemoryJsBlock = runCachedBlockScenario("js", jsOnlyMemoryBlockBytes, jsOnlyMemoryBlockSetup, { skipSoftScan: true, reset: jsOnlyMemoryBlockReset });
+  const jsOnlyMemoryAutoBlock = runCachedBlockScenario("auto", jsOnlyMemoryBlockBytes, jsOnlyMemoryBlockSetup, { skipSoftScan: true, reset: jsOnlyMemoryBlockReset });
+  const jsOnlyMemoryWasmBlock = runCachedBlockScenario("wasm", jsOnlyMemoryBlockBytes, jsOnlyMemoryBlockSetup, { skipSoftScan: true, reset: jsOnlyMemoryBlockReset });
+  assert(jsOnlyMemoryJsBlock.hasSimplePlan, "js-only memory simple block scenario should compile a JS simple plan");
+  assertEq(jsOnlyMemoryJsBlock.cached, jsOnlyMemoryJsBlock.built, "js-only memory simple block cached replay should cover the same entry count");
+  assertDeepEq(jsOnlyMemoryJsBlock.cachedState, jsOnlyMemoryJsBlock.linearState, "js-only memory simple block cached replay should match linear execution");
+  assert(jsOnlyMemoryAutoBlock.hasSimplePlan, "auto mode should still cache js-only memory simple blocks through the JS backend");
+  assert(!jsOnlyMemoryAutoBlock.hasPreparedPlan, "auto mode should not prepare js-only memory simple blocks for WASM");
+  assertDeepEq(jsOnlyMemoryAutoBlock.cachedState, jsOnlyMemoryAutoBlock.linearState, "auto js-only memory simple block replay should match linear execution");
+  assert(!jsOnlyMemoryWasmBlock.hasSimplePlan, "wasm mode should not compile js-only memory simple blocks into wasm plans");
 
   const genericSingleEntryBytes = [
     0xc6, 0xc0, 0x12,
