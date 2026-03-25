@@ -104,7 +104,8 @@
               this.shouldYieldForTimeslice();
               continue;
             }
-            if (this.softInstructions && this.handleSoftInstruction(eip)) {
+            const softSite = this.softInstructions ? this.getSoftInstructionSite(eip) : null;
+            if (softSite && this.handleSoftInstruction(eip, softSite)) {
               executed += 1;
               this.shouldYieldForTimeslice();
               continue;
@@ -321,10 +322,32 @@
           this.basicBlockStartHits = ((this.basicBlockStartHits | 0) + 1) | 0;
           return cached;
         }
+        let canStart = true;
+        if (this.syscallSiteSet.has(start)) {
+          canStart = false;
+        }
+        if (canStart) {
+          const softSites = this.softInstructions ? this.softInstructionSites : null;
+          if (softSites) {
+            const site = softSites.get(start);
+            if (site && !this.canExecuteSoftInstructionInBasicBlock(site)) {
+              canStart = false;
+            }
+          }
+        }
+        if (canStart) {
+          const hostCallStubs = this.hostCallStubs;
+          if (hostCallStubs && hostCallStubs.has(start)) {
+            canStart = false;
+          }
+        }
+        if (canStart && (mem[start] & 0xff) === 0xcd && (mem[(start + 1) >>> 0] & 0xff) === 0x40) {
+          canStart = false;
+        }
         const state = {
           sig0: sig0 >>> 0,
           sig1: sig1 >>> 0,
-          canStart: !this.isBasicBlockTerminatorAt(start, 0)
+          canStart: canStart && !this.isBasicBlockTerminatorAt(start, 0)
         };
         if (this.basicBlockStartCache.size >= (this.basicBlockStartCacheMax | 0)) {
           this.basicBlockStartCache.clear();
@@ -337,21 +360,6 @@
       canStartBasicBlockAt(addr) {
         const start = addr >>> 0;
         if (!this.cpu || !this.running) {
-          return false;
-        }
-        if (this.syscallSiteSet.has(start)) {
-          return false;
-        }
-        if (this.softInstructions && this.softInstructionSites.has(start)) {
-          const site = this.softInstructionSites.get(start);
-          if (!this.canExecuteSoftInstructionInBasicBlock(site)) {
-            return false;
-          }
-        }
-        if (this.hostCallStubs && this.hostCallStubs.has(start)) {
-          return false;
-        }
-        if (this.isDirectSyscallInstruction(start)) {
           return false;
         }
         const state = this.getCachedBasicBlockStartState(start);
@@ -441,11 +449,52 @@
         );
       },
 
+      getSoftInstructionSite(addr) {
+        if (!this.softInstructions) {
+          return null;
+        }
+        const current = addr >>> 0;
+        if (this.softInstructionSites instanceof Map) {
+          const site = this.softInstructionSites.get(current);
+          if (site) {
+            return site;
+          }
+        }
+        if (!this.cpu || !this.cpu.mem || typeof this.getDynamicSoftInstructionSite !== "function") {
+          return null;
+        }
+        const mem = this.cpu.mem;
+        const memLen = mem.length >>> 0;
+        if (current >= memLen) {
+          return null;
+        }
+        const opcode = mem[current] & 0xff;
+        const isDynamicCandidate =
+          (opcode >= 0x70 && opcode <= 0x7f) ||
+          opcode === 0xe8 ||
+          opcode === 0xe9 ||
+          opcode === 0xeb ||
+          opcode === 0xc3 ||
+          opcode === 0xe3 ||
+          opcode === 0xe0 ||
+          opcode === 0xe1 ||
+          opcode === 0xe2 ||
+          (
+            opcode === 0x0f &&
+            (current + 1) < memLen &&
+            ((mem[current + 1] & 0xff) >= 0x80 && (mem[current + 1] & 0xff) <= 0x8f)
+          );
+        if (!isDynamicCandidate) {
+          return null;
+        }
+        return this.getDynamicSoftInstructionSite(current);
+      },
+
       executeBasicBlockInstruction(addr) {
         const current = addr >>> 0;
-        if (this.softInstructions && this.softInstructionSites && this.softInstructionSites.has(current)) {
-          const site = this.softInstructionSites.get(current);
-          if (this.canExecuteSoftInstructionInBasicBlock(site) && this.handleSoftInstruction(current)) {
+        if (this.softInstructions) {
+          const site = this.getSoftInstructionSite(current);
+          if (this.canExecuteSoftInstructionInBasicBlock(site) && this.handleSoftInstruction(current, site)) {
             return true;
           }
         }
@@ -455,19 +504,26 @@
         return this.executeBasicInstruction(current);
       },
 
-      executeLinearBasicBlock(eip, budget, entryLimit, entries) {
+      executeLinearBasicBlock(eip, budget, entryLimit, entries, startVerified) {
         const start = eip >>> 0;
-        if (budget <= 0 || entryLimit <= 0 || !this.canStartBasicBlockAt(start)) {
+        let canContinue = !!startVerified;
+        if (budget <= 0 || entryLimit <= 0) {
           return 0;
+        }
+        if (!canContinue) {
+          canContinue = this.canStartBasicBlockAt(start);
+          if (!canContinue) {
+            return 0;
+          }
         }
         let executed = 0;
         let current = start;
         while (
+          canContinue &&
           executed < budget &&
           executed < entryLimit &&
           this.running &&
-          !this.yieldRequested &&
-          this.canStartBasicBlockAt(current)
+          !this.yieldRequested
         ) {
           this.lastEip = current >>> 0;
           const ok = this.executeBasicBlockInstruction(current);
@@ -486,7 +542,11 @@
           if (this.shouldYieldForTimeslice()) {
             break;
           }
-          if (next === current || !this.canStartBasicBlockAt(next)) {
+          if (next === current) {
+            break;
+          }
+          canContinue = this.canStartBasicBlockAt(next);
+          if (!canContinue) {
             break;
           }
           current = next >>> 0;
@@ -549,7 +609,8 @@
           start,
           budget,
           this.basicBlockMaxEntries,
-          entries
+          entries,
+          true
         );
         const precomputedSimplePlan = entries.length > 0 ? this.buildSimpleBasicBlockPlan(entries) : null;
         const canCacheSingleEntry = entries.length === 1;
@@ -1052,6 +1113,13 @@
             pushJsOnly(SIMPLE_BLOCK_OPS.LODSB, 0, 0, 0, 0);
             continue;
           }
+          if (opcode === 0xad && len === 1) {
+            if (!allowJsOnlyOps) {
+              return null;
+            }
+            pushJsOnly(SIMPLE_BLOCK_OPS.LODSD, 0, 0, 0, 0);
+            continue;
+          }
           if (opcode === 0xaa && len === 1) {
             if (!allowJsOnlyOps) {
               return null;
@@ -1059,11 +1127,42 @@
             pushJsOnly(SIMPLE_BLOCK_OPS.STOSB, 0, 0, 0, 0);
             continue;
           }
+          if (opcode === 0xab && len === 1) {
+            if (!allowJsOnlyOps) {
+              return null;
+            }
+            pushJsOnly(SIMPLE_BLOCK_OPS.STOSD, 0, 0, 0, 0);
+            continue;
+          }
           if (opcode === 0xd7 && len === 1) {
             if (!allowJsOnlyOps) {
               return null;
             }
             pushJsOnly(SIMPLE_BLOCK_OPS.XLAT, 0, 0, 0, 0);
+            continue;
+          }
+          if (opcode === 0xa1 && len === 5) {
+            if (!allowJsOnlyOps) {
+              return null;
+            }
+            const imm =
+              (bytes[1] & 0xff) |
+              ((bytes[2] & 0xff) << 8) |
+              ((bytes[3] & 0xff) << 16) |
+              ((bytes[4] & 0xff) << 24);
+            pushJsOnly(SIMPLE_BLOCK_OPS.MOV_R32_MEM32, REG.EAX, 0, imm >>> 0, 0);
+            continue;
+          }
+          if (opcode === 0xa3 && len === 5) {
+            if (!allowJsOnlyOps) {
+              return null;
+            }
+            const imm =
+              (bytes[1] & 0xff) |
+              ((bytes[2] & 0xff) << 8) |
+              ((bytes[3] & 0xff) << 16) |
+              ((bytes[4] & 0xff) << 24);
+            pushJsOnly(SIMPLE_BLOCK_OPS.MOV_MEM32_R32, REG.EAX, 0, imm >>> 0, 0);
             continue;
           }
           if (opcode >= 0x50 && opcode <= 0x57 && len === 1) {
@@ -1769,6 +1868,8 @@
         if (!block || !block.simplePlan || !this.cpu || !this.cpu.regs) {
           return 0;
         }
+        const regs = this.cpu.regs;
+        const plan = block.simplePlan;
         const backend =
           this.cpuBackend === "wasm"
             ? this.cpuHelperBackend
@@ -1778,7 +1879,6 @@
         if (!backend || typeof backend.executeSimpleBlock !== "function") {
           return 0;
         }
-        const regs = this.cpu.regs;
         let execRegs = regs;
         if (!(backend.kind === "js")) {
           const scratch = this.simpleBlockRegsScratch || (this.simpleBlockRegsScratch = new Uint32Array(8));
@@ -1788,30 +1888,30 @@
           execRegs = scratch;
         }
         if (
-          !block.simplePlan.prepared &&
+          !plan.prepared &&
           typeof backend.prepareSimpleBlockPlan === "function"
         ) {
-          block.simplePlan.prepared = backend.prepareSimpleBlockPlan(
-            block.simplePlan.words,
-            block.simplePlan.wordCount
+          plan.prepared = backend.prepareSimpleBlockPlan(
+            plan.words,
+            plan.wordCount
           );
         }
-        const result = block.simplePlan.prepared && typeof backend.executePreparedSimpleBlock === "function"
+        const result = plan.prepared && typeof backend.executePreparedSimpleBlock === "function"
           ? backend.executePreparedSimpleBlock(
-            block.simplePlan.prepared,
+            plan.prepared,
             execRegs,
             regs[REG.EFLAGS] >>> 0,
             this
           )
           : backend.executeSimpleBlock(
-            block.simplePlan.words,
-            block.simplePlan.wordCount,
+            plan.words,
+            plan.wordCount,
             execRegs,
             regs[REG.EFLAGS] >>> 0,
             this
           );
         if (!result || !result.ok) {
-          block.simplePlan.prepared = null;
+          plan.prepared = null;
           return 0;
         }
         if (execRegs !== regs) {

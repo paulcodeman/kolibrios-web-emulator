@@ -1478,6 +1478,37 @@ try {
   assertDeepEq(jsOnlyMemoryAutoBlock.cachedState, jsOnlyMemoryAutoBlock.linearState, "auto js-only memory simple block replay should match linear execution");
   assert(!jsOnlyMemoryWasmBlock.hasSimplePlan, "wasm mode should not compile js-only memory simple blocks into wasm plans");
 
+  const jsOnlyStringDwordBlockBytes = [
+    0xa1, 0x00, 0x02, 0x00, 0x00,
+    0xa3, 0x04, 0x02, 0x00, 0x00,
+    0xad,
+    0xab,
+    0xc3
+  ];
+  const jsOnlyStringDwordBlockReset = (emulator) => {
+    emulator.writeMem32(0x200, 0x12345678);
+    emulator.writeMem32(0x204, 0);
+    emulator.writeMem32(0x300, 0x89abcdef);
+    emulator.writeMem32(0x400, 0);
+  };
+  const jsOnlyStringDwordBlockSetup = (emulator) => {
+    emulator.writeReg(REG_EAX, 0);
+    emulator.writeReg(REG_ESI, 0x300);
+    emulator.writeReg(REG_EDI, 0x400);
+    emulator.writeReg(REG_EFLAGS, 0x202);
+    jsOnlyStringDwordBlockReset(emulator);
+  };
+  const jsOnlyStringDwordJsBlock = runCachedBlockScenario("js", jsOnlyStringDwordBlockBytes, jsOnlyStringDwordBlockSetup, { skipSoftScan: true, reset: jsOnlyStringDwordBlockReset });
+  const jsOnlyStringDwordAutoBlock = runCachedBlockScenario("auto", jsOnlyStringDwordBlockBytes, jsOnlyStringDwordBlockSetup, { skipSoftScan: true, reset: jsOnlyStringDwordBlockReset });
+  const jsOnlyStringDwordWasmBlock = runCachedBlockScenario("wasm", jsOnlyStringDwordBlockBytes, jsOnlyStringDwordBlockSetup, { skipSoftScan: true, reset: jsOnlyStringDwordBlockReset });
+  assert(jsOnlyStringDwordJsBlock.hasSimplePlan, "js-only dword string block scenario should compile a JS simple plan");
+  assertEq(jsOnlyStringDwordJsBlock.cached, jsOnlyStringDwordJsBlock.built, "js-only dword string block cached replay should cover the same entry count");
+  assertDeepEq(jsOnlyStringDwordJsBlock.cachedState, jsOnlyStringDwordJsBlock.linearState, "js-only dword string block cached replay should match linear execution");
+  assert(jsOnlyStringDwordAutoBlock.hasSimplePlan, "auto mode should still cache js-only dword string blocks through the JS backend");
+  assert(!jsOnlyStringDwordAutoBlock.hasPreparedPlan, "auto mode should not prepare js-only dword string blocks for WASM");
+  assertDeepEq(jsOnlyStringDwordAutoBlock.cachedState, jsOnlyStringDwordAutoBlock.linearState, "auto js-only dword string block replay should match linear execution");
+  assert(!jsOnlyStringDwordWasmBlock.hasSimplePlan, "wasm mode should not compile js-only dword string blocks into wasm plans");
+
   const jsOnlyUnaryMemoryBlockBytes = [
     0xf6, 0x43, 0x04, 0x0f,
     0xf6, 0x56, 0x05,
@@ -1809,6 +1840,26 @@ try {
   assert(startCacheEmulator.basicBlockStartHits > 0, "basic block start cache should record hits on repeated lookup");
   startCacheEmulator.writeMem8(0, 0xc3);
   assertEq(startCacheEmulator.canStartBasicBlockAt(0), false, "basic block start cache should invalidate after code writes");
+
+  const dynamicSoftEmulator = createInstructionEmulator("js");
+  dynamicSoftEmulator.softInstructionSites.clear();
+  dynamicSoftEmulator.writeMem8(0, 0x74);
+  dynamicSoftEmulator.writeMem8(1, 0x02);
+  dynamicSoftEmulator.writeMem8(2, 0x90);
+  dynamicSoftEmulator.writeMem8(3, 0x90);
+  dynamicSoftEmulator.writeReg(REG_EFLAGS, 0x242);
+  dynamicSoftEmulator.writeReg(REG_EIP, 0);
+  assertEq(dynamicSoftEmulator.executeBasicInstruction(0), true, "dynamic soft-site jcc should execute through the soft path");
+  assertEq(dynamicSoftEmulator.readReg(REG_EIP) >>> 0, 4, "dynamic soft-site jcc should take the cached short jump");
+  const firstDynamicSite = dynamicSoftEmulator.getDynamicSoftInstructionSite(0);
+  assert(firstDynamicSite && firstDynamicSite.type === "jcc", "dynamic soft-site cache should remember a short jcc site");
+  dynamicSoftEmulator.writeMem8(0, 0xeb);
+  dynamicSoftEmulator.writeMem8(1, 0xfe);
+  dynamicSoftEmulator.writeReg(REG_EIP, 0);
+  assertEq(dynamicSoftEmulator.executeBasicInstruction(0), true, "dynamic soft-site cache should re-decode after code writes");
+  assertEq(dynamicSoftEmulator.readReg(REG_EIP) >>> 0, 0, "dynamic soft-site cache should follow the updated short jump target");
+  const secondDynamicSite = dynamicSoftEmulator.getDynamicSoftInstructionSite(0);
+  assert(secondDynamicSite && secondDynamicSite.type === "jmp", "dynamic soft-site cache should refresh when branch bytes change");
 
   console.log("Autotest OK: CPU backend mode exposes working JS/WASM helper backends and matches JS semantics.");
 } catch (err) {

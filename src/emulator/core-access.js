@@ -256,6 +256,123 @@
         return { sig0: sig0 >>> 0, sig1: sig1 >>> 0 };
       },
 
+      getDynamicSoftInstructionSite(addr) {
+        if (!this.cpu || !this.cpu.mem || !this.decodeCache) {
+          return null;
+        }
+        const start = addr >>> 0;
+        const mem = this.cpu.mem;
+        const view = this.cpu.view;
+        const memLen = mem.length >>> 0;
+        if (start >= memLen) {
+          return null;
+        }
+        let sig0 = 0 >>> 0;
+        let sig1 = 0 >>> 0;
+        if ((start + 7) < memLen && view && typeof view.getUint32 === "function") {
+          sig0 = view.getUint32(start, true) >>> 0;
+          sig1 = view.getUint32((start + 4) >>> 0, true) >>> 0;
+        } else {
+          const limit0 = Math.min(4, memLen - start);
+          for (let i = 0; i < limit0; i += 1) {
+            sig0 |= (mem[start + i] & 0xff) << (i * 8);
+          }
+          const limit1 = Math.min(8, memLen - start);
+          for (let i = 4; i < limit1; i += 1) {
+            sig1 |= (mem[start + i] & 0xff) << ((i - 4) * 8);
+          }
+          sig0 >>>= 0;
+          sig1 >>>= 0;
+        }
+        const entry = this.decodeCache.get(start);
+        if (
+          entry &&
+          entry.sig0 === sig0 &&
+          entry.sig1 === sig1 &&
+          entry.softSiteKnown === 1
+        ) {
+          return entry.softSite;
+        }
+        const readRel8 = () => {
+          if ((start + 1) >= memLen) {
+            return null;
+          }
+          return (mem[start + 1] << 24) >> 24;
+        };
+        const readRel32 = (offset) => {
+          if ((start + offset + 3) >= memLen) {
+            return null;
+          }
+          return (
+            (mem[start + offset] & 0xff) |
+            ((mem[start + offset + 1] & 0xff) << 8) |
+            ((mem[start + offset + 2] & 0xff) << 16) |
+            ((mem[start + offset + 3] & 0xff) << 24)
+          ) | 0;
+        };
+        const opcode = mem[start] & 0xff;
+        let site = null;
+        if (opcode >= 0x70 && opcode <= 0x7f) {
+          const rel = readRel8();
+          if (rel !== null) {
+            site = { type: "jcc", cc: opcode & 0x0f, rel, len: 2 };
+          }
+        } else if (opcode === 0xeb) {
+          const rel = readRel8();
+          if (rel !== null) {
+            site = { type: "jmp", rel, len: 2 };
+          }
+        } else if (opcode === 0xe9) {
+          const rel = readRel32(1);
+          if (rel !== null) {
+            site = { type: "jmp", rel, len: 5 };
+          }
+        } else if (opcode === 0xe8) {
+          const rel = readRel32(1);
+          if (rel !== null) {
+            site = { type: "call-rel32", rel, len: 5 };
+          }
+        } else if (opcode === 0xc3) {
+          site = { type: "ret", len: 1 };
+        } else if (opcode === 0xe3) {
+          const rel = readRel8();
+          if (rel !== null) {
+            site = { type: "jecxz", rel, len: 2 };
+          }
+        } else if (opcode === 0xe0 || opcode === 0xe1 || opcode === 0xe2) {
+          const rel = readRel8();
+          if (rel !== null) {
+            site = {
+              type: "loop",
+              opcode,
+              rel,
+              len: 2,
+              bytes: Uint8Array.of(opcode, mem[start + 1] & 0xff)
+            };
+          }
+        } else if (opcode === 0x0f) {
+          if ((start + 1) < memLen) {
+            const op2 = mem[start + 1] & 0xff;
+            if (op2 >= 0x80 && op2 <= 0x8f) {
+              const rel = readRel32(2);
+              if (rel !== null) {
+                site = { type: "jcc", cc: op2 & 0x0f, rel, len: 6 };
+              }
+            }
+          }
+        }
+        const next = entry && entry.sig0 === sig0 && entry.sig1 === sig1 ? entry : { sig0, sig1 };
+        next.sig0 = sig0;
+        next.sig1 = sig1;
+        next.softSiteKnown = 1;
+        next.softSite = site;
+        this.decodeCache.set(start, next);
+        if (this.decodeCache.size > this.decodeCacheMax) {
+          this.decodeCache.clear();
+        }
+        return site;
+      },
+
       getCachedModRmInfo(addr, bytes, startIndex) {
         const { sig0, sig1 } = this.getDecodeSignature(bytes);
         const entry = this.decodeCache.get(addr);

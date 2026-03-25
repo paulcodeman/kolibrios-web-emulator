@@ -108,6 +108,21 @@
     }
 
     Object.assign(Emulator.prototype, {
+      promoteDynamicSoftInstruction(addr) {
+        if (
+          !this.softInstructions ||
+          typeof this.getSoftInstructionSite !== "function"
+        ) {
+          return null;
+        }
+        const current = addr >>> 0;
+        const site = this.getSoftInstructionSite(current);
+        if (!site) {
+          return null;
+        }
+        return this.handleSoftInstruction(current, site);
+      },
+
       invokeUnknownOpcodeHandler(eip) {
         if (typeof this.onUnknownOpcode !== "function") {
           return false;
@@ -2895,6 +2910,10 @@
       return true;
     }
     if (opcode === 0xe8) {
+      const promoted = this.promoteDynamicSoftInstruction(addr);
+      if (promoted !== null) {
+        return !!promoted;
+      }
       const rel = this.readMem32((addr + 1) >>> 0) | 0;
       const next = (addr + 5) >>> 0;
       const target = (next + rel) >>> 0;
@@ -2940,6 +2959,10 @@
       return true;
     }
     if (opcode === 0xc3) {
+      const promoted = this.promoteDynamicSoftInstruction(addr);
+      if (promoted !== null) {
+        return !!promoted;
+      }
       let esp = this.readReg(REG.ESP);
       const target = this.readMem32(esp);
       esp = (esp + 4) >>> 0;
@@ -3001,6 +3024,10 @@
       return true;
     }
     if (opcode === 0xe3) { // JECXZ/JCXZ
+      const promoted = this.promoteDynamicSoftInstruction(addr);
+      if (promoted !== null) {
+        return !!promoted;
+      }
       const rel8 = (this.readMem8((addr + 1) >>> 0) << 24) >> 24;
       const next = (addr + 2) >>> 0;
       const check = this.readCountReg(this.getActiveAddressSize());
@@ -3008,9 +3035,17 @@
       return true;
     }
     if (opcode === 0xe0 || opcode === 0xe1 || opcode === 0xe2) {
+      const promoted = this.promoteDynamicSoftInstruction(addr);
+      if (promoted !== null) {
+        return !!promoted;
+      }
       return this.executeLoopInstruction(addr, opcode, 2);
     }
     if (opcode === 0xe9) {
+      const promoted = this.promoteDynamicSoftInstruction(addr);
+      if (promoted !== null) {
+        return !!promoted;
+      }
       const rel = this.readMem32((addr + 1) >>> 0) | 0;
       const next = (addr + 5) >>> 0;
       this.writeReg(REG.EIP, (next + rel) >>> 0);
@@ -3024,6 +3059,10 @@
       return true;
     }
     if (opcode === 0xeb) {
+      const promoted = this.promoteDynamicSoftInstruction(addr);
+      if (promoted !== null) {
+        return !!promoted;
+      }
       const rel8 = (this.readMem8((addr + 1) >>> 0) << 24) >> 24;
       const next = (addr + 2) >>> 0;
       this.writeReg(REG.EIP, (next + rel8) >>> 0);
@@ -4859,6 +4898,10 @@
       return true;
     }
     if (opcode >= 0x70 && opcode <= 0x7f) {
+      const promoted = this.promoteDynamicSoftInstruction(addr);
+      if (promoted !== null) {
+        return !!promoted;
+      }
       const rel8 = (this.readMem8((addr + 1) >>> 0) << 24) >> 24;
       const flags = this.readReg(REG.EFLAGS);
       const take = evalJccCondition(opcode & 0x0f, flags);
@@ -4868,6 +4911,12 @@
     }
     if (opcode === 0x0f) {
       const op2 = this.readMem8((addr + 1) >>> 0);
+      if (op2 >= 0x80 && op2 <= 0x8f) {
+        const promoted = this.promoteDynamicSoftInstruction(addr);
+        if (promoted !== null) {
+          return !!promoted;
+        }
+      }
       if (op2 >= 0xc8 && op2 <= 0xcf) { // bswap r32
         const regIdx = op2 & 7;
         const value = this.readReg32ByIndex(regIdx) >>> 0;
@@ -6713,11 +6762,18 @@
         return true;
       },
 
-      handleSoftInstruction(addr) {
+      handleSoftInstruction(addr, siteOverride) {
         if (this.tryFastRuntimeCopyLoop(addr)) {
           return true;
         }
-        const site = this.softInstructionSites.get(addr >>> 0);
+        const current = addr >>> 0;
+        let site = siteOverride || null;
+        if (!site && this.softInstructionSites instanceof Map) {
+          site = this.softInstructionSites.get(current);
+        }
+        if (!site && typeof this.getDynamicSoftInstructionSite === "function") {
+          site = this.getDynamicSoftInstructionSite(current);
+        }
         if (site && site.bytes && site.bytes.length) {
           const first = site.bytes[0] & 0xff;
           if (
@@ -6759,7 +6815,7 @@
           if (fast && this.runFastLoop(fast, addr, site)) {
             return true;
           }
-          return this.executeLoopInstruction(addr, 0xe2, site.len);
+          return this.executeLoopInstruction(addr, site.opcode === undefined ? 0xe2 : (site.opcode & 0xff), site.len);
         }
         if (site && site.type === "shlb-mem1") {
           const modrmInfo = this.getCachedModRmInfo(addr, site.bytes, 1);
@@ -6932,33 +6988,6 @@
           this.writeReg(REG.EIP, (addr + site.len) >>> 0);
           return true;
         }
-        if (site && site.type === "call-rel32") {
-          const bytes = site.bytes;
-          if (!bytes || bytes.length < 5) {
-            return false;
-          }
-          const rel =
-            bytes[1] |
-            (bytes[2] << 8) |
-            (bytes[3] << 16) |
-            (bytes[4] << 24);
-          const next = (addr + site.len) >>> 0;
-          const target = (next + rel) >>> 0;
-          let esp = this.readReg(REG.ESP);
-          esp = (esp - 4) >>> 0;
-          this.writeMem32(esp, next);
-          this.writeReg(REG.ESP, esp);
-          this.writeReg(REG.EIP, target);
-          return true;
-        }
-        if (site && site.type === "ret") {
-          let esp = this.readReg(REG.ESP);
-          const target = this.readMem32(esp);
-          esp = (esp + 4) >>> 0;
-          this.writeReg(REG.ESP, esp);
-          this.writeReg(REG.EIP, target >>> 0);
-          return true;
-        }
         if (site && (site.type === "push-r32" || site.type === "pop-r32")) {
           const regIdx = site.reg & 7;
           if (site.type === "push-r32") {
@@ -7020,6 +7049,46 @@
           this.writeReg(REG.EAX, nextEax >>> 0);
           this.writeReg(REG.EFLAGS, alu.flags >>> 0);
           this.writeReg(REG.EIP, (addr + site.len) >>> 0);
+          return true;
+        }
+        if (site && site.type === "call-rel32") {
+          const bytes = site.bytes;
+          const rel = site.rel !== undefined
+            ? (site.rel | 0)
+            : (
+              bytes && bytes.length >= 5
+                ? (
+                  bytes[1] |
+                  (bytes[2] << 8) |
+                  (bytes[3] << 16) |
+                  (bytes[4] << 24)
+                ) | 0
+                : null
+            );
+          if (rel === null) {
+            return false;
+          }
+          const next = (addr + site.len) >>> 0;
+          const target = (next + rel) >>> 0;
+          let esp = this.readReg(REG.ESP);
+          esp = (esp - 4) >>> 0;
+          this.writeMem32(esp, next);
+          this.writeReg(REG.ESP, esp);
+          this.writeReg(REG.EIP, target);
+          return true;
+        }
+        if (site && site.type === "ret") {
+          let esp = this.readReg(REG.ESP);
+          const target = this.readMem32(esp);
+          esp = (esp + 4) >>> 0;
+          this.writeReg(REG.ESP, esp);
+          this.writeReg(REG.EIP, target >>> 0);
+          return true;
+        }
+        if (site && site.type === "jecxz") {
+          const next = (addr + site.len) >>> 0;
+          const check = this.readCountReg(this.getActiveAddressSize());
+          this.writeReg(REG.EIP, check === 0 ? (next + (site.rel | 0)) >>> 0 : next);
           return true;
         }
         if (site && site.type === "jcc") {
