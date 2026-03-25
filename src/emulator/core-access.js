@@ -267,6 +267,7 @@
         if (start >= memLen) {
           return null;
         }
+        const entry = this.decodeCache.get(start);
         let sig0 = 0 >>> 0;
         let sig1 = 0 >>> 0;
         if ((start + 7) < memLen && view && typeof view.getUint32 === "function") {
@@ -284,7 +285,6 @@
           sig0 >>>= 0;
           sig1 >>>= 0;
         }
-        const entry = this.decodeCache.get(start);
         if (
           entry &&
           entry.sig0 === sig0 &&

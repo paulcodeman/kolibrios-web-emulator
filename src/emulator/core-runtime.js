@@ -9,6 +9,7 @@
     const formatHex = shared && shared.formatHex;
     const SIMPLE_BLOCK_OPS = shared && shared.SIMPLE_BLOCK_OPS;
     const SIMPLE_BLOCK_RECORD_WORDS = shared && shared.SIMPLE_BLOCK_RECORD_WORDS;
+    const executeSimpleBlockJsFast = shared && shared.executeSimpleBlockJsFast;
     if (
       !REG ||
       typeof formatHex !== "function" ||
@@ -1876,6 +1877,21 @@
         }
         const regs = this.cpu.regs;
         const plan = block.simplePlan;
+        if (typeof executeSimpleBlockJsFast === "function" && this.cpuBackend === "js") {
+          const result = executeSimpleBlockJsFast(
+            plan.words,
+            plan.wordCount >>> 0,
+            regs,
+            regs[REG.EFLAGS] >>> 0,
+            this
+          );
+          if (!result || !result.ok) {
+            return 0;
+          }
+          regs[REG.EFLAGS] = (result.flags >>> 0) || 0;
+          regs[REG.EIP] = result.nextEip !== undefined ? (result.nextEip >>> 0) : (block.end >>> 0);
+          return block.entries.length >>> 0;
+        }
         const backend =
           this.cpuBackend === "wasm"
             ? this.cpuHelperBackend
@@ -1992,12 +2008,13 @@
       },
 
       invalidateBasicBlocksForWrite(addr, size) {
+        const start = addr >>> 0;
+        const byteCount = size >>> 0;
+        if (!byteCount) {
+          return;
+        }
+        const endExclusive = (start + byteCount) >>> 0;
         if (this.basicBlockStartCache && this.basicBlockStartCache.size) {
-          const start = addr >>> 0;
-          const byteCount = size >>> 0;
-          if (!byteCount) {
-            return;
-          }
           const extra = 16;
           const invalidateStart = start > extra ? (start - extra) >>> 0 : 0;
           const invalidateEnd = (start + byteCount + extra) >>> 0;
@@ -2040,12 +2057,6 @@
         if (!this.basicBlockCache.size) {
           return;
         }
-        const start = addr >>> 0;
-        const byteCount = size >>> 0;
-        if (!byteCount) {
-          return;
-        }
-        const endExclusive = (start + byteCount) >>> 0;
         if (endExclusive < start) {
           this.clearBasicBlockCache();
           return;

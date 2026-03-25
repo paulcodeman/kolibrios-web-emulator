@@ -1040,6 +1040,10 @@ function updateSubFlags(flags, op1, op2, result, widthBits) {
 }
 
 function aluBinaryWidthJs(op, left, right, widthBits, flags) {
+  return aluBinaryWidthIntoJs(op, left, right, widthBits, flags, { result: 0, flags: 0 });
+}
+
+function aluBinaryWidthIntoJs(op, left, right, widthBits, flags, out) {
   const width = (widthBits >>> 0) === 8 ? 8 : ((widthBits >>> 0) === 16 ? 16 : 32);
   const mask = widthMask(width);
   const a = widthValueUnsigned(left, width) >>> 0;
@@ -1092,7 +1096,9 @@ function aluBinaryWidthJs(op, left, right, widthBits, flags) {
       nextFlags = flags >>> 0;
       break;
   }
-  return { result: result >>> 0, flags: nextFlags >>> 0 };
+  out.result = result >>> 0;
+  out.flags = nextFlags >>> 0;
+  return out;
 }
 
 function aluBinaryWidth(op, left, right, widthBits, flags) {
@@ -1381,8 +1387,15 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
   if (!totalWords || (totalWords % SIMPLE_BLOCK_RECORD_WORDS) !== 0) {
     return { ok: false, flags: flags >>> 0 };
   }
+  return executeSimpleBlockJsFast(words, totalWords, regs, flags, emu);
+}
+
+function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
   let nextFlags = flags >>> 0;
   let nextEip = null;
+  const aluScratch = emu
+    ? (emu.simpleBlockAluScratch || (emu.simpleBlockAluScratch = { result: 0, flags: 0 }))
+    : { result: 0, flags: 0 };
   const hasReadMem8 = !!(emu && typeof emu.readMem8 === "function");
   const hasReadMem16 = !!(emu && typeof emu.readMem16 === "function");
   const hasReadMem32 = !!(emu && typeof emu.readMem32 === "function");
@@ -1413,6 +1426,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
     }
     let index = 0;
     const indexPlus = (packedRegs >>> 8) & 0xff;
+    const disp32 = disp | 0;
     if (indexPlus) {
       const value = regs[(indexPlus - 1) & 7] >>> 0;
       switch ((packedRegs >>> 16) & 0xff) {
@@ -1430,7 +1444,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
           break;
       }
     }
-    return (base + index + (disp | 0)) >>> 0;
+    return (base + index + disp32) >>> 0;
   };
   for (let offset = 0; offset < totalWords; offset += SIMPLE_BLOCK_RECORD_WORDS) {
     const kind = words[offset] >>> 0;
@@ -1444,7 +1458,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.INC_R32: {
         const reg = a & 7;
         const value = regs[reg] >>> 0;
-        const alu = aluBinaryWidthJs(0, value, 1, 32, nextFlags);
+        const alu = aluBinaryWidthIntoJs(0, value, 1, 32, nextFlags, aluScratch);
         regs[reg] = alu.result >>> 0;
         nextFlags = ((alu.flags & ~FLAG_CF) | (nextFlags & FLAG_CF)) >>> 0;
         break;
@@ -1452,7 +1466,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.DEC_R32: {
         const reg = a & 7;
         const value = regs[reg] >>> 0;
-        const alu = aluBinaryWidthJs(5, value, 1, 32, nextFlags);
+        const alu = aluBinaryWidthIntoJs(5, value, 1, 32, nextFlags, aluScratch);
         regs[reg] = alu.result >>> 0;
         nextFlags = ((alu.flags & ~FLAG_CF) | (nextFlags & FLAG_CF)) >>> 0;
         break;
@@ -1472,7 +1486,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         const lhsReg = a & 7;
         const rhsReg = b & 7;
         const writeResult = (d & 1) !== 0;
-        const alu = aluBinaryWidthJs(c >>> 0, regs[lhsReg] >>> 0, regs[rhsReg] >>> 0, 32, nextFlags);
+        const alu = aluBinaryWidthIntoJs(c >>> 0, regs[lhsReg] >>> 0, regs[rhsReg] >>> 0, 32, nextFlags, aluScratch);
         if (writeResult) {
           regs[lhsReg] = alu.result >>> 0;
         }
@@ -1482,7 +1496,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.ALU_R32_IMM32: {
         const reg = a & 7;
         const writeResult = (d & 1) !== 0;
-        const alu = aluBinaryWidthJs(c >>> 0, regs[reg] >>> 0, b >>> 0, 32, nextFlags);
+        const alu = aluBinaryWidthIntoJs(c >>> 0, regs[reg] >>> 0, b >>> 0, 32, nextFlags, aluScratch);
         if (writeResult) {
           regs[reg] = alu.result >>> 0;
         }
@@ -1492,7 +1506,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.ALU_AL_IMM8: {
         const eax = regs[REG.EAX] >>> 0;
         const writeResult = (c & 1) !== 0;
-        const alu = aluBinaryWidthJs(a >>> 0, eax & 0xff, b & 0xff, 8, nextFlags);
+        const alu = aluBinaryWidthIntoJs(a >>> 0, eax & 0xff, b & 0xff, 8, nextFlags, aluScratch);
         if (writeResult) {
           regs[REG.EAX] = ((eax & 0xffffff00) | (alu.result & 0xff)) >>> 0;
         }
@@ -1505,7 +1519,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.ALU_R8_IMM8: {
         const reg = a & 7;
         const writeResult = (d & 1) !== 0;
-        const alu = aluBinaryWidthJs(c >>> 0, readReg8(reg), b & 0xff, 8, nextFlags);
+        const alu = aluBinaryWidthIntoJs(c >>> 0, readReg8(reg), b & 0xff, 8, nextFlags, aluScratch);
         if (writeResult) {
           writeReg8(reg, alu.result & 0xff);
         }
@@ -1541,7 +1555,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         const dst = a & 7;
         const src = b & 7;
         const writeResult = (d & 1) !== 0;
-        const alu = aluBinaryWidthJs(c >>> 0, readReg8(dst), readReg8(src), 8, nextFlags);
+        const alu = aluBinaryWidthIntoJs(c >>> 0, readReg8(dst), readReg8(src), 8, nextFlags, aluScratch);
         if (writeResult) {
           writeReg8(dst, alu.result & 0xff);
         }
@@ -1572,14 +1586,14 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
           break;
         }
         if (op === 1) {
-          const alu = aluBinaryWidthJs(5, 0, regs[reg] >>> 0, 32, nextFlags);
+          const alu = aluBinaryWidthIntoJs(5, 0, regs[reg] >>> 0, 32, nextFlags, aluScratch);
           regs[reg] = alu.result >>> 0;
           nextFlags = alu.flags >>> 0;
           break;
         }
         if (op === 2 || op === 3) {
           const prevCf = nextFlags & FLAG_CF;
-          const alu = aluBinaryWidthJs(op === 2 ? 0 : 5, regs[reg] >>> 0, 1, 32, nextFlags);
+          const alu = aluBinaryWidthIntoJs(op === 2 ? 0 : 5, regs[reg] >>> 0, 1, 32, nextFlags, aluScratch);
           regs[reg] = alu.result >>> 0;
           nextFlags = ((alu.flags & ~FLAG_CF) | prevCf) >>> 0;
           break;
@@ -1595,14 +1609,14 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
           break;
         }
         if (op === 1) {
-          const alu = aluBinaryWidthJs(5, 0, value, 8, nextFlags);
+          const alu = aluBinaryWidthIntoJs(5, 0, value, 8, nextFlags, aluScratch);
           writeReg8(reg, alu.result & 0xff);
           nextFlags = alu.flags >>> 0;
           break;
         }
         if (op === 2 || op === 3) {
           const prevCf = nextFlags & FLAG_CF;
-          const alu = aluBinaryWidthJs(op === 2 ? 0 : 5, value, 1, 8, nextFlags);
+          const alu = aluBinaryWidthIntoJs(op === 2 ? 0 : 5, value, 1, 8, nextFlags, aluScratch);
           writeReg8(reg, alu.result & 0xff);
           nextFlags = ((alu.flags & ~FLAG_CF) | prevCf) >>> 0;
           break;
@@ -1819,7 +1833,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const rhs = emu.readMem32(ea) >>> 0;
-        const alu = aluBinaryWidthJs(7, regs[a & 7] >>> 0, rhs >>> 0, 32, nextFlags);
+        const alu = aluBinaryWidthIntoJs(7, regs[a & 7] >>> 0, rhs >>> 0, 32, nextFlags, aluScratch);
         nextFlags = alu.flags >>> 0;
         break;
       }
@@ -1830,7 +1844,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const lhs = emu.readMem32(ea) >>> 0;
         const imm = (d << 24) >> 24;
-        const alu = aluBinaryWidthJs(a >>> 0, lhs >>> 0, imm >>> 0, 32, nextFlags);
+        const alu = aluBinaryWidthIntoJs(a >>> 0, lhs >>> 0, imm >>> 0, 32, nextFlags, aluScratch);
         if ((a >>> 0) !== 7 && (a >>> 0) !== 8) {
           emu.writeMem32(ea, alu.result >>> 0);
         }
@@ -1843,7 +1857,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const lhs = emu.readMem8(ea) & 0xff;
-        const alu = aluBinaryWidthJs(a >>> 0, lhs >>> 0, d & 0xff, 8, nextFlags);
+        const alu = aluBinaryWidthIntoJs(a >>> 0, lhs >>> 0, d & 0xff, 8, nextFlags, aluScratch);
         if ((a >>> 0) !== 7 && (a >>> 0) !== 8) {
           emu.writeMem8(ea, alu.result & 0xff);
         }
@@ -1870,14 +1884,14 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
           break;
         }
         if (op === 1) {
-          const alu = aluBinaryWidthJs(5, 0, value, 8, nextFlags);
+          const alu = aluBinaryWidthIntoJs(5, 0, value, 8, nextFlags, aluScratch);
           emu.writeMem8(ea, alu.result & 0xff);
           nextFlags = alu.flags >>> 0;
           break;
         }
         if (op === 2 || op === 3) {
           const prevCf = nextFlags & FLAG_CF;
-          const alu = aluBinaryWidthJs(op === 2 ? 0 : 5, value, 1, 8, nextFlags);
+          const alu = aluBinaryWidthIntoJs(op === 2 ? 0 : 5, value, 1, 8, nextFlags, aluScratch);
           emu.writeMem8(ea, alu.result & 0xff);
           nextFlags = ((alu.flags & ~FLAG_CF) | prevCf) >>> 0;
           break;
@@ -1896,7 +1910,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
           break;
         }
         if (op === 1) {
-          const alu = aluBinaryWidthJs(5, 0, value >>> 0, 32, nextFlags);
+          const alu = aluBinaryWidthIntoJs(5, 0, value >>> 0, 32, nextFlags, aluScratch);
           emu.writeMem32(ea, alu.result >>> 0);
           nextFlags = alu.flags >>> 0;
           break;
@@ -1909,7 +1923,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const lhs = emu.readMem32(ea) >>> 0;
-        const alu = aluBinaryWidthJs(a >>> 0, lhs >>> 0, d >>> 0, 32, nextFlags);
+        const alu = aluBinaryWidthIntoJs(a >>> 0, lhs >>> 0, d >>> 0, 32, nextFlags, aluScratch);
         if ((a >>> 0) !== 7 && (a >>> 0) !== 8) {
           emu.writeMem32(ea, alu.result >>> 0);
         }
@@ -1925,7 +1939,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const lhs = emu.readMem32(ea) >>> 0;
-        const alu = aluBinaryWidthJs(d >>> 0, lhs >>> 0, regs[a & 7] >>> 0, 32, nextFlags);
+        const alu = aluBinaryWidthIntoJs(d >>> 0, lhs >>> 0, regs[a & 7] >>> 0, 32, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
           emu.writeMem32(ea, alu.result >>> 0);
         }
@@ -1938,7 +1952,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const rhs = emu.readMem32(ea) >>> 0;
-        const alu = aluBinaryWidthJs(d >>> 0, regs[a & 7] >>> 0, rhs >>> 0, 32, nextFlags);
+        const alu = aluBinaryWidthIntoJs(d >>> 0, regs[a & 7] >>> 0, rhs >>> 0, 32, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
           regs[a & 7] = alu.result >>> 0;
         }
@@ -1967,7 +1981,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const lhs = emu.readMem8(ea) & 0xff;
-        const alu = aluBinaryWidthJs(d >>> 0, lhs >>> 0, readReg8(a & 7) & 0xff, 8, nextFlags);
+        const alu = aluBinaryWidthIntoJs(d >>> 0, lhs >>> 0, readReg8(a & 7) & 0xff, 8, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
           emu.writeMem8(ea, alu.result & 0xff);
         }
@@ -1980,7 +1994,7 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const rhs = emu.readMem8(ea) & 0xff;
-        const alu = aluBinaryWidthJs(d >>> 0, readReg8(a & 7) & 0xff, rhs >>> 0, 8, nextFlags);
+        const alu = aluBinaryWidthIntoJs(d >>> 0, readReg8(a & 7) & 0xff, rhs >>> 0, 8, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
           writeReg8(a & 7, alu.result & 0xff);
         }
@@ -4016,6 +4030,7 @@ class Emulator {
     bswap32,
     xaddWidth,
     cmpxchgWidth,
+    executeSimpleBlockJsFast,
     matchBytes,
     FAST_LOOP_SHADE,
     FAST_LOOP_MAX,
