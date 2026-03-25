@@ -883,6 +883,36 @@ function updateLogicFlagsWidthJs(flags, result, widthBits) {
   return next >>> 0;
 }
 
+function updateLogicFlags32Js(flags, result) {
+  let next = flags & ~ALU_FLAG_MASK;
+  const res = result >>> 0;
+  if (res === 0) {
+    next |= FLAG_ZF;
+  }
+  if ((res & 0x80000000) !== 0) {
+    next |= FLAG_SF;
+  }
+  if (parityEven8(res)) {
+    next |= FLAG_PF;
+  }
+  return next >>> 0;
+}
+
+function updateLogicFlags8Js(flags, result) {
+  let next = flags & ~ALU_FLAG_MASK;
+  const res = result & 0xff;
+  if (res === 0) {
+    next |= FLAG_ZF;
+  }
+  if ((res & 0x80) !== 0) {
+    next |= FLAG_SF;
+  }
+  if (parityEven8(res)) {
+    next |= FLAG_PF;
+  }
+  return next >>> 0;
+}
+
 function updateLogicFlagsWidth(flags, result, widthBits) {
   const backend = getActiveCpuHelperBackend();
   if (backend && typeof backend.updateLogicFlagsWidth === "function") {
@@ -912,6 +942,60 @@ function updateAddFlagsJs(flags, op1, op2, result, widthBits) {
     next |= FLAG_ZF;
   }
   if (res & sign) {
+    next |= FLAG_SF;
+  }
+  if (parityEven8(res)) {
+    next |= FLAG_PF;
+  }
+  return next >>> 0;
+}
+
+function updateAddFlags32Js(flags, op1, op2, result) {
+  const a = op1 >>> 0;
+  const b = op2 >>> 0;
+  const res = result >>> 0;
+  const full = a + b;
+  let next = flags & ~(ALU_FLAG_MASK | FLAG_AF);
+  if (full > 0xffffffff) {
+    next |= FLAG_CF;
+  }
+  if (((a ^ b ^ res) & 0x10) !== 0) {
+    next |= FLAG_AF;
+  }
+  if (((~(a ^ b)) & (a ^ res) & 0x80000000) !== 0) {
+    next |= FLAG_OF;
+  }
+  if (res === 0) {
+    next |= FLAG_ZF;
+  }
+  if ((res & 0x80000000) !== 0) {
+    next |= FLAG_SF;
+  }
+  if (parityEven8(res)) {
+    next |= FLAG_PF;
+  }
+  return next >>> 0;
+}
+
+function updateAddFlags8Js(flags, op1, op2, result) {
+  const a = op1 & 0xff;
+  const b = op2 & 0xff;
+  const res = result & 0xff;
+  const full = a + b;
+  let next = flags & ~(ALU_FLAG_MASK | FLAG_AF);
+  if (full > 0xff) {
+    next |= FLAG_CF;
+  }
+  if (((a ^ b ^ res) & 0x10) !== 0) {
+    next |= FLAG_AF;
+  }
+  if (((~(a ^ b)) & (a ^ res) & 0x80) !== 0) {
+    next |= FLAG_OF;
+  }
+  if (res === 0) {
+    next |= FLAG_ZF;
+  }
+  if ((res & 0x80) !== 0) {
     next |= FLAG_SF;
   }
   if (parityEven8(res)) {
@@ -1031,6 +1115,58 @@ function updateSubFlagsJs(flags, op1, op2, result, widthBits) {
   return next >>> 0;
 }
 
+function updateSubFlags32Js(flags, op1, op2, result) {
+  const a = op1 >>> 0;
+  const b = op2 >>> 0;
+  const res = result >>> 0;
+  let next = flags & ~(ALU_FLAG_MASK | FLAG_AF);
+  if (b > a) {
+    next |= FLAG_CF;
+  }
+  if (((a ^ b ^ res) & 0x10) !== 0) {
+    next |= FLAG_AF;
+  }
+  if (((a ^ b) & (a ^ res) & 0x80000000) !== 0) {
+    next |= FLAG_OF;
+  }
+  if (res === 0) {
+    next |= FLAG_ZF;
+  }
+  if ((res & 0x80000000) !== 0) {
+    next |= FLAG_SF;
+  }
+  if (parityEven8(res)) {
+    next |= FLAG_PF;
+  }
+  return next >>> 0;
+}
+
+function updateSubFlags8Js(flags, op1, op2, result) {
+  const a = op1 & 0xff;
+  const b = op2 & 0xff;
+  const res = result & 0xff;
+  let next = flags & ~(ALU_FLAG_MASK | FLAG_AF);
+  if (b > a) {
+    next |= FLAG_CF;
+  }
+  if (((a ^ b ^ res) & 0x10) !== 0) {
+    next |= FLAG_AF;
+  }
+  if (((a ^ b) & (a ^ res) & 0x80) !== 0) {
+    next |= FLAG_OF;
+  }
+  if (res === 0) {
+    next |= FLAG_ZF;
+  }
+  if ((res & 0x80) !== 0) {
+    next |= FLAG_SF;
+  }
+  if (parityEven8(res)) {
+    next |= FLAG_PF;
+  }
+  return next >>> 0;
+}
+
 function updateSubFlags(flags, op1, op2, result, widthBits) {
   const backend = getActiveCpuHelperBackend();
   if (backend && typeof backend.updateSubFlags === "function") {
@@ -1097,6 +1233,118 @@ function aluBinaryWidthIntoJs(op, left, right, widthBits, flags, out) {
       break;
   }
   out.result = result >>> 0;
+  out.flags = nextFlags >>> 0;
+  return out;
+}
+
+function aluBinary32IntoJs(op, left, right, flags, out) {
+  const a = left >>> 0;
+  const b = right >>> 0;
+  let result = a >>> 0;
+  let nextFlags = flags >>> 0;
+  switch (op >>> 0) {
+    case 0:
+      result = (a + b) >>> 0;
+      nextFlags = updateAddFlags32Js(nextFlags, a, b, result);
+      break;
+    case 1:
+      result = (a | b) >>> 0;
+      nextFlags = updateLogicFlags32Js(nextFlags, result);
+      break;
+    case 2: {
+      const carry = (nextFlags & FLAG_CF) !== 0 ? 1 : 0;
+      result = (a + b + carry) >>> 0;
+      nextFlags = updateAdcFlagsJs(nextFlags, a, b, carry, result, 32);
+      break;
+    }
+    case 3: {
+      const carry = (nextFlags & FLAG_CF) !== 0 ? 1 : 0;
+      result = (a - b - carry) >>> 0;
+      nextFlags = updateSbbFlagsJs(nextFlags, a, b, carry, result, 32);
+      break;
+    }
+    case 4:
+      result = (a & b) >>> 0;
+      nextFlags = updateLogicFlags32Js(nextFlags, result);
+      break;
+    case 5:
+      result = (a - b) >>> 0;
+      nextFlags = updateSubFlags32Js(nextFlags, a, b, result);
+      break;
+    case 6:
+      result = (a ^ b) >>> 0;
+      nextFlags = updateLogicFlags32Js(nextFlags, result);
+      break;
+    case 7:
+      result = (a - b) >>> 0;
+      nextFlags = updateSubFlags32Js(nextFlags, a, b, result);
+      break;
+    case 8:
+      result = (a & b) >>> 0;
+      nextFlags = updateLogicFlags32Js(nextFlags, result);
+      break;
+    default:
+      result = 0;
+      nextFlags = flags >>> 0;
+      break;
+  }
+  out.result = result >>> 0;
+  out.flags = nextFlags >>> 0;
+  return out;
+}
+
+function aluBinary8IntoJs(op, left, right, flags, out) {
+  const a = left & 0xff;
+  const b = right & 0xff;
+  let result = a;
+  let nextFlags = flags >>> 0;
+  switch (op >>> 0) {
+    case 0:
+      result = (a + b) & 0xff;
+      nextFlags = updateAddFlags8Js(nextFlags, a, b, result);
+      break;
+    case 1:
+      result = (a | b) & 0xff;
+      nextFlags = updateLogicFlags8Js(nextFlags, result);
+      break;
+    case 2: {
+      const carry = (nextFlags & FLAG_CF) !== 0 ? 1 : 0;
+      result = (a + b + carry) & 0xff;
+      nextFlags = updateAdcFlagsJs(nextFlags, a, b, carry, result, 8);
+      break;
+    }
+    case 3: {
+      const carry = (nextFlags & FLAG_CF) !== 0 ? 1 : 0;
+      result = (a - b - carry) & 0xff;
+      nextFlags = updateSbbFlagsJs(nextFlags, a, b, carry, result, 8);
+      break;
+    }
+    case 4:
+      result = (a & b) & 0xff;
+      nextFlags = updateLogicFlags8Js(nextFlags, result);
+      break;
+    case 5:
+      result = (a - b) & 0xff;
+      nextFlags = updateSubFlags8Js(nextFlags, a, b, result);
+      break;
+    case 6:
+      result = (a ^ b) & 0xff;
+      nextFlags = updateLogicFlags8Js(nextFlags, result);
+      break;
+    case 7:
+      result = (a - b) & 0xff;
+      nextFlags = updateSubFlags8Js(nextFlags, a, b, result);
+      break;
+    case 8:
+      result = (a & b) & 0xff;
+      nextFlags = updateLogicFlags8Js(nextFlags, result);
+      break;
+    default:
+      result = 0;
+      nextFlags = flags >>> 0;
+      break;
+  }
+  out.result = result & 0xff;
   out.flags = nextFlags >>> 0;
   return out;
 }
@@ -1393,6 +1641,9 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
 function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
   let nextFlags = flags >>> 0;
   let nextEip = null;
+  const resultScratch = emu
+    ? (emu.simpleBlockResultScratch || (emu.simpleBlockResultScratch = { ok: true, flags: 0, nextEip: undefined }))
+    : null;
   const aluScratch = emu
     ? (emu.simpleBlockAluScratch || (emu.simpleBlockAluScratch = { result: 0, flags: 0 }))
     : { result: 0, flags: 0 };
@@ -1458,7 +1709,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.INC_R32: {
         const reg = a & 7;
         const value = regs[reg] >>> 0;
-        const alu = aluBinaryWidthIntoJs(0, value, 1, 32, nextFlags, aluScratch);
+        const alu = aluBinary32IntoJs(0, value, 1, nextFlags, aluScratch);
         regs[reg] = alu.result >>> 0;
         nextFlags = ((alu.flags & ~FLAG_CF) | (nextFlags & FLAG_CF)) >>> 0;
         break;
@@ -1466,7 +1717,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.DEC_R32: {
         const reg = a & 7;
         const value = regs[reg] >>> 0;
-        const alu = aluBinaryWidthIntoJs(5, value, 1, 32, nextFlags, aluScratch);
+        const alu = aluBinary32IntoJs(5, value, 1, nextFlags, aluScratch);
         regs[reg] = alu.result >>> 0;
         nextFlags = ((alu.flags & ~FLAG_CF) | (nextFlags & FLAG_CF)) >>> 0;
         break;
@@ -1486,7 +1737,51 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         const lhsReg = a & 7;
         const rhsReg = b & 7;
         const writeResult = (d & 1) !== 0;
-        const alu = aluBinaryWidthIntoJs(c >>> 0, regs[lhsReg] >>> 0, regs[rhsReg] >>> 0, 32, nextFlags, aluScratch);
+        const op = c >>> 0;
+        const left = regs[lhsReg] >>> 0;
+        const right = regs[rhsReg] >>> 0;
+        if (writeResult) {
+          if (op === 1) {
+            const result = (left | right) >>> 0;
+            regs[lhsReg] = result >>> 0;
+            nextFlags = updateLogicFlags32Js(nextFlags, result);
+            break;
+          }
+          if (op === 6) {
+            const result = (left ^ right) >>> 0;
+            regs[lhsReg] = result >>> 0;
+            nextFlags = updateLogicFlags32Js(nextFlags, result);
+            break;
+          }
+          if (op === 0) {
+            const result = (left + right) >>> 0;
+            regs[lhsReg] = result >>> 0;
+            nextFlags = updateAddFlags32Js(nextFlags, left, right, result);
+            break;
+          }
+          if (op === 5) {
+            const result = (left - right) >>> 0;
+            regs[lhsReg] = result >>> 0;
+            nextFlags = updateSubFlags32Js(nextFlags, left, right, result);
+            break;
+          }
+          if (op === 4) {
+            const result = (left & right) >>> 0;
+            regs[lhsReg] = result >>> 0;
+            nextFlags = updateLogicFlags32Js(nextFlags, result);
+            break;
+          }
+        } else {
+          if (op === 7) {
+            nextFlags = updateSubFlags32Js(nextFlags, left, right, (left - right) >>> 0);
+            break;
+          }
+          if (op === 8) {
+            nextFlags = updateLogicFlags32Js(nextFlags, (left & right) >>> 0);
+            break;
+          }
+        }
+        const alu = aluBinary32IntoJs(op, left, right, nextFlags, aluScratch);
         if (writeResult) {
           regs[lhsReg] = alu.result >>> 0;
         }
@@ -1496,7 +1791,45 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.ALU_R32_IMM32: {
         const reg = a & 7;
         const writeResult = (d & 1) !== 0;
-        const alu = aluBinaryWidthIntoJs(c >>> 0, regs[reg] >>> 0, b >>> 0, 32, nextFlags, aluScratch);
+        const op = c >>> 0;
+        const left = regs[reg] >>> 0;
+        const right = b >>> 0;
+        if (writeResult) {
+          if (op === 0) {
+            const result = (left + right) >>> 0;
+            regs[reg] = result >>> 0;
+            nextFlags = updateAddFlags32Js(nextFlags, left, right, result);
+            break;
+          }
+          if (op === 1) {
+            const result = (left | right) >>> 0;
+            regs[reg] = result >>> 0;
+            nextFlags = updateLogicFlags32Js(nextFlags, result);
+            break;
+          }
+          if (op === 4) {
+            const result = (left & right) >>> 0;
+            regs[reg] = result >>> 0;
+            nextFlags = updateLogicFlags32Js(nextFlags, result);
+            break;
+          }
+          if (op === 5) {
+            const result = (left - right) >>> 0;
+            regs[reg] = result >>> 0;
+            nextFlags = updateSubFlags32Js(nextFlags, left, right, result);
+            break;
+          }
+        } else {
+          if (op === 7) {
+            nextFlags = updateSubFlags32Js(nextFlags, left, right, (left - right) >>> 0);
+            break;
+          }
+          if (op === 8) {
+            nextFlags = updateLogicFlags32Js(nextFlags, (left & right) >>> 0);
+            break;
+          }
+        }
+        const alu = aluBinary32IntoJs(op, left, right, nextFlags, aluScratch);
         if (writeResult) {
           regs[reg] = alu.result >>> 0;
         }
@@ -1506,7 +1839,39 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.ALU_AL_IMM8: {
         const eax = regs[REG.EAX] >>> 0;
         const writeResult = (c & 1) !== 0;
-        const alu = aluBinaryWidthIntoJs(a >>> 0, eax & 0xff, b & 0xff, 8, nextFlags, aluScratch);
+        const op = a >>> 0;
+        const left = eax & 0xff;
+        const right = b & 0xff;
+        if (writeResult) {
+          if (op === 4) {
+            const result = (left & right) & 0xff;
+            regs[REG.EAX] = ((eax & 0xffffff00) | result) >>> 0;
+            nextFlags = updateLogicFlags8Js(nextFlags, result);
+            break;
+          }
+          if (op === 5) {
+            const result = (left - right) & 0xff;
+            regs[REG.EAX] = ((eax & 0xffffff00) | result) >>> 0;
+            nextFlags = updateSubFlags8Js(nextFlags, left, right, result);
+            break;
+          }
+          if (op === 0) {
+            const result = (left + right) & 0xff;
+            regs[REG.EAX] = ((eax & 0xffffff00) | result) >>> 0;
+            nextFlags = updateAddFlags8Js(nextFlags, left, right, result);
+            break;
+          }
+        } else {
+          if (op === 7) {
+            nextFlags = updateSubFlags8Js(nextFlags, left, right, (left - right) & 0xff);
+            break;
+          }
+          if (op === 8) {
+            nextFlags = updateLogicFlags8Js(nextFlags, (left & right) & 0xff);
+            break;
+          }
+        }
+        const alu = aluBinary8IntoJs(op, left, right, nextFlags, aluScratch);
         if (writeResult) {
           regs[REG.EAX] = ((eax & 0xffffff00) | (alu.result & 0xff)) >>> 0;
         }
@@ -1519,7 +1884,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.ALU_R8_IMM8: {
         const reg = a & 7;
         const writeResult = (d & 1) !== 0;
-        const alu = aluBinaryWidthIntoJs(c >>> 0, readReg8(reg), b & 0xff, 8, nextFlags, aluScratch);
+        const alu = aluBinary8IntoJs(c >>> 0, readReg8(reg), b & 0xff, nextFlags, aluScratch);
         if (writeResult) {
           writeReg8(reg, alu.result & 0xff);
         }
@@ -1555,7 +1920,45 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         const dst = a & 7;
         const src = b & 7;
         const writeResult = (d & 1) !== 0;
-        const alu = aluBinaryWidthIntoJs(c >>> 0, readReg8(dst), readReg8(src), 8, nextFlags, aluScratch);
+        const op = c >>> 0;
+        const left = readReg8(dst);
+        const right = readReg8(src);
+        if (writeResult) {
+          if (op === 1) {
+            const result = (left | right) & 0xff;
+            writeReg8(dst, result);
+            nextFlags = updateLogicFlags8Js(nextFlags, result);
+            break;
+          }
+          if (op === 6) {
+            const result = (left ^ right) & 0xff;
+            writeReg8(dst, result);
+            nextFlags = updateLogicFlags8Js(nextFlags, result);
+            break;
+          }
+          if (op === 0) {
+            const result = (left + right) & 0xff;
+            writeReg8(dst, result);
+            nextFlags = updateAddFlags8Js(nextFlags, left, right, result);
+            break;
+          }
+          if (op === 4) {
+            const result = (left & right) & 0xff;
+            writeReg8(dst, result);
+            nextFlags = updateLogicFlags8Js(nextFlags, result);
+            break;
+          }
+        } else {
+          if (op === 7) {
+            nextFlags = updateSubFlags8Js(nextFlags, left, right, (left - right) & 0xff);
+            break;
+          }
+          if (op === 8) {
+            nextFlags = updateLogicFlags8Js(nextFlags, (left & right) & 0xff);
+            break;
+          }
+        }
+        const alu = aluBinary8IntoJs(op, left, right, nextFlags, aluScratch);
         if (writeResult) {
           writeReg8(dst, alu.result & 0xff);
         }
@@ -1586,14 +1989,14 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
           break;
         }
         if (op === 1) {
-          const alu = aluBinaryWidthIntoJs(5, 0, regs[reg] >>> 0, 32, nextFlags, aluScratch);
+          const alu = aluBinary32IntoJs(5, 0, regs[reg] >>> 0, nextFlags, aluScratch);
           regs[reg] = alu.result >>> 0;
           nextFlags = alu.flags >>> 0;
           break;
         }
         if (op === 2 || op === 3) {
           const prevCf = nextFlags & FLAG_CF;
-          const alu = aluBinaryWidthIntoJs(op === 2 ? 0 : 5, regs[reg] >>> 0, 1, 32, nextFlags, aluScratch);
+          const alu = aluBinary32IntoJs(op === 2 ? 0 : 5, regs[reg] >>> 0, 1, nextFlags, aluScratch);
           regs[reg] = alu.result >>> 0;
           nextFlags = ((alu.flags & ~FLAG_CF) | prevCf) >>> 0;
           break;
@@ -1609,14 +2012,14 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
           break;
         }
         if (op === 1) {
-          const alu = aluBinaryWidthIntoJs(5, 0, value, 8, nextFlags, aluScratch);
+          const alu = aluBinary8IntoJs(5, 0, value, nextFlags, aluScratch);
           writeReg8(reg, alu.result & 0xff);
           nextFlags = alu.flags >>> 0;
           break;
         }
         if (op === 2 || op === 3) {
           const prevCf = nextFlags & FLAG_CF;
-          const alu = aluBinaryWidthIntoJs(op === 2 ? 0 : 5, value, 1, 8, nextFlags, aluScratch);
+          const alu = aluBinary8IntoJs(op === 2 ? 0 : 5, value, 1, nextFlags, aluScratch);
           writeReg8(reg, alu.result & 0xff);
           nextFlags = ((alu.flags & ~FLAG_CF) | prevCf) >>> 0;
           break;
@@ -1833,7 +2236,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const rhs = emu.readMem32(ea) >>> 0;
-        const alu = aluBinaryWidthIntoJs(7, regs[a & 7] >>> 0, rhs >>> 0, 32, nextFlags, aluScratch);
+        const alu = aluBinary32IntoJs(7, regs[a & 7] >>> 0, rhs >>> 0, nextFlags, aluScratch);
         nextFlags = alu.flags >>> 0;
         break;
       }
@@ -1844,7 +2247,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const lhs = emu.readMem32(ea) >>> 0;
         const imm = (d << 24) >> 24;
-        const alu = aluBinaryWidthIntoJs(a >>> 0, lhs >>> 0, imm >>> 0, 32, nextFlags, aluScratch);
+        const alu = aluBinary32IntoJs(a >>> 0, lhs >>> 0, imm >>> 0, nextFlags, aluScratch);
         if ((a >>> 0) !== 7 && (a >>> 0) !== 8) {
           emu.writeMem32(ea, alu.result >>> 0);
         }
@@ -1857,7 +2260,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const lhs = emu.readMem8(ea) & 0xff;
-        const alu = aluBinaryWidthIntoJs(a >>> 0, lhs >>> 0, d & 0xff, 8, nextFlags, aluScratch);
+        const alu = aluBinary8IntoJs(a >>> 0, lhs >>> 0, d & 0xff, nextFlags, aluScratch);
         if ((a >>> 0) !== 7 && (a >>> 0) !== 8) {
           emu.writeMem8(ea, alu.result & 0xff);
         }
@@ -1884,14 +2287,14 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
           break;
         }
         if (op === 1) {
-          const alu = aluBinaryWidthIntoJs(5, 0, value, 8, nextFlags, aluScratch);
+          const alu = aluBinary8IntoJs(5, 0, value, nextFlags, aluScratch);
           emu.writeMem8(ea, alu.result & 0xff);
           nextFlags = alu.flags >>> 0;
           break;
         }
         if (op === 2 || op === 3) {
           const prevCf = nextFlags & FLAG_CF;
-          const alu = aluBinaryWidthIntoJs(op === 2 ? 0 : 5, value, 1, 8, nextFlags, aluScratch);
+          const alu = aluBinary8IntoJs(op === 2 ? 0 : 5, value, 1, nextFlags, aluScratch);
           emu.writeMem8(ea, alu.result & 0xff);
           nextFlags = ((alu.flags & ~FLAG_CF) | prevCf) >>> 0;
           break;
@@ -1910,7 +2313,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
           break;
         }
         if (op === 1) {
-          const alu = aluBinaryWidthIntoJs(5, 0, value >>> 0, 32, nextFlags, aluScratch);
+          const alu = aluBinary32IntoJs(5, 0, value >>> 0, nextFlags, aluScratch);
           emu.writeMem32(ea, alu.result >>> 0);
           nextFlags = alu.flags >>> 0;
           break;
@@ -1923,7 +2326,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const lhs = emu.readMem32(ea) >>> 0;
-        const alu = aluBinaryWidthIntoJs(a >>> 0, lhs >>> 0, d >>> 0, 32, nextFlags, aluScratch);
+        const alu = aluBinary32IntoJs(a >>> 0, lhs >>> 0, d >>> 0, nextFlags, aluScratch);
         if ((a >>> 0) !== 7 && (a >>> 0) !== 8) {
           emu.writeMem32(ea, alu.result >>> 0);
         }
@@ -1939,7 +2342,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const lhs = emu.readMem32(ea) >>> 0;
-        const alu = aluBinaryWidthIntoJs(d >>> 0, lhs >>> 0, regs[a & 7] >>> 0, 32, nextFlags, aluScratch);
+        const alu = aluBinary32IntoJs(d >>> 0, lhs >>> 0, regs[a & 7] >>> 0, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
           emu.writeMem32(ea, alu.result >>> 0);
         }
@@ -1952,7 +2355,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const rhs = emu.readMem32(ea) >>> 0;
-        const alu = aluBinaryWidthIntoJs(d >>> 0, regs[a & 7] >>> 0, rhs >>> 0, 32, nextFlags, aluScratch);
+        const alu = aluBinary32IntoJs(d >>> 0, regs[a & 7] >>> 0, rhs >>> 0, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
           regs[a & 7] = alu.result >>> 0;
         }
@@ -1981,7 +2384,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const lhs = emu.readMem8(ea) & 0xff;
-        const alu = aluBinaryWidthIntoJs(d >>> 0, lhs >>> 0, readReg8(a & 7) & 0xff, 8, nextFlags, aluScratch);
+        const alu = aluBinary8IntoJs(d >>> 0, lhs >>> 0, readReg8(a & 7) & 0xff, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
           emu.writeMem8(ea, alu.result & 0xff);
         }
@@ -1994,7 +2397,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         }
         const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
         const rhs = emu.readMem8(ea) & 0xff;
-        const alu = aluBinaryWidthIntoJs(d >>> 0, readReg8(a & 7) & 0xff, rhs >>> 0, 8, nextFlags, aluScratch);
+        const alu = aluBinary8IntoJs(d >>> 0, readReg8(a & 7) & 0xff, rhs >>> 0, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
           writeReg8(a & 7, alu.result & 0xff);
         }
@@ -2035,6 +2438,12 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
       default:
         return { ok: false, flags: flags >>> 0 };
     }
+  }
+  if (resultScratch) {
+    resultScratch.ok = true;
+    resultScratch.flags = nextFlags >>> 0;
+    resultScratch.nextEip = nextEip === null ? undefined : (nextEip >>> 0);
+    return resultScratch;
   }
   return {
     ok: true,

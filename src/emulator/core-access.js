@@ -262,7 +262,6 @@
         }
         const start = addr >>> 0;
         const mem = this.cpu.mem;
-        const view = this.cpu.view;
         const memLen = mem.length >>> 0;
         if (start >= memLen) {
           return null;
@@ -270,9 +269,19 @@
         const entry = this.decodeCache.get(start);
         let sig0 = 0 >>> 0;
         let sig1 = 0 >>> 0;
-        if ((start + 7) < memLen && view && typeof view.getUint32 === "function") {
-          sig0 = view.getUint32(start, true) >>> 0;
-          sig1 = view.getUint32((start + 4) >>> 0, true) >>> 0;
+        if ((start + 7) < memLen) {
+          sig0 =
+            (mem[start] & 0xff) |
+            ((mem[start + 1] & 0xff) << 8) |
+            ((mem[start + 2] & 0xff) << 16) |
+            ((mem[start + 3] & 0xff) << 24);
+          sig1 =
+            (mem[start + 4] & 0xff) |
+            ((mem[start + 5] & 0xff) << 8) |
+            ((mem[start + 6] & 0xff) << 16) |
+            ((mem[start + 7] & 0xff) << 24);
+          sig0 >>>= 0;
+          sig1 >>>= 0;
         } else {
           const limit0 = Math.min(4, memLen - start);
           for (let i = 0; i < limit0; i += 1) {
