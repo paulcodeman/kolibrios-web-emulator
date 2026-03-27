@@ -93,6 +93,49 @@
     } = shared || {};
     const FAST_RUNTIME_COPY_LOOP_FWD = new Uint8Array([0x39, 0xcf, 0x74, 0x03, 0xa4, 0xeb, 0xf9]);
     const FAST_RUNTIME_COPY_LOOP_BWD = new Uint8Array([0x49, 0x8a, 0x1c, 0x0a, 0x88, 0x1c, 0x08, 0x75, 0xf7]);
+    const SOFT_KIND_NONE = 0;
+    const SOFT_KIND_JCC = 1;
+    const SOFT_KIND_JMP = 2;
+    const SOFT_KIND_CALL_REL32 = 3;
+    const SOFT_KIND_RET = 4;
+    const SOFT_KIND_LOOP = 5;
+    const SOFT_KIND_BSWAP = 6;
+
+    function getSoftSiteFastKind(site) {
+      if (!site || !site.type) {
+        return SOFT_KIND_NONE;
+      }
+      const cached = site.fastKind | 0;
+      if (cached) {
+        return cached;
+      }
+      let kind = SOFT_KIND_NONE;
+      switch (site.type) {
+        case "jcc":
+          kind = SOFT_KIND_JCC;
+          break;
+        case "jmp":
+          kind = SOFT_KIND_JMP;
+          break;
+        case "call-rel32":
+          kind = SOFT_KIND_CALL_REL32;
+          break;
+        case "ret":
+          kind = SOFT_KIND_RET;
+          break;
+        case "loop":
+          kind = SOFT_KIND_LOOP;
+          break;
+        case "bswap":
+          kind = SOFT_KIND_BSWAP;
+          break;
+        default:
+          kind = SOFT_KIND_NONE;
+          break;
+      }
+      site.fastKind = kind;
+      return kind;
+    }
 
     function stopInterpreterFault(emulator, reason, message) {
       if (emulator && typeof emulator.log === "function") {
@@ -6775,37 +6818,9 @@
         }
         const cpu = this.cpu || null;
         const regs = cpu && cpu.regs ? cpu.regs : null;
-        let first = 0;
-        if (site && site.bytes && site.bytes.length) {
-          first = site.bytes[0] & 0xff;
-        } else if (cpu && cpu.mem && current < (cpu.mem.length >>> 0)) {
-          first = cpu.mem[current] & 0xff;
-        }
-        if (
-          (first === (FAST_RUNTIME_COPY_LOOP_FWD[0] & 0xff) || first === (FAST_RUNTIME_COPY_LOOP_BWD[0] & 0xff)) &&
-          this.tryFastRuntimeCopyLoop(addr)
-        ) {
-          return true;
-        }
-        if (site && site.bytes && site.bytes.length) {
-          if (
-            first === 0x66 ||
-            first === 0x67 ||
-            first === 0xf0 ||
-            first === 0xf2 ||
-            first === 0xf3 ||
-            first === 0x2e ||
-            first === 0x36 ||
-            first === 0x3e ||
-            first === 0x26 ||
-            first === 0x64 ||
-            first === 0x65
-          ) {
-            return false;
-          }
-        }
+        const fastKind = getSoftSiteFastKind(site);
         if (site && regs) {
-          if (site.type === "call-rel32") {
+          if (fastKind === SOFT_KIND_CALL_REL32) {
             const next = site.next !== undefined
               ? (site.next >>> 0)
               : ((site.next = ((current + site.len) >>> 0)) >>> 0);
@@ -6836,13 +6851,13 @@
             regs[REG.EIP] = target >>> 0;
             return true;
           }
-          if (site.type === "ret") {
+          if (fastKind === SOFT_KIND_RET) {
             const esp = regs[REG.ESP] >>> 0;
             regs[REG.EIP] = this.readMem32(esp) >>> 0;
             regs[REG.ESP] = (esp + 4) >>> 0;
             return true;
           }
-          if (site.type === "jcc") {
+          if (fastKind === SOFT_KIND_JCC) {
             const next = site.next !== undefined
               ? (site.next >>> 0)
               : ((site.next = ((current + site.len) >>> 0)) >>> 0);
@@ -6857,14 +6872,43 @@
             regs[REG.EIP] = take ? target : next;
             return true;
           }
-          if (site.type === "jmp") {
+          if (fastKind === SOFT_KIND_JMP) {
             regs[REG.EIP] = site.target !== undefined
               ? (site.target >>> 0)
               : ((site.target = ((current + site.len + (site.rel | 0)) >>> 0)) >>> 0);
             return true;
           }
         }
-        if (site && site.type === "bswap") {
+        let first = 0;
+        if (site && site.bytes && site.bytes.length) {
+          first = site.bytes[0] & 0xff;
+        } else if (cpu && cpu.mem && current < (cpu.mem.length >>> 0)) {
+          first = cpu.mem[current] & 0xff;
+        }
+        if (
+          (first === (FAST_RUNTIME_COPY_LOOP_FWD[0] & 0xff) || first === (FAST_RUNTIME_COPY_LOOP_BWD[0] & 0xff)) &&
+          this.tryFastRuntimeCopyLoop(addr)
+        ) {
+          return true;
+        }
+        if (site && site.bytes && site.bytes.length) {
+          if (
+            first === 0x66 ||
+            first === 0x67 ||
+            first === 0xf0 ||
+            first === 0xf2 ||
+            first === 0xf3 ||
+            first === 0x2e ||
+            first === 0x36 ||
+            first === 0x3e ||
+            first === 0x26 ||
+            first === 0x64 ||
+            first === 0x65
+          ) {
+            return false;
+          }
+        }
+        if (site && fastKind === SOFT_KIND_BSWAP) {
           const regIdx = site.reg & 7;
           const value = this.readReg32ByIndex(regIdx);
           const swapped = bswap32(value >>> 0);
@@ -6882,7 +6926,7 @@
           this.writeReg(REG.EIP, (addr + site.len) >>> 0);
           return true;
         }
-        if (site && site.type === "loop") {
+        if (site && fastKind === SOFT_KIND_LOOP) {
           const fast = this.getFastLoopInfo(addr, site);
           if (fast && this.runFastLoop(fast, addr, site)) {
             return true;

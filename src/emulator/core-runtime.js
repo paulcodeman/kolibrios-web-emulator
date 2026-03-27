@@ -691,7 +691,8 @@
           return false;
         }
         const start = entries[0].addr >>> 0;
-        const end = entries[entries.length - 1].next >>> 0;
+        const lastEntry = entries[entries.length - 1];
+        const end = (lastEntry.end !== undefined ? lastEntry.end : lastEntry.next) >>> 0;
         if (end <= start) {
           return false;
         }
@@ -2187,10 +2188,44 @@
         return starts;
       },
 
+      writeMayAffectTrackedCode(addr, size) {
+        const start = addr >>> 0;
+        const byteCount = size >>> 0;
+        if (!byteCount) {
+          return false;
+        }
+        const hasDecodePages = !!(this.decodeCachePageMap && this.decodeCachePageMap.size);
+        const hasBlockPages = !!(this.basicBlockPageMap && this.basicBlockPageMap.size);
+        const hasStartPages = !!(this.basicBlockStartPageSet && this.basicBlockStartPageSet.size);
+        if (!hasDecodePages && !hasBlockPages && !hasStartPages) {
+          return false;
+        }
+        const end = (start + byteCount - 1) >>> 0;
+        if (end < start) {
+          return true;
+        }
+        const firstPage = start >>> 12;
+        const lastPage = end >>> 12;
+        for (let page = firstPage; page <= lastPage; page += 1) {
+          const key = page >>> 0;
+          if (
+            (hasDecodePages && this.decodeCachePageMap.has(key)) ||
+            (hasBlockPages && this.basicBlockPageMap.has(key)) ||
+            (hasStartPages && this.basicBlockStartPageSet.has(key))
+          ) {
+            return true;
+          }
+        }
+        return false;
+      },
+
       invalidateBasicBlocksForWrite(addr, size) {
         const start = addr >>> 0;
         const byteCount = size >>> 0;
         if (!byteCount) {
+          return;
+        }
+        if (!this.writeMayAffectTrackedCode(start, byteCount)) {
           return;
         }
         this.invalidateDecodeCacheForWrite(start, byteCount);
