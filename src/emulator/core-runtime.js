@@ -107,6 +107,27 @@
               continue;
             }
             const softSite = this.softInstructions ? this.getSoftInstructionSite(eip) : null;
+            const allowSoftBasicBlock = !!(softSite && this.canExecuteSoftInstructionInBasicBlock(softSite));
+            if (allowSoftBasicBlock) {
+              const cached = this.executeCachedBasicBlock(eip, budget - executed);
+              if (cached > 0) {
+                executed += cached;
+                this.shouldYieldForTimeslice();
+                continue;
+              }
+              if (!this.running) {
+                break;
+              }
+              const built = this.executeAndBuildBasicBlock(eip, budget - executed);
+              if (built > 0) {
+                executed += built;
+                this.shouldYieldForTimeslice();
+                continue;
+              }
+              if (!this.running) {
+                break;
+              }
+            }
             if (softSite && this.handleSoftInstruction(eip, softSite)) {
               executed += 1;
               this.shouldYieldForTimeslice();

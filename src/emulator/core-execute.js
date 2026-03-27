@@ -6765,9 +6765,6 @@
       },
 
       handleSoftInstruction(addr, siteOverride) {
-        if (this.tryFastRuntimeCopyLoop(addr)) {
-          return true;
-        }
         const current = addr >>> 0;
         let site = siteOverride || null;
         if (!site && this.softInstructionSites instanceof Map) {
@@ -6776,8 +6773,21 @@
         if (!site && typeof this.getDynamicSoftInstructionSite === "function") {
           site = this.getDynamicSoftInstructionSite(current);
         }
+        const cpu = this.cpu || null;
+        const regs = cpu && cpu.regs ? cpu.regs : null;
+        let first = 0;
         if (site && site.bytes && site.bytes.length) {
-          const first = site.bytes[0] & 0xff;
+          first = site.bytes[0] & 0xff;
+        } else if (cpu && cpu.mem && current < (cpu.mem.length >>> 0)) {
+          first = cpu.mem[current] & 0xff;
+        }
+        if (
+          (first === (FAST_RUNTIME_COPY_LOOP_FWD[0] & 0xff) || first === (FAST_RUNTIME_COPY_LOOP_BWD[0] & 0xff)) &&
+          this.tryFastRuntimeCopyLoop(addr)
+        ) {
+          return true;
+        }
+        if (site && site.bytes && site.bytes.length) {
           if (
             first === 0x66 ||
             first === 0x67 ||
@@ -6792,6 +6802,66 @@
             first === 0x65
           ) {
             return false;
+          }
+        }
+        if (site && regs) {
+          if (site.type === "call-rel32") {
+            const next = site.next !== undefined
+              ? (site.next >>> 0)
+              : ((site.next = ((current + site.len) >>> 0)) >>> 0);
+            const target = site.target !== undefined
+              ? (site.target >>> 0)
+              : (
+                site.target = (
+                  site.rel !== undefined
+                    ? ((next + (site.rel | 0)) >>> 0)
+                    : (
+                      site.bytes && site.bytes.length >= 5
+                        ? (
+                          next +
+                          (
+                            site.bytes[1] |
+                            (site.bytes[2] << 8) |
+                            (site.bytes[3] << 16) |
+                            (site.bytes[4] << 24)
+                          )
+                        ) >>> 0
+                        : 0
+                    )
+                ) >>> 0
+              );
+            const nextEsp = (regs[REG.ESP] - 4) >>> 0;
+            this.writeMem32(nextEsp, next);
+            regs[REG.ESP] = nextEsp >>> 0;
+            regs[REG.EIP] = target >>> 0;
+            return true;
+          }
+          if (site.type === "ret") {
+            const esp = regs[REG.ESP] >>> 0;
+            regs[REG.EIP] = this.readMem32(esp) >>> 0;
+            regs[REG.ESP] = (esp + 4) >>> 0;
+            return true;
+          }
+          if (site.type === "jcc") {
+            const next = site.next !== undefined
+              ? (site.next >>> 0)
+              : ((site.next = ((current + site.len) >>> 0)) >>> 0);
+            const target = site.target !== undefined
+              ? (site.target >>> 0)
+              : ((site.target = ((next + (site.rel | 0)) >>> 0)) >>> 0);
+            const flags = regs[REG.EFLAGS] >>> 0;
+            const cc = site.cc & 0x0f;
+            const take =
+              cc === 4 ? !!(flags & FLAG_ZF)
+                : (cc === 5 ? !(flags & FLAG_ZF) : evalJccCondition(cc, flags));
+            regs[REG.EIP] = take ? target : next;
+            return true;
+          }
+          if (site.type === "jmp") {
+            regs[REG.EIP] = site.target !== undefined
+              ? (site.target >>> 0)
+              : ((site.target = ((current + site.len + (site.rel | 0)) >>> 0)) >>> 0);
+            return true;
           }
         }
         if (site && site.type === "bswap") {
