@@ -622,17 +622,27 @@
 
     Object.assign(Emulator.prototype, {
       handleSyscall() {
-        const eax = this.readReg(REG.EAX);
-        this.lastSyscall = {
-          eax,
-          ebx: this.readReg(REG.EBX),
-          ecx: this.readReg(REG.ECX),
-          edx: this.readReg(REG.EDX),
-          esi: this.readReg(REG.ESI),
-          edi: this.readReg(REG.EDI)
-        };
+        const eax = this.readReg(REG.EAX) >>> 0;
+        const ebx = this.readReg(REG.EBX) >>> 0;
+        const ecx = this.readReg(REG.ECX) >>> 0;
+        const edx = this.readReg(REG.EDX) >>> 0;
+        const esi = this.readReg(REG.ESI) >>> 0;
+        const edi = this.readReg(REG.EDI) >>> 0;
+        const sc = this.lastSyscall || (this.lastSyscall = {
+          eax: 0,
+          ebx: 0,
+          ecx: 0,
+          edx: 0,
+          esi: 0,
+          edi: 0
+        });
+        sc.eax = eax;
+        sc.ebx = ebx;
+        sc.ecx = ecx;
+        sc.edx = edx;
+        sc.esi = esi;
+        sc.edi = edi;
         if (this.traceSyscalls) {
-          const sc = this.lastSyscall;
           this.log(
             `syscall ${eax} ebx=0x${sc.ebx.toString(16)} ecx=0x${sc.ecx.toString(16)} edx=0x${sc.edx.toString(16)}`
           );
@@ -6399,6 +6409,8 @@
 
       heapAllocInternal(size) {
         const requestSize = size >>> 0;
+        const mem = this.cpu && this.cpu.mem ? this.cpu.mem : null;
+        const previousMemLength = mem ? (mem.length >>> 0) : 0;
         let ptr = this.heapAllocFromFreeList(requestSize);
         if (!ptr) {
           ptr = this.heapAllocBump(requestSize);
@@ -6411,8 +6423,15 @@
           const start = ptr >>> 0;
           const end = Math.min((start + requestSize) >>> 0, this.cpu.mem.length >>> 0);
           if (end > start) {
-            this.invalidateBasicBlocksForWrite(start, end - start);
-            this.cpu.mem.fill(0, start, end);
+            let dirtyEnd = end;
+            if (previousMemLength && end > previousMemLength && (this.cpu.mem.length >>> 0) > previousMemLength) {
+              dirtyEnd = Math.min(end, previousMemLength) >>> 0;
+            }
+            if (dirtyEnd > start) {
+              // Fresh tail bytes after a Uint8Array grow are already zeroed.
+              this.invalidateBasicBlocksForWrite(start, dirtyEnd - start);
+              this.cpu.mem.fill(0, start, dirtyEnd);
+            }
           }
         }
         return ptr >>> 0;

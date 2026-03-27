@@ -256,6 +256,42 @@
         return { sig0: sig0 >>> 0, sig1: sig1 >>> 0 };
       },
 
+      cacheDecodeEntry(addr, entry) {
+        if (!this.decodeCache || !entry) {
+          return entry || null;
+        }
+        const start = addr >>> 0;
+        if (!this.decodeCache.has(start)) {
+          const pageMap = this.decodeCachePageMap;
+          if (pageMap) {
+            const end = (start + 7) >>> 0;
+            if (end < start) {
+              pageMap.clear();
+            } else {
+              const firstPage = start >>> 12;
+              const lastPage = end >>> 12;
+              for (let page = firstPage; page <= lastPage; page += 1) {
+                const key = page >>> 0;
+                let set = pageMap.get(key);
+                if (!set) {
+                  set = new Set();
+                  pageMap.set(key, set);
+                }
+                set.add(start);
+              }
+            }
+          }
+        }
+        this.decodeCache.set(start, entry);
+        if (this.decodeCache.size > this.decodeCacheMax) {
+          this.decodeCache.clear();
+          if (this.decodeCachePageMap) {
+            this.decodeCachePageMap.clear();
+          }
+        }
+        return entry;
+      },
+
       getDynamicSoftInstructionSite(addr) {
         if (!this.cpu || !this.cpu.mem || !this.decodeCache) {
           return null;
@@ -267,39 +303,7 @@
           return null;
         }
         const entry = this.decodeCache.get(start);
-        let sig0 = 0 >>> 0;
-        let sig1 = 0 >>> 0;
-        if ((start + 7) < memLen) {
-          sig0 =
-            (mem[start] & 0xff) |
-            ((mem[start + 1] & 0xff) << 8) |
-            ((mem[start + 2] & 0xff) << 16) |
-            ((mem[start + 3] & 0xff) << 24);
-          sig1 =
-            (mem[start + 4] & 0xff) |
-            ((mem[start + 5] & 0xff) << 8) |
-            ((mem[start + 6] & 0xff) << 16) |
-            ((mem[start + 7] & 0xff) << 24);
-          sig0 >>>= 0;
-          sig1 >>>= 0;
-        } else {
-          const limit0 = Math.min(4, memLen - start);
-          for (let i = 0; i < limit0; i += 1) {
-            sig0 |= (mem[start + i] & 0xff) << (i * 8);
-          }
-          const limit1 = Math.min(8, memLen - start);
-          for (let i = 4; i < limit1; i += 1) {
-            sig1 |= (mem[start + i] & 0xff) << ((i - 4) * 8);
-          }
-          sig0 >>>= 0;
-          sig1 >>>= 0;
-        }
-        if (
-          entry &&
-          entry.sig0 === sig0 &&
-          entry.sig1 === sig1 &&
-          entry.softSiteKnown === 1
-        ) {
+        if (entry && entry.softSiteKnown === 1) {
           return entry.softSite;
         }
         const opcode = mem[start] & 0xff;
@@ -362,38 +366,27 @@
             }
           }
         }
-        const next = entry && entry.sig0 === sig0 && entry.sig1 === sig1 ? entry : { sig0, sig1 };
-        next.sig0 = sig0;
-        next.sig1 = sig1;
+        const next = entry || {};
         next.softSiteKnown = 1;
         next.softSite = site;
-        this.decodeCache.set(start, next);
-        if (this.decodeCache.size > this.decodeCacheMax) {
-          this.decodeCache.clear();
-        }
+        this.cacheDecodeEntry(start, next);
         return site;
       },
 
       getCachedModRmInfo(addr, bytes, startIndex) {
-        const { sig0, sig1 } = this.getDecodeSignature(bytes);
         const entry = this.decodeCache.get(addr);
         const addrSize = this.addrSizeOverride === 16 ? 16 : 32;
         const key = startIndex === 2
           ? (addrSize === 16 ? "modrm2_16" : "modrm2")
           : (addrSize === 16 ? "modrm1_16" : "modrm1");
-        if (entry && entry.sig0 === sig0 && entry.sig1 === sig1 && entry[key]) {
+        if (entry && entry[key]) {
           this.decodeCacheHits += 1;
           return entry[key];
         }
         const modrmInfo = this.decodeModRm8(bytes, startIndex, addrSize);
-        const next = entry && entry.sig0 === sig0 && entry.sig1 === sig1 ? entry : { sig0, sig1 };
-        next.sig0 = sig0;
-        next.sig1 = sig1;
+        const next = entry || {};
         next[key] = modrmInfo;
-        this.decodeCache.set(addr, next);
-        if (this.decodeCache.size > this.decodeCacheMax) {
-          this.decodeCache.clear();
-        }
+        this.cacheDecodeEntry(addr, next);
         this.decodeCacheMisses += 1;
         return modrmInfo;
       },

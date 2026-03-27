@@ -3603,6 +3603,7 @@ class Emulator {
     this.cpuBusySampleTotalMs = 0;
     this.cpuBusyActiveStartMs = 0;
     this.decodeCache = new Map();
+    this.decodeCachePageMap = new Map();
     this.decodeCacheMax = 50000;
     this.decodeCacheHits = 0;
     this.decodeCacheMisses = 0;
@@ -3880,6 +3881,7 @@ class Emulator {
       };
     }
     this.decodeCache.clear();
+    this.decodeCachePageMap.clear();
     this.decodeCacheHits = 0;
     this.decodeCacheMisses = 0;
     this.basicBlockStartCache.clear();
@@ -4453,8 +4455,15 @@ class Emulator {
   if (typeof Emulator.prototype.executeBasicInstruction === "function") {
     const executeBasicInstructionImpl = Emulator.prototype.executeBasicInstruction;
     Emulator.prototype.executeBasicInstruction = function executeBasicInstructionWithBackend(addr) {
+      const backend = this && this.cpuBackend === "wasm" ? this.cpuHelperBackend : null;
+      if (!backend) {
+        return executeBasicInstructionImpl.call(this, addr >>> 0);
+      }
       const prevBackend = getActiveCpuHelperBackend();
-      setActiveCpuHelperBackend(this && this.cpuBackend === "wasm" ? this.cpuHelperBackend : null);
+      if (prevBackend === backend) {
+        return executeBasicInstructionImpl.call(this, addr >>> 0);
+      }
+      setActiveCpuHelperBackend(backend);
       try {
         return executeBasicInstructionImpl.call(this, addr >>> 0);
       } finally {

@@ -76,6 +76,7 @@
         if (!this.running || !this.cpu) {
           return;
         }
+        const regs = this.cpu.regs;
         this.yieldRequested = false;
         this.yieldDelay = 0;
         this.yieldMode = "";
@@ -92,13 +93,13 @@
         );
         try {
           while (executed < budget && this.running && !this.yieldRequested) {
-            const eip = this.readReg(REG.EIP);
+            const eip = regs[REG.EIP] >>> 0;
             this.lastEip = eip;
             if (this.syscallSiteSet.has(eip)) {
               this.repeatCurrentInstruction = false;
               this.handleSyscall();
               if (!this.repeatCurrentInstruction) {
-                this.writeReg(REG.EIP, (eip + 2) >>> 0);
+                regs[REG.EIP] = (eip + 2) >>> 0;
               }
               this.repeatCurrentInstruction = false;
               executed += 1;
@@ -461,16 +462,25 @@
           return null;
         }
         const current = addr >>> 0;
-        if (this.softInstructionSites instanceof Map) {
-          const site = this.softInstructionSites.get(current);
+        const softInstructionSites = this.softInstructionSites;
+        if (softInstructionSites) {
+          const site = softInstructionSites.get(current);
           if (site) {
             return site;
           }
         }
-        if (!this.cpu || !this.cpu.mem || typeof this.getDynamicSoftInstructionSite !== "function") {
+        const decodeCache = this.decodeCache;
+        if (decodeCache) {
+          const cached = decodeCache.get(current);
+          if (cached && cached.softSiteKnown === 1) {
+            return cached.softSite;
+          }
+        }
+        const cpu = this.cpu;
+        if (!cpu || !cpu.mem || typeof this.getDynamicSoftInstructionSite !== "function") {
           return null;
         }
-        const mem = this.cpu.mem;
+        const mem = cpu.mem;
         const memLen = mem.length >>> 0;
         if (current >= memLen) {
           return null;
@@ -505,7 +515,8 @@
             return true;
           }
         }
-        if (this.invokeHostCallStub && this.hostCallStubs && this.hostCallStubs.has(current)) {
+        const hostCallStubs = this.hostCallStubs;
+        if (this.invokeHostCallStub && hostCallStubs && hostCallStubs.has(current)) {
           return !!this.invokeHostCallStub(current);
         }
         return this.executeBasicInstruction(current);
@@ -513,6 +524,7 @@
 
       executeLinearBasicBlock(eip, budget, entryLimit, entries, startVerified) {
         const start = eip >>> 0;
+        const regs = this.cpu && this.cpu.regs ? this.cpu.regs : null;
         let canContinue = !!startVerified;
         if (budget <= 0 || entryLimit <= 0) {
           return 0;
@@ -539,7 +551,7 @@
             return executed;
           }
           executed += 1;
-          const next = this.readReg(REG.EIP) >>> 0;
+          const next = regs ? (regs[REG.EIP] >>> 0) : (this.readReg(REG.EIP) >>> 0);
           if (entries) {
             entries.push({
               addr: current >>> 0,
@@ -565,6 +577,7 @@
         if (!this.basicBlockCache.size || budget <= 0) {
           return 0;
         }
+        const regs = this.cpu && this.cpu.regs ? this.cpu.regs : null;
         const start = eip >>> 0;
         const block = this.basicBlockCache.get(start);
         if (!block) {
@@ -585,7 +598,7 @@
         const entries = block.entries;
         for (let i = 0; i < entries.length && executed < budget && this.running && !this.yieldRequested; i += 1) {
           const entry = entries[i];
-          if ((this.readReg(REG.EIP) >>> 0) !== entry.addr) {
+          if ((regs ? (regs[REG.EIP] >>> 0) : (this.readReg(REG.EIP) >>> 0)) !== entry.addr) {
             break;
           }
           this.lastEip = entry.addr >>> 0;
@@ -599,7 +612,7 @@
           if (this.shouldYieldForTimeslice()) {
             break;
           }
-          if ((this.readReg(REG.EIP) >>> 0) !== entry.next) {
+          if ((regs ? (regs[REG.EIP] >>> 0) : (this.readReg(REG.EIP) >>> 0)) !== entry.next) {
             break;
           }
         }
@@ -1966,6 +1979,87 @@
         }
       },
 
+      removeDecodeCacheStart(start) {
+        const key = start >>> 0;
+        const pageMap = this.decodeCachePageMap;
+        if (!pageMap || !pageMap.size) {
+          return;
+        }
+        const end = (key + 7) >>> 0;
+        if (end < key) {
+          pageMap.clear();
+          return;
+        }
+        const firstPage = key >>> 12;
+        const lastPage = end >>> 12;
+        for (let page = firstPage; page <= lastPage; page += 1) {
+          const set = pageMap.get(page >>> 0);
+          if (!set) {
+            continue;
+          }
+          set.delete(key);
+          if (set.size === 0) {
+            pageMap.delete(page >>> 0);
+          }
+        }
+      },
+
+      collectDecodeCacheStartsForRange(addr, size) {
+        const pageMap = this.decodeCachePageMap;
+        if (!pageMap || !pageMap.size) {
+          return null;
+        }
+        const start = addr >>> 0;
+        const byteCount = size >>> 0;
+        if (!byteCount) {
+          return null;
+        }
+        const end = (start + byteCount - 1) >>> 0;
+        if (end < start) {
+          return null;
+        }
+        const starts = new Set();
+        if (byteCount <= 0x1000) {
+          const firstPage = start >>> 12;
+          const lastPage = end >>> 12;
+          for (let page = firstPage; page <= lastPage; page += 1) {
+            const set = pageMap.get(page >>> 0);
+            if (!set) {
+              continue;
+            }
+            for (const blockStart of set) {
+              starts.add(blockStart >>> 0);
+            }
+          }
+          return starts;
+        }
+        for (const [page, set] of pageMap.entries()) {
+          const pageStart = (page << 12) >>> 0;
+          const pageEnd = (pageStart + 0xfff) >>> 0;
+          if (pageStart > end || pageEnd < start) {
+            continue;
+          }
+          for (const blockStart of set) {
+            starts.add(blockStart >>> 0);
+          }
+        }
+        return starts;
+      },
+
+      invalidateDecodeCacheForWrite(addr, size) {
+        if (!this.decodeCache || !this.decodeCache.size) {
+          return;
+        }
+        const starts = this.collectDecodeCacheStartsForRange(addr, size);
+        if (!starts || starts.size === 0) {
+          return;
+        }
+        for (const decodeStart of starts) {
+          this.decodeCache.delete(decodeStart >>> 0);
+          this.removeDecodeCacheStart(decodeStart >>> 0);
+        }
+      },
+
       collectBasicBlockStartsForRange(addr, size) {
         if (!this.basicBlockPageMap.size) {
           return null;
@@ -2013,6 +2107,7 @@
         if (!byteCount) {
           return;
         }
+        this.invalidateDecodeCacheForWrite(start, byteCount);
         const endExclusive = (start + byteCount) >>> 0;
         if (this.basicBlockStartCache && this.basicBlockStartCache.size) {
           const extra = 16;
