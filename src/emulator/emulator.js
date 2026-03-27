@@ -1638,6 +1638,51 @@ function executeSimpleBlockJs(planWords, wordCount, regs, flags, emu) {
   return executeSimpleBlockJsFast(words, totalWords, regs, flags, emu);
 }
 
+function simpleBlockReadReg8(regs, index) {
+  const idx = index & 7;
+  if (idx <= 3) {
+    return regs[idx] & 0xff;
+  }
+  return (regs[idx - 4] >>> 8) & 0xff;
+}
+
+function simpleBlockWriteReg8(regs, index, value) {
+  const idx = index & 7;
+  const v = value & 0xff;
+  if (idx <= 3) {
+    regs[idx] = ((regs[idx] & 0xffffff00) | v) >>> 0;
+    return;
+  }
+  const base = idx - 4;
+  regs[base] = ((regs[base] & 0xffff00ff) | (v << 8)) >>> 0;
+}
+
+function simpleBlockCalcMem32Address(regs, packedRegs, disp) {
+  const basePlus = packedRegs & 0xff;
+  const indexPlus = (packedRegs >>> 8) & 0xff;
+  const disp32 = disp | 0;
+  let addr = basePlus ? (regs[(basePlus - 1) & 7] >>> 0) : 0;
+  if (!indexPlus) {
+    return (addr + disp32) >>> 0;
+  }
+  let index = regs[(indexPlus - 1) & 7] >>> 0;
+  switch ((packedRegs >>> 16) & 0xff) {
+    case 2:
+      index = (index << 1) >>> 0;
+      break;
+    case 4:
+      index = (index << 2) >>> 0;
+      break;
+    case 8:
+      index = (index << 3) >>> 0;
+      break;
+    default:
+      break;
+  }
+  addr = (addr + index) >>> 0;
+  return (addr + disp32) >>> 0;
+}
+
 function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
   let nextFlags = flags >>> 0;
   let nextEip = null;
@@ -1652,54 +1697,6 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
   const hasReadMem32 = !!(emu && typeof emu.readMem32 === "function");
   const hasWriteMem8 = !!(emu && typeof emu.writeMem8 === "function");
   const hasWriteMem32 = !!(emu && typeof emu.writeMem32 === "function");
-  const readReg8 = (index) => {
-    const idx = index & 7;
-    if (idx <= 3) {
-      return regs[idx] & 0xff;
-    }
-    return (regs[idx - 4] >>> 8) & 0xff;
-  };
-  const writeReg8 = (index, value) => {
-    const idx = index & 7;
-    const v = value & 0xff;
-    if (idx <= 3) {
-      regs[idx] = ((regs[idx] & 0xffffff00) | v) >>> 0;
-      return;
-    }
-    const base = idx - 4;
-    regs[base] = ((regs[base] & 0xffff00ff) | (v << 8)) >>> 0;
-  };
-  const calcSimpleMem32Address = (packedRegs, disp) => {
-    const basePlus = packedRegs & 0xff;
-    const indexPlus = (packedRegs >>> 8) & 0xff;
-    const disp32 = disp | 0;
-    if (!indexPlus && ((packedRegs >>> 16) & 0xff) === 1) {
-      return ((basePlus ? (regs[(basePlus - 1) & 7] >>> 0) : 0) + disp32) >>> 0;
-    }
-    let base = 0;
-    if (basePlus) {
-      base = regs[(basePlus - 1) & 7] >>> 0;
-    }
-    let index = 0;
-    if (indexPlus) {
-      const value = regs[(indexPlus - 1) & 7] >>> 0;
-      switch ((packedRegs >>> 16) & 0xff) {
-        case 2:
-          index = (value << 1) >>> 0;
-          break;
-        case 4:
-          index = (value << 2) >>> 0;
-          break;
-        case 8:
-          index = (value << 3) >>> 0;
-          break;
-        default:
-          index = value >>> 0;
-          break;
-      }
-    }
-    return (base + index + disp32) >>> 0;
-  };
   for (let offset = 0; offset < totalWords; offset += SIMPLE_BLOCK_RECORD_WORDS) {
     const kind = words[offset] >>> 0;
     const a = words[offset + 1] >>> 0;
@@ -1882,21 +1879,21 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         break;
       }
       case SIMPLE_BLOCK_OPS.MOV_R8_R8:
-        writeReg8(a >>> 0, readReg8(b >>> 0));
+        simpleBlockWriteReg8(regs, a >>> 0, simpleBlockReadReg8(regs, b >>> 0));
         break;
       case SIMPLE_BLOCK_OPS.ALU_R8_IMM8: {
         const reg = a & 7;
         const writeResult = (d & 1) !== 0;
-        const alu = aluBinary8IntoJs(c >>> 0, readReg8(reg), b & 0xff, nextFlags, aluScratch);
+        const alu = aluBinary8IntoJs(c >>> 0, simpleBlockReadReg8(regs, reg), b & 0xff, nextFlags, aluScratch);
         if (writeResult) {
-          writeReg8(reg, alu.result & 0xff);
+          simpleBlockWriteReg8(regs, reg, alu.result & 0xff);
         }
         nextFlags = alu.flags >>> 0;
         break;
       }
       case SIMPLE_BLOCK_OPS.SHIFT_R32_IMM: {
         const reg = a & 7;
-        const shift = (d & 1) !== 0 ? readReg8(1) & 0x1f : (b & 0x1f);
+        const shift = (d & 1) !== 0 ? simpleBlockReadReg8(regs, 1) & 0x1f : (b & 0x1f);
         const res = shiftRotate(regs[reg] >>> 0, shift, 32, c >>> 0, nextFlags);
         if (!res.ok) {
           return { ok: false, flags: flags >>> 0 };
@@ -1907,47 +1904,47 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
       }
       case SIMPLE_BLOCK_OPS.SHIFT_R8_IMM: {
         const reg = a & 7;
-        const shift = (d & 1) !== 0 ? readReg8(1) & 0x1f : (b & 0x1f);
-        const res = shiftRotate(readReg8(reg), shift, 8, c >>> 0, nextFlags);
+        const shift = (d & 1) !== 0 ? simpleBlockReadReg8(regs, 1) & 0x1f : (b & 0x1f);
+        const res = shiftRotate(simpleBlockReadReg8(regs, reg), shift, 8, c >>> 0, nextFlags);
         if (!res.ok) {
           return { ok: false, flags: flags >>> 0 };
         }
-        writeReg8(reg, res.result & 0xff);
+        simpleBlockWriteReg8(regs, reg, res.result & 0xff);
         nextFlags = res.flags >>> 0;
         break;
       }
       case SIMPLE_BLOCK_OPS.MOV_R8_IMM8:
-        writeReg8(a >>> 0, b >>> 0);
+        simpleBlockWriteReg8(regs, a >>> 0, b >>> 0);
         break;
       case SIMPLE_BLOCK_OPS.ALU_R8_R8: {
         const dst = a & 7;
         const src = b & 7;
         const writeResult = (d & 1) !== 0;
         const op = c >>> 0;
-        const left = readReg8(dst);
-        const right = readReg8(src);
+        const left = simpleBlockReadReg8(regs, dst);
+        const right = simpleBlockReadReg8(regs, src);
         if (writeResult) {
           if (op === 1) {
             const result = (left | right) & 0xff;
-            writeReg8(dst, result);
+            simpleBlockWriteReg8(regs, dst, result);
             nextFlags = updateLogicFlags8Js(nextFlags, result);
             break;
           }
           if (op === 6) {
             const result = (left ^ right) & 0xff;
-            writeReg8(dst, result);
+            simpleBlockWriteReg8(regs, dst, result);
             nextFlags = updateLogicFlags8Js(nextFlags, result);
             break;
           }
           if (op === 0) {
             const result = (left + right) & 0xff;
-            writeReg8(dst, result);
+            simpleBlockWriteReg8(regs, dst, result);
             nextFlags = updateAddFlags8Js(nextFlags, left, right, result);
             break;
           }
           if (op === 4) {
             const result = (left & right) & 0xff;
-            writeReg8(dst, result);
+            simpleBlockWriteReg8(regs, dst, result);
             nextFlags = updateLogicFlags8Js(nextFlags, result);
             break;
           }
@@ -1963,7 +1960,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         }
         const alu = aluBinary8IntoJs(op, left, right, nextFlags, aluScratch);
         if (writeResult) {
-          writeReg8(dst, alu.result & 0xff);
+          simpleBlockWriteReg8(regs, dst, alu.result & 0xff);
         }
         nextFlags = alu.flags >>> 0;
         break;
@@ -1979,9 +1976,9 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.XCHG_R8_R8: {
         const left = a & 7;
         const right = b & 7;
-        const temp = readReg8(left);
-        writeReg8(left, readReg8(right));
-        writeReg8(right, temp);
+        const temp = simpleBlockReadReg8(regs, left);
+        simpleBlockWriteReg8(regs, left, simpleBlockReadReg8(regs, right));
+        simpleBlockWriteReg8(regs, right, temp);
         break;
       }
       case SIMPLE_BLOCK_OPS.UNARY_R32: {
@@ -2009,21 +2006,21 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
       case SIMPLE_BLOCK_OPS.UNARY_R8: {
         const reg = a & 7;
         const op = b & 3;
-        const value = readReg8(reg);
+        const value = simpleBlockReadReg8(regs, reg);
         if (op === 0) {
-          writeReg8(reg, (~value) & 0xff);
+          simpleBlockWriteReg8(regs, reg, (~value) & 0xff);
           break;
         }
         if (op === 1) {
           const alu = aluBinary8IntoJs(5, 0, value, nextFlags, aluScratch);
-          writeReg8(reg, alu.result & 0xff);
+          simpleBlockWriteReg8(regs, reg, alu.result & 0xff);
           nextFlags = alu.flags >>> 0;
           break;
         }
         if (op === 2 || op === 3) {
           const prevCf = nextFlags & FLAG_CF;
           const alu = aluBinary8IntoJs(op === 2 ? 0 : 5, value, 1, nextFlags, aluScratch);
-          writeReg8(reg, alu.result & 0xff);
+          simpleBlockWriteReg8(regs, reg, alu.result & 0xff);
           nextFlags = ((alu.flags & ~FLAG_CF) | prevCf) >>> 0;
           break;
         }
@@ -2035,13 +2032,13 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         let value = 0;
         switch (c & 3) {
           case 0:
-            value = readReg8(src) & 0xff;
+            value = simpleBlockReadReg8(regs, src) & 0xff;
             break;
           case 1:
             value = regs[src] & 0xffff;
             break;
           case 2:
-            value = ((readReg8(src) << 24) >> 24) >>> 0;
+            value = ((simpleBlockReadReg8(regs, src) << 24) >> 24) >>> 0;
             break;
           case 3:
             value = (((regs[src] & 0xffff) << 16) >> 16) >>> 0;
@@ -2053,7 +2050,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         break;
       }
       case SIMPLE_BLOCK_OPS.SETCC_R8:
-        writeReg8(a >>> 0, evalJccConditionJs(b >>> 0, nextFlags) ? 1 : 0);
+        simpleBlockWriteReg8(regs, a >>> 0, evalJccConditionJs(b >>> 0, nextFlags) ? 1 : 0);
         break;
       case SIMPLE_BLOCK_OPS.BITSCAN_R32_R32: {
         const scan = bitScanJs(regs[b & 7] >>> 0, (c & 1) !== 0, 32);
@@ -2091,9 +2088,9 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         break;
       }
       case SIMPLE_BLOCK_OPS.XADD_R8_R8: {
-        const result = xaddWidthJs(readReg8(a), readReg8(b), 8, nextFlags);
-        writeReg8(a, result.dst & 0xff);
-        writeReg8(b, result.src & 0xff);
+        const result = xaddWidthJs(simpleBlockReadReg8(regs, a), simpleBlockReadReg8(regs, b), 8, nextFlags);
+        simpleBlockWriteReg8(regs, a, result.dst & 0xff);
+        simpleBlockWriteReg8(regs, b, result.src & 0xff);
         nextFlags = result.flags >>> 0;
         break;
       }
@@ -2221,7 +2218,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasReadMem32) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         regs[a & 7] = emu.readMem32(ea) >>> 0;
         break;
       }
@@ -2229,7 +2226,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasWriteMem32) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         emu.writeMem32(ea, regs[a & 7] >>> 0);
         break;
       }
@@ -2237,7 +2234,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasReadMem32) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         const rhs = emu.readMem32(ea) >>> 0;
         const alu = aluBinary32IntoJs(7, regs[a & 7] >>> 0, rhs >>> 0, nextFlags, aluScratch);
         nextFlags = alu.flags >>> 0;
@@ -2247,7 +2244,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasReadMem32 || !hasWriteMem32) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         const lhs = emu.readMem32(ea) >>> 0;
         const imm = (d << 24) >> 24;
         const alu = aluBinary32IntoJs(a >>> 0, lhs >>> 0, imm >>> 0, nextFlags, aluScratch);
@@ -2261,7 +2258,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasReadMem8 || !hasWriteMem8) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         const lhs = emu.readMem8(ea) & 0xff;
         const alu = aluBinary8IntoJs(a >>> 0, lhs >>> 0, d & 0xff, nextFlags, aluScratch);
         if ((a >>> 0) !== 7 && (a >>> 0) !== 8) {
@@ -2274,7 +2271,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasWriteMem8) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         emu.writeMem8(ea, d & 0xff);
         break;
       }
@@ -2282,7 +2279,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasReadMem8 || !hasWriteMem8) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         const value = emu.readMem8(ea) & 0xff;
         const op = a >>> 0;
         if (op === 0) {
@@ -2308,7 +2305,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasReadMem32 || !hasWriteMem32) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         const value = emu.readMem32(ea) >>> 0;
         const op = a >>> 0;
         if (op === 0) {
@@ -2327,7 +2324,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasReadMem32 || !hasWriteMem32) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         const lhs = emu.readMem32(ea) >>> 0;
         const alu = aluBinary32IntoJs(a >>> 0, lhs >>> 0, d >>> 0, nextFlags, aluScratch);
         if ((a >>> 0) !== 7 && (a >>> 0) !== 8) {
@@ -2337,13 +2334,13 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         break;
       }
       case SIMPLE_BLOCK_OPS.LEA_R32_MEM32:
-        regs[a & 7] = calcSimpleMem32Address(b >>> 0, c >>> 0) >>> 0;
+        regs[a & 7] = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0) >>> 0;
         break;
       case SIMPLE_BLOCK_OPS.ALU_MEM32_R32: {
         if (!hasReadMem32 || !hasWriteMem32) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         const lhs = emu.readMem32(ea) >>> 0;
         const alu = aluBinary32IntoJs(d >>> 0, lhs >>> 0, regs[a & 7] >>> 0, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
@@ -2356,7 +2353,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasReadMem32) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         const rhs = emu.readMem32(ea) >>> 0;
         const alu = aluBinary32IntoJs(d >>> 0, regs[a & 7] >>> 0, rhs >>> 0, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
@@ -2369,25 +2366,25 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasReadMem8) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
-        writeReg8(a & 7, emu.readMem8(ea) & 0xff);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
+        simpleBlockWriteReg8(regs, a & 7, emu.readMem8(ea) & 0xff);
         break;
       }
       case SIMPLE_BLOCK_OPS.MOV_MEM8_R8: {
         if (!hasWriteMem8) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
-        emu.writeMem8(ea, readReg8(a & 7) & 0xff);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
+        emu.writeMem8(ea, simpleBlockReadReg8(regs, a & 7) & 0xff);
         break;
       }
       case SIMPLE_BLOCK_OPS.ALU_MEM8_R8: {
         if (!hasReadMem8 || !hasWriteMem8) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         const lhs = emu.readMem8(ea) & 0xff;
-        const alu = aluBinary8IntoJs(d >>> 0, lhs >>> 0, readReg8(a & 7) & 0xff, nextFlags, aluScratch);
+        const alu = aluBinary8IntoJs(d >>> 0, lhs >>> 0, simpleBlockReadReg8(regs, a & 7) & 0xff, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
           emu.writeMem8(ea, alu.result & 0xff);
         }
@@ -2398,11 +2395,11 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasReadMem8) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         const rhs = emu.readMem8(ea) & 0xff;
-        const alu = aluBinary8IntoJs(d >>> 0, readReg8(a & 7) & 0xff, rhs >>> 0, nextFlags, aluScratch);
+        const alu = aluBinary8IntoJs(d >>> 0, simpleBlockReadReg8(regs, a & 7) & 0xff, rhs >>> 0, nextFlags, aluScratch);
         if ((d >>> 0) !== 7 && (d >>> 0) !== 8) {
-          writeReg8(a & 7, alu.result & 0xff);
+          simpleBlockWriteReg8(regs, a & 7, alu.result & 0xff);
         }
         nextFlags = alu.flags >>> 0;
         break;
@@ -2411,7 +2408,7 @@ function executeSimpleBlockJsFast(words, totalWords, regs, flags, emu) {
         if (!hasReadMem8) {
           return { ok: false, flags: flags >>> 0 };
         }
-        const ea = calcSimpleMem32Address(b >>> 0, c >>> 0);
+        const ea = simpleBlockCalcMem32Address(regs, b >>> 0, c >>> 0);
         let value = 0;
         switch (d & 3) {
           case 0:

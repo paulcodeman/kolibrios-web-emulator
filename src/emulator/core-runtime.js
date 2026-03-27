@@ -1240,9 +1240,21 @@
             push(SIMPLE_BLOCK_OPS.MOV_R32_IMM32, rm, imm, 0, 0);
             continue;
           }
+          if (opcode === 0xc6 && len === 3) {
+            const modrm = bytes[1] & 0xff;
+            const mod = (modrm >>> 6) & 3;
+            const regField = (modrm >>> 3) & 7;
+            const rm = modrm & 7;
+            if (mod !== 3 || regField !== 0) {
+              return null;
+            }
+            push(SIMPLE_BLOCK_OPS.MOV_R8_IMM8, rm, bytes[2] & 0xff, 0, 0);
+            continue;
+          }
           if (
             allowJsOnlyOps &&
             (
+              opcode === 0x00 ||
               opcode === 0x01 ||
               opcode === 0x02 ||
               opcode === 0x03 ||
@@ -1250,6 +1262,14 @@
               opcode === 0x09 ||
               opcode === 0x0a ||
               opcode === 0x0b ||
+              opcode === 0x10 ||
+              opcode === 0x11 ||
+              opcode === 0x12 ||
+              opcode === 0x13 ||
+              opcode === 0x18 ||
+              opcode === 0x19 ||
+              opcode === 0x1a ||
+              opcode === 0x1b ||
               opcode === 0x20 ||
               opcode === 0x21 ||
               opcode === 0x22 ||
@@ -1265,6 +1285,8 @@
               opcode === 0x38 ||
               opcode === 0x39 ||
               opcode === 0x3a ||
+              opcode === 0x84 ||
+              opcode === 0x85 ||
               opcode === 0x8b ||
               opcode === 0x88 ||
               opcode === 0x89 ||
@@ -1286,24 +1308,45 @@
               const aluOp =
                 (opcode === 0x01 || opcode === 0x03) ? 0
                   : ((opcode === 0x09 || opcode === 0x0b) ? 1
-                    : ((opcode === 0x21 || opcode === 0x23) ? 4
-                      : ((opcode === 0x29 || opcode === 0x2b) ? 5
-                        : ((opcode === 0x31 || opcode === 0x33) ? 6
-                          : ((opcode === 0x39 || opcode === 0x3b) ? 7 : -1)))));
+                    : ((opcode === 0x11 || opcode === 0x13) ? 2
+                      : ((opcode === 0x19 || opcode === 0x1b) ? 3
+                        : ((opcode === 0x21 || opcode === 0x23) ? 4
+                          : ((opcode === 0x29 || opcode === 0x2b) ? 5
+                            : ((opcode === 0x31 || opcode === 0x33) ? 6
+                              : ((opcode === 0x39 || opcode === 0x3b) ? 7
+                                : (opcode === 0x85 ? 8 : -1))))))));
               if (opcode === 0x8d && len === (1 + modrmInfo.size)) {
                 pushJsOnly(SIMPLE_BLOCK_OPS.LEA_R32_MEM32, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, 0);
                 continue;
               }
               if (
                 len === (1 + modrmInfo.size) &&
-                (opcode === 0x01 || opcode === 0x09 || opcode === 0x21 || opcode === 0x29 || opcode === 0x31 || opcode === 0x39)
+                (
+                  opcode === 0x01 ||
+                  opcode === 0x09 ||
+                  opcode === 0x11 ||
+                  opcode === 0x19 ||
+                  opcode === 0x21 ||
+                  opcode === 0x29 ||
+                  opcode === 0x31 ||
+                  opcode === 0x39 ||
+                  opcode === 0x85
+                )
               ) {
                 pushJsOnly(SIMPLE_BLOCK_OPS.ALU_MEM32_R32, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, aluOp);
                 continue;
               }
               if (
                 len === (1 + modrmInfo.size) &&
-                (opcode === 0x03 || opcode === 0x0b || opcode === 0x23 || opcode === 0x2b || opcode === 0x33)
+                (
+                  opcode === 0x03 ||
+                  opcode === 0x0b ||
+                  opcode === 0x13 ||
+                  opcode === 0x1b ||
+                  opcode === 0x23 ||
+                  opcode === 0x2b ||
+                  opcode === 0x33
+                )
               ) {
                 pushJsOnly(SIMPLE_BLOCK_OPS.ALU_R32_MEM32, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, aluOp);
                 continue;
@@ -1311,10 +1354,13 @@
               const byteAluOp =
                 (opcode === 0x00 || opcode === 0x02) ? 0
                   : ((opcode === 0x08 || opcode === 0x0a) ? 1
-                    : ((opcode === 0x20 || opcode === 0x22) ? 4
-                      : ((opcode === 0x28 || opcode === 0x2a) ? 5
-                        : ((opcode === 0x30 || opcode === 0x32) ? 6
-                          : ((opcode === 0x38 || opcode === 0x3a) ? 7 : -1)))));
+                    : ((opcode === 0x10 || opcode === 0x12) ? 2
+                      : ((opcode === 0x18 || opcode === 0x1a) ? 3
+                        : ((opcode === 0x20 || opcode === 0x22) ? 4
+                          : ((opcode === 0x28 || opcode === 0x2a) ? 5
+                            : ((opcode === 0x30 || opcode === 0x32) ? 6
+                              : ((opcode === 0x38 || opcode === 0x3a) ? 7
+                                : (opcode === 0x84 ? 8 : -1))))))));
               if (opcode === 0x88 && len === (1 + modrmInfo.size)) {
                 pushJsOnly(SIMPLE_BLOCK_OPS.MOV_MEM8_R8, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, 0);
                 continue;
@@ -1325,14 +1371,33 @@
               }
               if (
                 len === (1 + modrmInfo.size) &&
-                (opcode === 0x00 || opcode === 0x08 || opcode === 0x20 || opcode === 0x28 || opcode === 0x30 || opcode === 0x38)
+                (
+                  opcode === 0x00 ||
+                  opcode === 0x08 ||
+                  opcode === 0x10 ||
+                  opcode === 0x18 ||
+                  opcode === 0x20 ||
+                  opcode === 0x28 ||
+                  opcode === 0x30 ||
+                  opcode === 0x38 ||
+                  opcode === 0x84
+                )
               ) {
                 pushJsOnly(SIMPLE_BLOCK_OPS.ALU_MEM8_R8, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, byteAluOp);
                 continue;
               }
               if (
                 len === (1 + modrmInfo.size) &&
-                (opcode === 0x02 || opcode === 0x0a || opcode === 0x22 || opcode === 0x2a || opcode === 0x32 || opcode === 0x3a)
+                (
+                  opcode === 0x02 ||
+                  opcode === 0x0a ||
+                  opcode === 0x12 ||
+                  opcode === 0x1a ||
+                  opcode === 0x22 ||
+                  opcode === 0x2a ||
+                  opcode === 0x32 ||
+                  opcode === 0x3a
+                )
               ) {
                 pushJsOnly(SIMPLE_BLOCK_OPS.ALU_R8_MEM8, modrmInfo.reg & 7, packedMem, modrmInfo.disp >>> 0, byteAluOp);
                 continue;

@@ -1648,11 +1648,11 @@ try {
   assertEq(jsGenericSingleEntryBlock.builtFirst, 1, "js generic hot single-entry scenario should execute one instruction on first build");
   assertEq(jsGenericSingleEntryBlock.builtSecond, 1, "js generic hot single-entry scenario should execute one instruction on second build");
   assert(jsGenericSingleEntryBlock.hasBlock, "js generic hot single-entry scenario should promote a cached block after warming");
-  assert(!jsGenericSingleEntryBlock.hasSimplePlan, "js generic hot single-entry scenario should stay on the generic cached-block path");
+  assert(jsGenericSingleEntryBlock.hasSimplePlan, "js generic hot single-entry scenario should now compile a simple plan");
   assertEq(jsGenericSingleEntryBlock.cached, 1, "js generic hot single-entry cached block should replay the single instruction");
   assert(wasmGenericSingleEntryBlock.hasBlock, "wasm generic hot single-entry scenario should promote a cached block after warming");
-  assert(!wasmGenericSingleEntryBlock.hasSimplePlan, "wasm generic hot single-entry scenario should stay on the generic cached-block path");
-  assert(!wasmGenericSingleEntryBlock.hasPreparedPlan, "wasm generic hot single-entry scenario should not allocate a prepared simple plan");
+  assert(wasmGenericSingleEntryBlock.hasSimplePlan, "wasm generic hot single-entry scenario should now compile a simple plan");
+  assert(wasmGenericSingleEntryBlock.hasPreparedPlan, "wasm generic hot single-entry scenario should allocate a prepared simple plan");
   assertEq(wasmGenericSingleEntryBlock.cached, 1, "wasm generic hot single-entry cached block should replay the single instruction");
   assertDeepEq(wasmGenericSingleEntryBlock.linearState, jsGenericSingleEntryBlock.linearState, "generic hot single-entry linear execution should match between js and wasm");
   assertDeepEq(wasmGenericSingleEntryBlock.cachedState, jsGenericSingleEntryBlock.cachedState, "generic hot single-entry cached replay should match between js and wasm");
