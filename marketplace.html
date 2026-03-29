@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KolibriOS Marketplace</title>
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body class="storage-page">
+    <div id="app" class="storage-app">
+      <div id="screenPanel" class="storage-screen-panel">
+        <div class="workspace storage-workspace" id="workspace">
+          <div class="workspace-empty" id="workspaceEmpty" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <aside class="storage-overlay">
+        <section class="card storage-hero">
+          <div class="card-title">Marketplace</div>
+          <div class="storage-hero-title">Приложения KolibriOS</div>
+          <p class="storage-hero-text">Выбирайте приложение, скачивайте бинарник или запускайте его прямо из браузера.</p>
+        </section>
+
+        <section class="storage-catalog" id="storageCatalog"></section>
+
+        <div class="storage-hidden-ui" aria-hidden="true">
+          <div class="status" id="status">Подготовка каталога...</div>
+          <input id="fileInput" type="file" accept=".kex,.bin,.com" tabindex="-1" />
+          <button id="pickRootBtn" type="button" tabindex="-1">Pick FS Root</button>
+          <button id="clearRootBtn" type="button" tabindex="-1">Clear FS Root</button>
+          <button id="runBtn" type="button" tabindex="-1">Run</button>
+          <button id="stopBtn" type="button" tabindex="-1">Stop</button>
+          <label><input id="traceSyscalls" type="checkbox" tabindex="-1" /></label>
+          <label><input id="traceImages" type="checkbox" tabindex="-1" /></label>
+          <label><input id="traceOpcodes" type="checkbox" tabindex="-1" /></label>
+          <div id="fsRootStatus">FS root: preparing...</div>
+          <div id="sessionInfo">Session idle</div>
+          <pre id="info">No image loaded.</pre>
+          <pre id="log">Ready.</pre>
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      window.KosEmuPageConfig = {
+        skipPersistedRootRestore: true
+      };
+    </script>
+    <script src="src/boot.js"></script>
+    <script src="src/vendor/lzma_worker-min.js"></script>
+    <script src="src/vendor/fflate-umd.js"></script>
+    <script src="src/core/utils.js"></script>
+    <script src="src/core/loader.js"></script>
+    <script src="src/gfx/text.js"></script>
+    <script src="src/gfx/kolibri-font-assets.js"></script>
+    <script src="src/gfx/kolibri-font.js"></script>
+    <script src="src/gfx/kolibri-skin-assets.js"></script>
+    <script src="src/gfx/kolibri-skin.js"></script>
+    <script src="src/gfx/surface.js"></script>
+    <script src="src/emulator/core-access.js"></script>
+    <script src="src/emulator/host-libs/registry.js"></script>
+    <script src="src/emulator/host-libs/http.obj.js"></script>
+    <script src="src/emulator/host-libs/cnv_png.obj.js"></script>
+    <script src="src/emulator/host-libs/libimg.obj.js"></script>
+    <script src="src/emulator/host-libs/libini.obj.js"></script>
+    <script src="src/emulator/host-libs/runtime.js"></script>
+    <script src="src/emulator/emulator-host.js"></script>
+    <script src="src/emulator/core-runtime.js"></script>
+    <script src="src/emulator/core-execute.js"></script>
+    <script src="src/emulator/emulator-syscalls.js"></script>
+    <script src="src/emulator/wasm-cpu.generated.js"></script>
+    <script src="src/emulator/wasm-cpu-runtime.js"></script>
+    <script src="src/emulator/emulator.js"></script>
+    <script src="src/ui/browser-fs.js"></script>
+    <script src="src/ui/app-ui.js"></script>
+    <script src="src/ui/builtin-root.js"></script>
+    <script src="src/ui/session-shared.js"></script>
+    <script src="src/ui/session-manager.js"></script>
+    <script src="assets_kolibrios/builtin-root.js"></script>
+    <script src="src/app.js"></script>
+    <script src="src/ui/storage-page.js"></script>
+  </body>
+</html>

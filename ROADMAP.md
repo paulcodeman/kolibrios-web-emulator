@@ -51,6 +51,7 @@ Goal: Run KolibriOS 32-bit .kex apps in the browser using a JS x86 interpreter a
 - Add browser-style keyboard/scancode regression scenarios, including extended keys and key-release handling.
 - Add a host-side session/workspace manager with one emulator instance per app window, shared FS/IPC services, and process syscalls that can grow into a near-real Kolibri desktop session.
 - Add a bundled read-only Kolibri root plus a dedicated `launcher.html` desktop page so the browser build can boot straight into `LAUNCHER` out of the box.
+- Add a dedicated `marketplace.html` catalog page on top of the same workspace/session manager so bundled apps can be browsed, downloaded, and launched directly from the browser UI.
 - Add regression tests and golden screenshots.
 - Add debugging tools (register view, memory dump, syscall trace).
 
