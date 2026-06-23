@@ -3541,27 +3541,21 @@
         return false;
       }
       const surface = this.desktopSurface;
+      const sw = surface.width | 0;
+      const sh = surface.height | 0;
+      const dstBuf = surface.buffer32;
+      const src32 = new Uint32Array(data.buffer, data.byteOffset, data.byteLength >>> 2);
+
       for (let py = 0; py < drawHeight; py += 1) {
         const ty = dstY + py;
-        if (ty < 0 || ty >= (surface.height | 0)) {
-          continue;
-        }
-        const srcRow = py * drawWidth;
-        const dstRow = ty * (surface.width | 0);
-        for (let px = 0; px < drawWidth; px += 1) {
-          const tx = dstX + px;
-          if (tx < 0 || tx >= (surface.width | 0)) {
-            continue;
-          }
-          const base = ((srcRow + px) * 4) | 0;
-          const alpha = data[base + 3] & 0xff;
-          if (!alpha) {
-            continue;
-          }
-          const b = data[base] & 0xff;
-          const g = data[base + 1] & 0xff;
-          const r = data[base + 2] & 0xff;
-          surface.buffer32[dstRow + tx] = packCanvasColor(((r << 16) | (g << 8) | b) >>> 0, 255);
+        if (ty < 0 || ty >= sh) continue;
+        const srcOff = py * drawWidth;
+        const dstOff = ty * sw + dstX;
+        const rowEnd = Math.min(drawWidth, sw - dstX);
+        for (let px = 0; px < rowEnd; px += 1) {
+          const p = src32[srcOff + px];
+          if (!(p >>> 24)) continue;
+          dstBuf[dstOff + px] = ((p & 0x000000ff) << 16) | (p & 0x0000ff00) | ((p & 0x00ff0000) >>> 16) | 0xff000000;
         }
       }
       this.presentDesktopSurface();

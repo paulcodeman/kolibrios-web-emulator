@@ -610,49 +610,41 @@
       },
 
       readMemFloat32(addr) {
-        if (!this.cpu) {
-          return 0;
-        }
+        const cpu = this.cpu;
+        if (!cpu) return 0;
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, 4)) {
-          return 0;
-        }
-        return this.cpu.view.getFloat32(start, true);
+        const len = cpu.mem.length >>> 0;
+        if ((start + 4) > len && !this.checkInterpreterMem(start, 4)) return 0;
+        return cpu.view.getFloat32(start, true);
       },
 
       readMemFloat64(addr) {
-        if (!this.cpu) {
-          return 0;
-        }
+        const cpu = this.cpu;
+        if (!cpu) return 0;
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, 8)) {
-          return 0;
-        }
-        return this.cpu.view.getFloat64(start, true);
+        const len = cpu.mem.length >>> 0;
+        if ((start + 8) > len && !this.checkInterpreterMem(start, 8)) return 0;
+        return cpu.view.getFloat64(start, true);
       },
 
       writeMemFloat32(addr, value) {
-        if (!this.cpu) {
-          return;
-        }
+        const cpu = this.cpu;
+        if (!cpu) return;
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, 4)) {
-          return;
-        }
+        const len = cpu.mem.length >>> 0;
+        if ((start + 4) > len && !this.checkInterpreterMem(start, 4)) return;
         this.invalidateBasicBlocksForWrite(start, 4);
-        this.cpu.view.setFloat32(start, value, true);
+        cpu.view.setFloat32(start, value, true);
       },
 
       writeMemFloat64(addr, value) {
-        if (!this.cpu) {
-          return;
-        }
+        const cpu = this.cpu;
+        if (!cpu) return;
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, 8)) {
-          return;
-        }
+        const len = cpu.mem.length >>> 0;
+        if ((start + 8) > len && !this.checkInterpreterMem(start, 8)) return;
         this.invalidateBasicBlocksForWrite(start, 8);
-        this.cpu.view.setFloat64(start, value, true);
+        cpu.view.setFloat64(start, value, true);
       },
 
       readMem16(addr) {

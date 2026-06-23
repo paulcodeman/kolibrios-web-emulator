@@ -3563,7 +3563,7 @@ class Emulator {
     this.lastSyscall = null;
     this.unknownSyscalls = new Set();
     this.cpu = null;
-    this.eventQueue = [];
+    this.queuedEventBits = 0;
     this.eventMask = 0x7;
     this.lastTimerEventAt = 0;
     this.tscBase = 0;
@@ -3798,10 +3798,10 @@ class Emulator {
   }
 
   resetEventState(queueInitialRedraw) {
-    this.eventQueue.length = 0;
+    this.queuedEventBits = 0;
     this.eventMask = 0x7;
     if (queueInitialRedraw) {
-      this.eventQueue.push(1);
+      this.queuedEventBits |= 1;
     }
     this.lastTimerEventAt = 0;
   }

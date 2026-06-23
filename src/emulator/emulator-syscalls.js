@@ -604,6 +604,82 @@
     }
   }
 
+  const SYSCALL_TABLE = (() => {
+    const names = [
+      'sysCreateWindow',          // 0
+      'sysPutPixel',              // 1
+      'sysGetKey',                // 2
+      'sysGetTime',               // 3
+      'sysDrawText',              // 4
+      'sysSleep',                 // 5
+      null,                       // 6
+      'sysDrawImage',             // 7
+      'sysDefineButton',          // 8
+      'sysThreadInfo',            // 9
+      'sysWaitEvent',             // 10
+      'sysCheckEvent',            // 11
+      'sysRedraw',                // 12
+      'sysDrawRect',              // 13
+      'sysScreenSize',            // 14
+      'sysBackground',            // 15
+      'sysSaveRamdiskFloppy',     // 16
+      'sysGetButton',             // 17
+      'sysSystem',                // 18
+      null, null,                 // 19, 20
+      'sysSystemSet',             // 21
+      'sysSetTimeDate',           // 22
+      'sysWaitEventTimeout',      // 23
+      'sysCdDrive',               // 24
+      'sysScreenPutImage',        // 25
+      'sysSystemInfo',            // 26
+      null, null,                 // 27, 28
+      'sysGetDate',               // 29
+      'sysCurrentFolder',         // 30
+      null, null, null,           // 31, 32, 33
+      'sysPixelOwner',            // 34
+      'sysPixelColor',            // 35
+      'sysGetImage',              // 36
+      'sysMouse',                 // 37
+      'sysDrawLine',              // 38
+      'sysBackgroundGet',         // 39
+      'sysSetEventMask',          // 40
+      null, null, null, null, null, // 41-45
+      'sysSetPorts',              // 46
+      'sysDrawNumber',            // 47
+      'sysStyleSettings',         // 48
+      'sysApm',                   // 49
+      'sysSetWindowShape',        // 50
+      'sysThreadControl',         // 51
+      null, null,                 // 52, 53
+      'sysClipboard',             // 54
+      'sysSpeakerPlay',           // 55
+      null,                       // 56
+      'sysPciBios',               // 57
+      null, null,                 // 58, 59
+      'sysIpc',                   // 60
+      'sysDirectGraphicsParams',  // 61
+      'sysPci',                   // 62
+      'sysDebugBoard',            // 63
+      'sysResizeApplicationMemory', // 64
+      'sysDrawImagePalette',      // 65
+      'sysKeyboard',              // 66
+      'sysChangeWindowGeometry',  // 67
+      'sysSysMisc',               // 68
+      'sysDebug',                 // 69
+      'sysFile',                  // 70
+      'sysSetCaption',            // 71
+      'sysSendWindowMessage',     // 72
+      'sysBlitBitmap',            // 73
+      'sysNetworkGet',            // 74
+      'sysNetworkSocket',         // 75
+      'sysNetworkProtocol',       // 76
+      'sysFutex',                 // 77
+      null, null,                 // 78, 79
+      'sysFileEncoded',           // 80
+    ];
+    return names;
+  })();
+
   function installEmulatorSyscalls(Emulator, shared) {
     if (!Emulator || !Emulator.prototype) {
       throw new Error("installEmulatorSyscalls requires an Emulator class.");
@@ -623,223 +699,25 @@
     Object.assign(Emulator.prototype, {
       handleSyscall() {
         const eax = this.readReg(REG.EAX) >>> 0;
-        const ebx = this.readReg(REG.EBX) >>> 0;
-        const ecx = this.readReg(REG.ECX) >>> 0;
-        const edx = this.readReg(REG.EDX) >>> 0;
-        const esi = this.readReg(REG.ESI) >>> 0;
-        const edi = this.readReg(REG.EDI) >>> 0;
-        const sc = this.lastSyscall || (this.lastSyscall = {
-          eax: 0,
-          ebx: 0,
-          ecx: 0,
-          edx: 0,
-          esi: 0,
-          edi: 0
-        });
-        sc.eax = eax;
-        sc.ebx = ebx;
-        sc.ecx = ecx;
-        sc.edx = edx;
-        sc.esi = esi;
-        sc.edi = edi;
+        this.lastSyscall = eax;
         if (this.traceSyscalls) {
+          const ebx = this.readReg(REG.EBX) >>> 0;
+          const ecx = this.readReg(REG.ECX) >>> 0;
+          const edx = this.readReg(REG.EDX) >>> 0;
           this.log(
-            `syscall ${eax} ebx=0x${sc.ebx.toString(16)} ecx=0x${sc.ecx.toString(16)} edx=0x${sc.edx.toString(16)}`
+            `syscall ${eax} ebx=0x${ebx.toString(16)} ecx=0x${ecx.toString(16)} edx=0x${edx.toString(16)}`
           );
         }
-        switch (eax) {
-          case 0:
-            this.sysCreateWindow();
-            break;
-          case 1:
-            this.sysPutPixel();
-            break;
-          case 2:
-            this.sysGetKey();
-            break;
-          case 3:
-            this.sysGetTime();
-            break;
-          case 5:
-            this.sysSleep();
-            break;
-          case 4:
-            this.sysDrawText();
-            break;
-          case 7:
-            this.sysDrawImage();
-            break;
-          case 8:
-            this.sysDefineButton();
-            break;
-          case 9:
-            this.sysThreadInfo();
-            break;
-          case 11:
-            this.sysCheckEvent();
-            break;
-          case 23:
-            this.sysWaitEventTimeout();
-            break;
-          case 40:
-            this.sysSetEventMask();
-            break;
-          case 10:
-            this.sysWaitEvent();
-            break;
-          case 12:
-            this.sysRedraw();
-            break;
-          case 17:
-            this.sysGetButton();
-            break;
-          case 13:
-            this.sysDrawRect();
-            break;
-          case 14:
-            this.sysScreenSize();
-            break;
-          case 15:
-            this.sysBackground();
-            break;
-          case 16:
-            this.sysSaveRamdiskFloppy();
-            break;
-          case 18:
-            this.sysSystem();
-            break;
-          case 21:
-            this.sysSystemSet();
-            break;
-          case 22:
-            this.sysSetTimeDate();
-            break;
-          case 24:
-            this.sysCdDrive();
-            break;
-          case 25:
-            this.sysScreenPutImage();
-            break;
-          case 26:
-            this.sysSystemInfo();
-            break;
-          case 29:
-            this.sysGetDate();
-            break;
-          case 30:
-            this.sysCurrentFolder();
-            break;
-          case 34:
-            this.sysPixelOwner();
-            break;
-          case 35:
-            this.sysPixelColor();
-            break;
-          case 36:
-            this.sysGetImage();
-            break;
-          case 37:
-            this.sysMouse();
-            break;
-          case 38:
-            this.sysDrawLine();
-            break;
-          case 39:
-            this.sysBackgroundGet();
-            break;
-          case 46:
-            this.sysSetPorts();
-            break;
-          case 47:
-            this.sysDrawNumber();
-            break;
-          case 49:
-            this.sysApm();
-            break;
-          case 65:
-            this.sysDrawImagePalette();
-            break;
-          case 66:
-            this.sysKeyboard();
-            break;
-          case 67:
-            this.sysChangeWindowGeometry();
-            break;
-          case 68:
-            this.sysSysMisc();
-            break;
-          case 48:
-            this.sysStyleSettings();
-            break;
-          case 50:
-            this.sysSetWindowShape();
-            break;
-          case 51:
-            this.sysThreadControl();
-            break;
-          case 54:
-            this.sysClipboard();
-            break;
-          case 55:
-            this.sysSpeakerPlay();
-            break;
-          case 57:
-            this.sysPciBios();
-            break;
-          case 60:
-            this.sysIpc();
-            break;
-          case 61:
-            this.sysDirectGraphicsParams();
-            break;
-          case 62:
-            this.sysPci();
-            break;
-          case 63:
-            this.sysDebugBoard();
-            break;
-          case 64:
-            this.sysResizeApplicationMemory();
-            break;
-          case 69:
-            this.sysDebug();
-            break;
-          case 70:
-            this.sysFile();
-            break;
-          case 71:
-            this.sysSetCaption();
-            break;
-          case 72:
-            this.sysSendWindowMessage();
-            break;
-          case 73:
-            this.sysBlitBitmap();
-            break;
-          case 74:
-            this.sysNetworkGet();
-            break;
-          case 75:
-            this.sysNetworkSocket();
-            break;
-          case 76:
-            this.sysNetworkProtocol();
-            break;
-          case 77:
-            this.sysFutex();
-            break;
-          case 80:
-            this.sysFileEncoded();
-            break;
-          case 0xffffffff:
-            this.sysTerminate();
-            break;
-          default:
-            if (!this.unknownSyscalls.has(eax)) {
-              this.unknownSyscalls.add(eax);
-              this.log(`Unhandled syscall ${eax}`);
-            }
-            break;
+        const fnName = SYSCALL_TABLE[eax];
+        if (fnName) {
+          this[fnName]();
+        } else if (eax === 0xffffffff) {
+          this.sysTerminate();
+        } else {
+          if (!this.unknownSyscalls.has(eax)) {
+            this.unknownSyscalls.add(eax);
+            this.log(`Unhandled syscall ${eax}`);
+          }
         }
       },
 
@@ -6223,7 +6101,8 @@
           }
           const ptr = block.ptr >>> 0;
           if ((block.size >>> 0) === requestSize) {
-            blocks.splice(i, 1);
+            const last = blocks.pop();
+            if (i < blocks.length) blocks[i] = last;
           } else {
             block.ptr = ((block.ptr >>> 0) + requestSize) >>> 0;
             block.size = ((block.size >>> 0) - requestSize) >>> 0;
@@ -6260,34 +6139,33 @@
         if (!start || !blockSize) {
           return;
         }
-        if (!Array.isArray(this.heapFreeBlocks)) {
-          this.heapFreeBlocks = [];
-        }
-        const blocks = this.heapFreeBlocks;
-        let nextStart = start >>> 0;
+        const blocks = Array.isArray(this.heapFreeBlocks) ? this.heapFreeBlocks : (this.heapFreeBlocks = []);
+        let nextStart = start;
         let nextEnd = (start + blockSize) >>> 0;
-        let insertAt = blocks.length;
+        let insertAt = -1;
+        const merged = new Array(blocks.length);
+        let outLen = 0;
         for (let i = 0; i < blocks.length; i += 1) {
           const block = blocks[i];
           const blockStart = block.ptr >>> 0;
           const blockEnd = (blockStart + (block.size >>> 0)) >>> 0;
           if (nextEnd < blockStart) {
-            insertAt = i;
-            break;
+            if (insertAt < 0) insertAt = outLen;
+            merged[outLen++] = block;
+          } else if (nextStart > blockEnd) {
+            merged[outLen++] = block;
+          } else {
+            nextStart = Math.min(nextStart, blockStart) >>> 0;
+            nextEnd = Math.max(nextEnd, blockEnd) >>> 0;
           }
-          if (nextStart > blockEnd) {
-            continue;
-          }
-          nextStart = Math.min(nextStart, blockStart) >>> 0;
-          nextEnd = Math.max(nextEnd, blockEnd) >>> 0;
-          blocks.splice(i, 1);
-          i -= 1;
-          insertAt = i + 1;
         }
-        blocks.splice(insertAt, 0, {
-          ptr: nextStart >>> 0,
-          size: (nextEnd - nextStart) >>> 0
-        });
+        if (insertAt < 0) insertAt = outLen;
+        for (let i = outLen; i > insertAt; i -= 1) {
+          merged[i] = merged[i - 1];
+        }
+        merged[insertAt] = { ptr: nextStart >>> 0, size: (nextEnd - nextStart) >>> 0 };
+        merged.length = outLen + 1;
+        this.heapFreeBlocks = merged;
         this.heapReleaseTailFreeBlocks();
       },
 
@@ -6453,15 +6331,9 @@
       },
 
       queueEvent(eventId) {
-        if (!eventId) {
-          return;
+        if (eventId) {
+          this.queuedEventBits |= 1 << (eventId - 1);
         }
-        for (let i = 0; i < this.eventQueue.length; i += 1) {
-          if ((this.eventQueue[i] | 0) === (eventId | 0)) {
-            return;
-          }
-        }
-        this.eventQueue.push(eventId);
       },
 
       isPersistentBufferedEvent(eventId) {
@@ -6469,15 +6341,8 @@
       },
 
       hasQueuedEvent(eventId) {
-        if (!eventId || !this.eventQueue.length) {
-          return false;
-        }
-        for (let i = 0; i < this.eventQueue.length; i += 1) {
-          if ((this.eventQueue[i] | 0) === (eventId | 0)) {
-            return true;
-          }
-        }
-        return false;
+        if (!eventId) return false;
+        return (this.queuedEventBits >>> (eventId - 1)) & 1;
       },
 
       getNextQueuedEventId() {
@@ -6498,22 +6363,15 @@
           }
           return eventId;
         }
-        for (let i = 0; i < this.eventQueue.length; i += 1) {
-          const eventId = this.eventQueue[i] | 0;
-          if (eventId === 4) {
-            continue;
-          }
-          if (eventId === 2 && !this.hasPendingKeyEvent()) {
-            continue;
-          }
-          if (eventId === 3 && !this.hasPendingButtonEvent()) {
-            continue;
-          }
-          if (eventId === 6 && !this.hasPendingMouseEvent()) {
-            continue;
-          }
-          if (this.isEventAllowed(eventId)) {
-            return eventId;
+        let bits = this.queuedEventBits & ~0x1ff; // clear bits for events 1-9
+        if (bits) {
+          const eventId = 31 - Math.clz32(bits);
+          if (eventId !== 4 && this.isEventAllowed(eventId)) {
+            if (!(eventId === 2 && !this.hasPendingKeyEvent()) &&
+                !(eventId === 3 && !this.hasPendingButtonEvent()) &&
+                !(eventId === 6 && !this.hasPendingMouseEvent())) {
+              return eventId;
+            }
           }
         }
         return 0;

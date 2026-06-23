@@ -718,13 +718,8 @@
       },
 
       removeQueuedEvent(eventId) {
-        if (!eventId || !this.eventQueue.length) {
-          return;
-        }
-        for (let i = this.eventQueue.length - 1; i >= 0; i -= 1) {
-          if (this.eventQueue[i] === eventId) {
-            this.eventQueue.splice(i, 1);
-          }
+        if (eventId) {
+          this.queuedEventBits &= ~(1 << (eventId - 1));
         }
       },
 
@@ -1771,15 +1766,15 @@
       },
 
       readCString(addr, maxLen) {
-        const start = addr >>> 0;
-        const limit = maxLen || 512;
+        const len = maxLen || 512;
+        const bytes = this.readMemBlock(addr >>> 0, len);
+        if (!bytes) return "";
+        const nullAt = bytes.indexOf(0);
+        const end = nullAt >= 0 ? nullAt : len;
+        if (!end) return "";
         let out = "";
-        for (let i = 0; i < limit; i += 1) {
-          const b = this.readMem8((start + i) >>> 0);
-          if (b === 0) {
-            break;
-          }
-          out += String.fromCharCode(b);
+        for (let i = 0; i < end; i += 1) {
+          out += String.fromCharCode(bytes[i]);
         }
         return out;
       },
