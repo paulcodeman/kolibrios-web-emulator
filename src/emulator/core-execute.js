@@ -353,7 +353,7 @@
             this.fpuCompareValues(st0, 0.0);
           } else if (stIndex === 5) { // fxam
             const fpu = this.cpu ? this.cpu : null;
-            const val = fpu && stIndex < fpu.fpuSize ? fpu.fpu[0] : NaN;
+            const val = fpu && fpu.fpuSize > 0 ? fpu.fpu[fpu.fpuTop | 0] : NaN;
             let c3 = 0, c2 = 0, c0 = 0, c1 = 0;
             if (!fpu || fpu.fpuSize === 0) {
               c3 = 1; c0 = 1; // empty
@@ -403,47 +403,12 @@
             const st1 = this.fpuGet(1);
             this.fpuSet(1, x87Atan2(st1, st0));
             this.fpuPop();
-          } else if (stIndex === 6) { // fdecstp
-            const fpu = this.cpu;
-            const size = fpu ? (fpu.fpuSize | 0) : 0;
-            if (size >= 2) {
-              const tmp = fpu.fpu[0];
-              for (let i = 0; i < size - 1; i += 1) {
-                fpu.fpu[i] = fpu.fpu[i + 1];
-              }
-              fpu.fpu[size - 1] = tmp;
-            }
-          } else if (stIndex === 7) { // fincstp
-            const fpu = this.cpu;
-            const size = fpu ? (fpu.fpuSize | 0) : 0;
-            if (size >= 2) {
-              const tmp = fpu.fpu[size - 1];
-              for (let i = size - 1; i > 0; i -= 1) {
-                fpu.fpu[i] = fpu.fpu[i - 1];
-              }
-              fpu.fpu[0] = tmp;
-            }
-          }
-        } else if (reg === 6) {
-          const st0 = this.fpuPeek();
-          if (stIndex === 0) {
-            this.fpuSet(0, x87F2xm1(st0));
-          } else if (stIndex === 1) {
-            const st1 = this.fpuGet(1);
-            this.fpuSet(1, x87Fyl2x(st1, st0));
-            this.fpuPop();
-          } else if (stIndex === 2) {
-            this.fpuSet(0, x87Tan(st0));
-            this.fpuPush(1.0);
-          } else if (stIndex === 3) {
-            const st1 = this.fpuGet(1);
-            this.fpuSet(1, x87Atan2(st1, st0));
-            this.fpuPop();
           } else if (stIndex === 4) { // fxtract
             const fpu = this.cpu;
             const size = fpu ? (fpu.fpuSize | 0) : 0;
             if (size >= 1) {
-              const val = fpu.fpu[0];
+              const top = fpu.fpuTop | 0;
+              const val = fpu.fpu[top];
               let exponent;
               let significand;
               if (val === 0) {
@@ -454,9 +419,10 @@
                 exponent = Math.floor(Math.log2(absVal));
                 significand = val / Math.pow(2, exponent);
               }
-              fpu.fpu[0] = significand;
+              fpu.fpu[top] = significand;
               if (size < 8) {
-                fpu.fpu[size] = exponent;
+                const nextSlot = (top + size) & 7;
+                fpu.fpu[nextSlot] = exponent;
                 fpu.fpuSize = size + 1;
               }
             }
@@ -464,22 +430,12 @@
             const st1 = this.fpuGet(1);
             this.fpuSet(0, x87Fprem1(st0, st1));
           } else if (stIndex === 6) { // fdecstp
-            const size = this.cpu ? (this.cpu.fpuSize | 0) : 0;
-            if (size >= 2) {
-              const tmp = this.cpu.fpu[0];
-              for (let i = 0; i < size - 1; i += 1) {
-                this.cpu.fpu[i] = this.cpu.fpu[i + 1];
-              }
-              this.cpu.fpu[size - 1] = tmp;
+            if (this.cpu) {
+              this.cpu.fpuTop = (this.cpu.fpuTop + 7) & 7;
             }
           } else if (stIndex === 7) { // fincstp
-            const size = this.cpu ? (this.cpu.fpuSize | 0) : 0;
-            if (size >= 2) {
-              const tmp = this.cpu.fpu[size - 1];
-              for (let i = size - 1; i > 0; i -= 1) {
-                this.cpu.fpu[i] = this.cpu.fpu[i - 1];
-              }
-              this.cpu.fpu[0] = tmp;
+            if (this.cpu) {
+              this.cpu.fpuTop = (this.cpu.fpuTop + 1) & 7;
             }
           }
         } else if (reg === 7) {
@@ -936,6 +892,7 @@
         }
         this.cpu.fpu.fill(0);
         this.cpu.fpuSize = 0;
+        this.cpu.fpuTop = 0;
         this.cpu.fpuStatusWord = 0;
       },
 
@@ -950,7 +907,8 @@
         if (idx >= this.cpu.fpuSize) {
           return 0;
         }
-        return this.cpu.fpu[idx];
+        const slot = (this.cpu.fpuTop + idx) & 7;
+        return this.cpu.fpu[slot];
       },
 
       fpuSet(index, value) {
@@ -961,11 +919,12 @@
         if (idx < 0 || idx >= 8) {
           return;
         }
-        this.cpu.fpu[idx] = Number(value) || 0;
+        const slot = (this.cpu.fpuTop + idx) & 7;
+        this.cpu.fpu[slot] = Number(value) || 0;
         if (idx >= this.cpu.fpuSize) {
           const size = this.cpu.fpuSize | 0;
           for (let i = size; i < idx; i += 1) {
-            this.cpu.fpu[i] = 0;
+            this.cpu.fpu[(this.cpu.fpuTop + i) & 7] = 0;
           }
           this.cpu.fpuSize = Math.min(8, idx + 1);
         }
@@ -980,9 +939,11 @@
           return;
         }
         const fpu = this.cpu.fpu;
-        const tmp = fpu[0];
-        fpu[0] = fpu[idx];
-        fpu[idx] = tmp;
+        const top = this.cpu.fpuTop | 0;
+        const slot = (top + idx) & 7;
+        const tmp = fpu[top];
+        fpu[top] = fpu[slot];
+        fpu[slot] = tmp;
       },
 
       fpuPush(value) {
@@ -990,13 +951,10 @@
           return;
         }
         const fpu = this.cpu.fpu;
-        const size = Math.min(8, this.cpu.fpuSize | 0);
+        const size = this.cpu.fpuSize | 0;
         const v = Number(value) || 0;
-        const max = Math.min(size, 7);
-        for (let i = max; i > 0; i -= 1) {
-          fpu[i] = fpu[i - 1];
-        }
-        fpu[0] = v;
+        this.cpu.fpuTop = (this.cpu.fpuTop + 7) & 7;
+        fpu[this.cpu.fpuTop] = v;
         this.cpu.fpuSize = size < 8 ? (size + 1) : 8;
       },
 
@@ -1009,11 +967,10 @@
           return 0;
         }
         const fpu = this.cpu.fpu;
-        const value = fpu[0];
-        for (let i = 0; i < size - 1; i += 1) {
-          fpu[i] = fpu[i + 1];
-        }
-        fpu[size - 1] = 0;
+        const top = this.cpu.fpuTop | 0;
+        const value = fpu[top];
+        fpu[top] = 0;
+        this.cpu.fpuTop = (top + 1) & 7;
         this.cpu.fpuSize = size - 1;
         return value;
       },
@@ -1022,7 +979,7 @@
         if (!this.cpu || this.cpu.fpuSize <= 0) {
           return 0;
         }
-        return this.cpu.fpu[0];
+        return this.cpu.fpu[this.cpu.fpuTop];
       },
 
       executeLoopInstruction(addr, opcode, length) {

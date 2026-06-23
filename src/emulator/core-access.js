@@ -13,28 +13,15 @@
 
     Object.assign(Emulator.prototype, {
       readReg(reg) {
-        if (!this.cpu) {
-          return 0;
-        }
-        const regs = this.cpu.regs;
-        const idx = reg | 0;
-        if (idx < 0 || idx >= regs.length) {
-          return 0;
-        }
-        return regs[idx] >>> 0;
+        const c = this.cpu;
+        if (!c) return 0;
+        return c.regs[reg | 0] >>> 0;
       },
 
       writeReg(reg, value) {
-        if (!this.cpu) {
-          return;
-        }
-        const regs = this.cpu.regs;
-        const v = value >>> 0;
-        const idx = reg | 0;
-        if (idx < 0 || idx >= regs.length) {
-          return;
-        }
-        regs[idx] = v;
+        const c = this.cpu;
+        if (!c) return;
+        c.regs[reg | 0] = value >>> 0;
       },
 
       readReg32ByIndex(index) {
@@ -596,46 +583,30 @@
 
       readMem8(addr) {
         const cpu = this.cpu;
-        if (!cpu) {
-          return 0;
-        }
+        if (!cpu) return 0;
         const start = addr >>> 0;
         const mem = cpu.mem;
-        if (!mem) {
-          return 0;
-        }
-        if ((start + 1) > (mem.length >>> 0) && !this.checkInterpreterMem(start, 1)) {
-          return 0;
-        }
+        const len = mem.length >>> 0;
+        if ((start + 1) > len && !this.checkInterpreterMem(start, 1)) return 0;
         return mem[start] >>> 0;
       },
 
       writeMem8(addr, value) {
-        if (!this.cpu) {
-          return;
-        }
+        const cpu = this.cpu;
+        if (!cpu) return;
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, 1)) {
-          return;
-        }
+        if (!this.checkInterpreterMem(start, 1)) return;
         this.invalidateBasicBlocksForWrite(start, 1);
-        this.cpu.mem[start] = value & 0xff;
+        cpu.mem[start] = value & 0xff;
       },
 
       readMem32(addr) {
         const cpu = this.cpu;
-        if (!cpu) {
-          return 0;
-        }
+        if (!cpu) return 0;
         const start = addr >>> 0;
         const mem = cpu.mem;
-        if (!mem) {
-          return 0;
-        }
-        if ((start + 4) > (mem.length >>> 0) && !this.checkInterpreterMem(start, 4)) {
-          return 0;
-        }
-        return cpu.view.getUint32(start, true) >>> 0;
+        if ((start + 4) > (mem.length >>> 0) && !this.checkInterpreterMem(start, 4)) return 0;
+        return (mem[start] | (mem[start + 1] << 8) | (mem[start + 2] << 16) | (mem[start + 3] << 24)) >>> 0;
       },
 
       readMemFloat32(addr) {
@@ -686,30 +657,23 @@
 
       readMem16(addr) {
         const cpu = this.cpu;
-        if (!cpu) {
-          return 0;
-        }
+        if (!cpu) return 0;
         const start = addr >>> 0;
         const mem = cpu.mem;
-        if (!mem) {
-          return 0;
-        }
-        if ((start + 2) > (mem.length >>> 0) && !this.checkInterpreterMem(start, 2)) {
-          return 0;
-        }
-        return cpu.view.getUint16(start, true) & 0xffff;
+        if ((start + 2) > (mem.length >>> 0) && !this.checkInterpreterMem(start, 2)) return 0;
+        return (mem[start] | (mem[start + 1] << 8)) & 0xffff;
       },
 
       writeMem16(addr, value) {
-        if (!this.cpu) {
-          return;
-        }
+        const cpu = this.cpu;
+        if (!cpu) return;
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, 2)) {
-          return;
-        }
+        if (!this.checkInterpreterMem(start, 2)) return;
         this.invalidateBasicBlocksForWrite(start, 2);
-        this.cpu.view.setUint16(start, value & 0xffff, true);
+        const mem = cpu.mem;
+        const v = value & 0xffff;
+        mem[start] = v & 0xff;
+        mem[start + 1] = (v >>> 8) & 0xff;
       },
 
       readMem16Signed(addr) {
@@ -732,15 +696,17 @@
       },
 
       writeMem32(addr, value) {
-        if (!this.cpu) {
-          return;
-        }
+        const cpu = this.cpu;
+        if (!cpu) return;
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, 4)) {
-          return;
-        }
+        if (!this.checkInterpreterMem(start, 4)) return;
         this.invalidateBasicBlocksForWrite(start, 4);
-        this.cpu.view.setUint32(start, value >>> 0, true);
+        const mem = cpu.mem;
+        const v = value >>> 0;
+        mem[start] = v & 0xff;
+        mem[start + 1] = (v >>> 8) & 0xff;
+        mem[start + 2] = (v >>> 16) & 0xff;
+        mem[start + 3] = (v >>> 24) & 0xff;
       },
 
       readMemBlock(addr, size) {
