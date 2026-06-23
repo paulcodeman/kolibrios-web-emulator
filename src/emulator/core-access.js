@@ -892,7 +892,7 @@
         }
         const start = addr >>> 0;
         const size = byteCount >>> 0;
-        const end = start + size;
+        const end = (start + size) >>> 0;
         if (end < start) {
           return false;
         }
