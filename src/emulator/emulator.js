@@ -4536,4 +4536,5 @@ class Emulator {
   Emulator.shouldPreferWasmSimpleBlock = shouldPreferWasmSimpleBlock;
   KosEmu.emu.createJsCpuHelperBackend = getJsCpuHelperBackend;
   KosEmu.emu.Emulator = Emulator;
+  KosEmu.emu.REG = REG;
 })();

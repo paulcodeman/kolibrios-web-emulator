@@ -427,6 +427,7 @@
       this.currentImage = null;
       this.currentFileBuffer = null;
       this.currentFileName = "";
+      this.execPaused = false;
       this.cpuBackendStorageKey = "kosemu.cpuBackendMode";
       this.cpuBackendMode = this.resolveInitialCpuBackendMode();
       if (this.cpuBackendSelect) {
@@ -498,6 +499,15 @@
       if (this.traceOpcodesInput) {
         this.traceOpcodesInput.addEventListener("change", () => this.applyTraceConfig());
       }
+      if (this.pauseBtn) {
+        this.pauseBtn.addEventListener("click", () => this.togglePause());
+      }
+      if (this.stepBtn) {
+        this.stepBtn.addEventListener("click", () => this.stepInstruction());
+      }
+      if (this.speedSlider) {
+        this.speedSlider.addEventListener("input", () => this.setSpeed());
+      }
       if (this.cpuBackendSelect) {
         this.cpuBackendSelect.addEventListener("change", () => this.applyCpuBackendConfig());
       }
@@ -532,6 +542,16 @@
       this.setStatus("Session ready");
       this.restorePersistedRootFolder();
       this.scheduleBrowserKeyboardLanguageRefresh(0);
+      this.startRegisterUpdateLoop();
+    }
+
+    startRegisterUpdateLoop() {
+      const tick = () => {
+        this.updateRegisters();
+        this.updateSessionState();
+        this.regsRaf = requestAnimationFrame(tick);
+      };
+      this.regsRaf = requestAnimationFrame(tick);
     }
 
     bindDom() {
@@ -549,6 +569,10 @@
       this.traceOpcodesInput = document.getElementById("traceOpcodes");
       this.traceImagesInput = document.getElementById("traceImages");
       this.infoEl = document.getElementById("info");
+      this.regsEl = document.getElementById("regs");
+      this.pauseBtn = document.getElementById("pauseBtn");
+      this.stepBtn = document.getElementById("stepBtn");
+      this.speedSlider = document.getElementById("speedSlider");
       this.logEl = document.getElementById("log");
       this.statusEl = document.getElementById("status");
       this.fsRootStatusEl = document.getElementById("fsRootStatus");
@@ -1722,6 +1746,96 @@
       this.log("No running applications.");
     }
 
+    updateControls() {
+      const hasProcess = !!(this.sessionManager && this.sessionManager.getActiveProcess && this.sessionManager.getActiveProcess());
+      const emu = hasProcess ? this.sessionManager.getActiveProcess().emulator : null;
+      const running = emu ? emu.running : false;
+      const canControl = hasProcess && emu;
+      if (this.pauseBtn) {
+        this.pauseBtn.disabled = !canControl;
+        this.pauseBtn.textContent = canControl && this.execPaused ? "Resume" : "Pause";
+      }
+      if (this.stepBtn) {
+        this.stepBtn.disabled = !canControl || !this.execPaused;
+      }
+    }
+
+    togglePause() {
+      const active = this.sessionManager && this.sessionManager.getActiveProcess();
+      const emu = active && active.emulator;
+      if (!emu) return;
+      if (this.execPaused) {
+        this.execPaused = false;
+        emu.running = true;
+        emu.scheduleStep(0);
+      } else {
+        this.execPaused = true;
+        emu.running = false;
+        emu.cancelScheduledStep();
+      }
+    }
+
+    stepInstruction() {
+      const active = this.sessionManager && this.sessionManager.getActiveProcess();
+      const emu = active && active.emulator;
+      if (!emu || !this.execPaused) return;
+      const eip = emu.readReg(globalThis.KosEmu.emu.REG.EIP) >>> 0;
+      const wasRunning = emu.running;
+      emu.running = true;
+      const ok = emu.executeBasicInstruction(eip);
+      emu.running = wasRunning;
+      if (ok) {
+        emu.cancelScheduledStep();
+      }
+    }
+
+    setSpeed() {
+      if (!this.speedSlider) return;
+      const value = parseInt(this.speedSlider.value, 10);
+      const active = this.sessionManager && this.sessionManager.getActiveProcess();
+      const emu = active && active.emulator;
+      if (emu && typeof emu.maxInstructions !== "undefined") {
+        emu.maxInstructions = value;
+      }
+    }
+
+    updateRegisters() {
+      if (!this.sessionManager || !this.regsEl) return;
+      const active = this.sessionManager.getActiveProcess();
+      if (!active || !active.emulator) {
+        if (this.regsEl.textContent !== "(no process)") {
+          this.regsEl.textContent = "(no process)";
+        }
+        this.updateControls();
+        return;
+      }
+      const emu = active.emulator;
+      if (!emu.readReg) return;
+      const REG = globalThis.KosEmu.emu.REG;
+      function r(n) { return (emu.readReg(n) >>> 0).toString(16).padStart(8, "0"); }
+      const eax = r(REG.EAX), ecx = r(REG.ECX);
+      const edx = r(REG.EDX), ebx = r(REG.EBX);
+      const esp = r(REG.ESP), ebp = r(REG.EBP);
+      const esi = r(REG.ESI), edi = r(REG.EDI);
+      const eip = r(REG.EIP);
+      const fl = emu.readReg(REG.EFLAGS) >>> 0;
+      const cf = fl & 1 ? "C" : ".";
+      const pf = fl & 4 ? "P" : ".";
+      const af = fl & 0x10 ? "A" : ".";
+      const zf = fl & 0x40 ? "Z" : ".";
+      const sf = fl & 0x80 ? "S" : ".";
+      const df = fl & 0x400 ? "D" : ".";
+      const of = fl & 0x800 ? "O" : ".";
+      this.regsEl.innerHTML =
+        `EAX=${eax}  ECX=${ecx}\n` +
+        `EDX=${edx}  EBX=${ebx}\n` +
+        `ESP=${esp}  EBP=${ebp}\n` +
+        `ESI=${esi}  EDI=${edi}\n` +
+        `EIP=${eip}\n` +
+        `FL=${fl.toString(16).padStart(8, "0")} <span class="flags">${cf}${pf}${af}${zf}${sf}${df}${of}</span>`;
+      this.updateControls();
+    }
+
     updateSessionState() {
       if (!this.sessionManager) {
         return;
@@ -1739,10 +1853,15 @@
       const active = this.sessionManager.getActiveProcess();
       if (active) {
         this.setStatus(`Active: ${active.displayPath} | PID ${active.pid} | slot ${active.slot}`);
-      } else if (this.currentImage) {
-        this.setStatus(`Loaded ${this.currentImage.fileName}`);
       } else {
-        this.setStatus("Session ready");
+        if (this.execPaused) {
+          this.execPaused = false;
+        }
+        if (this.currentImage) {
+          this.setStatus(`Loaded ${this.currentImage.fileName}`);
+        } else {
+          this.setStatus("Session ready");
+        }
       }
     }
 

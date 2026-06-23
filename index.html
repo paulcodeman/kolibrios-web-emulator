@@ -68,6 +68,21 @@
             <pre id="info" class="mono">No image loaded.</pre>
           </div>
           <div class="card">
+            <div class="card-title">Registers</div>
+            <pre id="regs" class="mono reg-grid">(no process)</pre>
+          </div>
+          <div class="card">
+            <div class="card-title">Control</div>
+            <div class="exec-controls">
+              <button id="pauseBtn" class="exec-btn" disabled>Pause</button>
+              <button id="stepBtn" class="exec-btn" disabled>Step</button>
+              <label class="speed-label">
+                <span>Speed</span>
+                <input id="speedSlider" type="range" min="1" max="2000000" value="800000" class="speed-slider">
+              </label>
+            </div>
+          </div>
+          <div class="card">
             <div class="card-title">Log</div>
             <pre id="log" class="mono">Ready.</pre>
           </div>
