@@ -2619,34 +2619,6 @@
       }
       return ok;
     }
-    if (opcode === 0x06 || opcode === 0x0e || opcode === 0x16 || opcode === 0x1e) { // push seg
-      const seg =
-        opcode === 0x06 ? this.segES :
-        opcode === 0x0e ? this.segCS :
-        opcode === 0x16 ? this.segSS :
-        this.segDS;
-      let esp = this.readReg(REG.ESP) >>> 0;
-      esp = (esp - 2) >>> 0;
-      this.writeMem16(esp, seg & 0xffff);
-      this.writeReg(REG.ESP, esp >>> 0);
-      this.writeReg(REG.EIP, (addr + 1) >>> 0);
-      return true;
-    }
-    if (opcode === 0x07 || opcode === 0x17 || opcode === 0x1f) { // pop seg
-      let esp = this.readReg(REG.ESP) >>> 0;
-      const value = this.readMem16(esp);
-      esp = (esp + 2) >>> 0;
-      this.writeReg(REG.ESP, esp >>> 0);
-      if (opcode === 0x07) {
-        this.segES = value & 0xffff;
-      } else if (opcode === 0x17) {
-        this.segSS = value & 0xffff;
-      } else {
-        this.segDS = value & 0xffff;
-      }
-      this.writeReg(REG.EIP, (addr + 1) >>> 0);
-      return true;
-    }
     if (opcode === 0xf3 || opcode === 0xf2) {
       const next = (addr + 1) >>> 0;
       const op2 = this.readMem8(next);
@@ -2678,6 +2650,56 @@
       this.writeReg(REG.EIP, next);
       return true;
     }
+    switch (opcode) {
+    case 0x06:
+    case 0x0e:
+    case 0x16:
+    case 0x1e:
+    if (opcode === 0x06 || opcode === 0x0e || opcode === 0x16 || opcode === 0x1e) { // push seg
+      const seg =
+        opcode === 0x06 ? this.segES :
+        opcode === 0x0e ? this.segCS :
+        opcode === 0x16 ? this.segSS :
+        this.segDS;
+      let esp = this.readReg(REG.ESP) >>> 0;
+      esp = (esp - 2) >>> 0;
+      this.writeMem16(esp, seg & 0xffff);
+      this.writeReg(REG.ESP, esp >>> 0);
+      this.writeReg(REG.EIP, (addr + 1) >>> 0);
+      return true;
+    }
+    case 0x07:
+    case 0x17:
+    case 0x1f:
+    if (opcode === 0x07 || opcode === 0x17 || opcode === 0x1f) { // pop seg
+      let esp = this.readReg(REG.ESP) >>> 0;
+      const value = this.readMem16(esp);
+      esp = (esp + 2) >>> 0;
+      this.writeReg(REG.ESP, esp >>> 0);
+      if (opcode === 0x07) {
+        this.segES = value & 0xffff;
+      } else if (opcode === 0x17) {
+        this.segSS = value & 0xffff;
+      } else {
+        this.segDS = value & 0xffff;
+      }
+      this.writeReg(REG.EIP, (addr + 1) >>> 0);
+      return true;
+    }
+    case 0x6c:
+    case 0x6d:
+    case 0x6e:
+    case 0x6f:
+    case 0xa4:
+    case 0xa5:
+    case 0xa6:
+    case 0xa7:
+    case 0xaa:
+    case 0xab:
+    case 0xac:
+    case 0xad:
+    case 0xae:
+    case 0xaf:
     if (
       opcode === 0xa4 ||
       opcode === 0xa5 ||
@@ -2696,6 +2718,7 @@
     ) {
       return this.executeStringInstruction(addr, 0, 4);
     }
+    case 0xd7:
     if (opcode === 0xd7) { // XLAT
       const eax = this.readReg(REG.EAX) >>> 0;
       const al = eax & 0xff;
@@ -2706,6 +2729,7 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x98:
     if (opcode === 0x98) { // CWDE
       const ax = this.readReg(REG.EAX) & 0xffff;
       const eax = (ax << 16) >> 16;
@@ -2713,10 +2737,18 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x90:
     if (opcode === 0x90) {
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x91:
+    case 0x92:
+    case 0x93:
+    case 0x94:
+    case 0x95:
+    case 0x96:
+    case 0x97:
     if (opcode >= 0x91 && opcode <= 0x97) {
       const regIdx = opcode - 0x90;
       const eax = this.readReg(REG.EAX);
@@ -2726,6 +2758,7 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x99:
     if (opcode === 0x99) {
       const eax = this.readReg(REG.EAX) >>> 0;
       const edx = (eax & 0x80000000) ? 0xffffffff : 0x00000000;
@@ -2733,6 +2766,7 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x9e:
     if (opcode === 0x9e) { // sahf
       const eax = this.readReg(REG.EAX) >>> 0;
       const ah = (eax >>> 8) & 0xff;
@@ -2747,6 +2781,8 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x27:
+    case 0x2f:
     if (opcode === 0x27 || opcode === 0x2f) { // DAA/DAS
       let eax = this.readReg(REG.EAX) >>> 0;
       let al = eax & 0xff;
@@ -2776,6 +2812,8 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x37:
+    case 0x3f:
     if (opcode === 0x37 || opcode === 0x3f) { // AAA/AAS
       let eax = this.readReg(REG.EAX) >>> 0;
       let al = eax & 0xff;
@@ -2795,6 +2833,8 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xd4:
+    case 0xd5:
     if (opcode === 0xd4 || opcode === 0xd5) { // AAM/AAD
       const imm = this.readMem8((addr + 1) >>> 0) & 0xff;
       if (imm === 0) {
@@ -2821,6 +2861,7 @@
       this.writeReg(REG.EIP, (addr + 2) >>> 0);
       return true;
     }
+    case 0x9c:
     if (opcode === 0x9c) { // pushf
       const flags = this.readReg(REG.EFLAGS) >>> 0;
       let esp = this.readReg(REG.ESP) >>> 0;
@@ -2830,6 +2871,7 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x9d:
     if (opcode === 0x9d) { // popf
       let esp = this.readReg(REG.ESP);
       const flags = this.readMem32(esp);
@@ -2839,40 +2881,55 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xfc:
     if (opcode === 0xfc) { // cld
       const flags = this.readReg(REG.EFLAGS) & ~FLAG_DF;
       this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xfa:
+    case 0xfb:
     if (opcode === 0xfa || opcode === 0xfb) { // cli/sti
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xfd:
     if (opcode === 0xfd) { // std
       const flags = this.readReg(REG.EFLAGS) | FLAG_DF;
       this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xf8:
     if (opcode === 0xf8) { // clc
       const flags = this.readReg(REG.EFLAGS) & ~FLAG_CF;
       this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xf9:
     if (opcode === 0xf9) { // stc
       const flags = this.readReg(REG.EFLAGS) | FLAG_CF;
       this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xf5:
     if (opcode === 0xf5) { // cmc
       const flags = this.readReg(REG.EFLAGS) ^ FLAG_CF;
       this.writeReg(REG.EFLAGS, flags >>> 0);
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xb8:
+    case 0xb9:
+    case 0xba:
+    case 0xbb:
+    case 0xbc:
+    case 0xbd:
+    case 0xbe:
+    case 0xbf:
     if (opcode >= 0xb8 && opcode <= 0xbf) {
       const regIdx = opcode - 0xb8;
       const imm = this.readMem32((addr + 1) >>> 0);
@@ -2880,6 +2937,14 @@
       this.writeReg(REG.EIP, (addr + 5) >>> 0);
       return true;
     }
+    case 0xb0:
+    case 0xb1:
+    case 0xb2:
+    case 0xb3:
+    case 0xb4:
+    case 0xb5:
+    case 0xb6:
+    case 0xb7:
     if (opcode >= 0xb0 && opcode <= 0xb7) {
       const regIdx = opcode - 0xb0;
       const imm = this.readMem8((addr + 1) >>> 0);
@@ -2887,6 +2952,7 @@
       this.writeReg(REG.EIP, (addr + 2) >>> 0);
       return true;
     }
+    case 0x68:
     if (opcode === 0x68) {
       const imm = this.readMem32((addr + 1) >>> 0);
       let esp = this.readReg(REG.ESP);
@@ -2896,6 +2962,7 @@
       this.writeReg(REG.EIP, (addr + 5) >>> 0);
       return true;
     }
+    case 0x6a:
     if (opcode === 0x6a) {
       const imm8 = (this.readMem8((addr + 1) >>> 0) << 24) >> 24;
       let esp = this.readReg(REG.ESP);
@@ -2905,6 +2972,7 @@
       this.writeReg(REG.EIP, (addr + 2) >>> 0);
       return true;
     }
+    case 0x60:
     if (opcode === 0x60) {
       let esp = this.readReg(REG.ESP);
       const eax = this.readReg(REG.EAX);
@@ -2929,6 +2997,7 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x61:
     if (opcode === 0x61) {
       let esp = this.readReg(REG.ESP);
       const edi = this.readMem32(esp); esp = (esp + 4) >>> 0;
@@ -2950,6 +3019,7 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x62:
     if (opcode === 0x62) { // BOUND r32, m32&32
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -2980,6 +3050,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x63:
     if (opcode === 0x63) { // ARPL r/m16, r16
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3017,6 +3088,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0xe8:
     if (opcode === 0xe8) {
       const promoted = this.promoteDynamicSoftInstruction(addr);
       if (promoted !== null) {
@@ -3032,6 +3104,7 @@
       this.writeReg(REG.EIP, target);
       return true;
     }
+    case 0x9a:
     if (opcode === 0x9a) { // call ptr16:32
       const offset = this.readMem32((addr + 1) >>> 0) >>> 0;
       const selector = this.readMem16((addr + 5) >>> 0) & 0xffff;
@@ -3046,6 +3119,7 @@
       this.writeReg(REG.EIP, offset >>> 0);
       return true;
     }
+    case 0xc2:
     if (opcode === 0xc2) { // ret imm16
       const imm = this.readMem16((addr + 1) >>> 0) >>> 0;
       let esp = this.readReg(REG.ESP);
@@ -3055,6 +3129,7 @@
       this.writeReg(REG.EIP, target >>> 0);
       return true;
     }
+    case 0xca:
     if (opcode === 0xca) { // retf imm16
       const imm = this.readMem16((addr + 1) >>> 0) >>> 0;
       let esp = this.readReg(REG.ESP) >>> 0;
@@ -3066,6 +3141,7 @@
       this.writeReg(REG.EIP, target >>> 0);
       return true;
     }
+    case 0xc3:
     if (opcode === 0xc3) {
       const promoted = this.promoteDynamicSoftInstruction(addr);
       if (promoted !== null) {
@@ -3078,6 +3154,7 @@
       this.writeReg(REG.EIP, target >>> 0);
       return true;
     }
+    case 0xcb:
     if (opcode === 0xcb) { // retf
       let esp = this.readReg(REG.ESP) >>> 0;
       const target = this.readMem32(esp); esp = (esp + 4) >>> 0;
@@ -3087,6 +3164,7 @@
       this.writeReg(REG.EIP, target >>> 0);
       return true;
     }
+    case 0xc8:
     if (opcode === 0xc8) { // ENTER imm16, imm8
       const imm = this.readMem16((addr + 1) >>> 0) & 0xffff;
       const level = this.readMem8((addr + 3) >>> 0) & 0x1f;
@@ -3112,6 +3190,7 @@
       this.writeReg(REG.EIP, (addr + 4) >>> 0);
       return true;
     }
+    case 0xc9:
     if (opcode === 0xc9) { // LEAVE
       let esp = this.readReg(REG.EBP) >>> 0;
       const nextEbp = this.readMem32(esp);
@@ -3121,6 +3200,7 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xcf:
     if (opcode === 0xcf) { // IRET
       let esp = this.readReg(REG.ESP) >>> 0;
       const nextEip = this.readMem32(esp); esp = (esp + 4) >>> 0;
@@ -3131,6 +3211,7 @@
       this.writeReg(REG.ESP, esp >>> 0);
       return true;
     }
+    case 0xe3:
     if (opcode === 0xe3) { // JECXZ/JCXZ
       const promoted = this.promoteDynamicSoftInstruction(addr);
       if (promoted !== null) {
@@ -3142,6 +3223,9 @@
       this.writeReg(REG.EIP, check === 0 ? (next + rel8) >>> 0 : next);
       return true;
     }
+    case 0xe0:
+    case 0xe1:
+    case 0xe2:
     if (opcode === 0xe0 || opcode === 0xe1 || opcode === 0xe2) {
       const promoted = this.promoteDynamicSoftInstruction(addr);
       if (promoted !== null) {
@@ -3149,6 +3233,7 @@
       }
       return this.executeLoopInstruction(addr, opcode, 2);
     }
+    case 0xe9:
     if (opcode === 0xe9) {
       const promoted = this.promoteDynamicSoftInstruction(addr);
       if (promoted !== null) {
@@ -3159,6 +3244,7 @@
       this.writeReg(REG.EIP, (next + rel) >>> 0);
       return true;
     }
+    case 0xea:
     if (opcode === 0xea) { // jmp ptr16:32
       const offset = this.readMem32((addr + 1) >>> 0) >>> 0;
       const selector = this.readMem16((addr + 5) >>> 0) & 0xffff;
@@ -3166,6 +3252,7 @@
       this.writeReg(REG.EIP, offset >>> 0);
       return true;
     }
+    case 0xeb:
     if (opcode === 0xeb) {
       const promoted = this.promoteDynamicSoftInstruction(addr);
       if (promoted !== null) {
@@ -3176,6 +3263,8 @@
       this.writeReg(REG.EIP, (next + rel8) >>> 0);
       return true;
     }
+    case 0x08:
+    case 0x0a:
     if (opcode === 0x08 || opcode === 0x0a) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3218,6 +3307,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x09:
     if (opcode === 0x09) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3244,6 +3334,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x0b:
     if (opcode === 0x0b) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3267,6 +3358,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x31:
     if (opcode === 0x31) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3293,6 +3385,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x33:
     if (opcode === 0x33) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3316,6 +3409,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x69:
+    case 0x6b:
     if (opcode === 0x69 || opcode === 0x6b) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3350,6 +3445,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size + immSize) >>> 0);
       return true;
     }
+    case 0xfe:
     if (opcode === 0xfe) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3392,6 +3488,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0xff:
     if (opcode === 0xff) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3505,6 +3602,8 @@
       }
       return false;
     }
+    case 0x88:
+    case 0x8a:
     if (opcode === 0x88 || opcode === 0x8a) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3538,6 +3637,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0xaa:
     if (opcode === 0xaa) {
       const al = this.readReg(REG.EAX) & 0xff;
       const addrSize = this.getActiveAddressSize();
@@ -3551,6 +3651,8 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xc6:
+    case 0xc7:
     if (opcode === 0xc6 || opcode === 0xc7) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3589,6 +3691,9 @@
       this.writeReg(REG.EIP, (addr + immOffset + 4) >>> 0);
       return true;
     }
+    case 0x89:
+    case 0x8b:
+    case 0x8d:
     if (opcode === 0x8b || opcode === 0x89 || opcode === 0x8d) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3637,6 +3742,10 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0xe6:
+    case 0xe7:
+    case 0xee:
+    case 0xef:
     if (opcode === 0xee || opcode === 0xef || opcode === 0xe6 || opcode === 0xe7) {
       const dx = this.readReg(REG.EDX) & 0xffff;
       if (opcode === 0xe6 || opcode === 0xe7) {
@@ -3657,6 +3766,10 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xe4:
+    case 0xe5:
+    case 0xec:
+    case 0xed:
     if (opcode === 0xec || opcode === 0xed || opcode === 0xe4 || opcode === 0xe5) {
       if (opcode === 0xe4 || opcode === 0xe5) {
         const port = this.readMem8((addr + 1) >>> 0) & 0xff;
@@ -3681,9 +3794,14 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xa4:
+    case 0xa5:
+    case 0xab:
     if (opcode === 0xa4 || opcode === 0xa5 || opcode === 0xab) {
       return this.executeStringInstruction(addr, 0, 4);
     }
+    case 0x30:
+    case 0x32:
     if (opcode === 0x30 || opcode === 0x32) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3721,6 +3839,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x20:
+    case 0x22:
     if (opcode === 0x20 || opcode === 0x22) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3758,6 +3878,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x21:
+    case 0x23:
     if (opcode === 0x21 || opcode === 0x23) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3795,6 +3917,10 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x28:
+    case 0x29:
+    case 0x2a:
+    case 0x2b:
     if (opcode === 0x28 || opcode === 0x2a || opcode === 0x29 || opcode === 0x2b) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3849,6 +3975,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x38:
+    case 0x3a:
     if (opcode === 0x38 || opcode === 0x3a) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -3876,6 +4004,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x1c:
+    case 0x1d:
     if (opcode === 0x1c || opcode === 0x1d) {
       if (opcode === 0x1c) {
         const imm = this.readMem8((addr + 1) >>> 0) & 0xff;
@@ -3899,6 +4029,13 @@
       this.writeReg(REG.EIP, (addr + 5) >>> 0);
       return true;
     }
+    case 0x04:
+    case 0x0c:
+    case 0x14:
+    case 0x24:
+    case 0x2c:
+    case 0x34:
+    case 0x3c:
     if (
       opcode === 0x04 || // add al, imm8
       opcode === 0x0c || // or al, imm8
@@ -3925,6 +4062,13 @@
       this.writeReg(REG.EIP, (addr + 2) >>> 0);
       return true;
     }
+    case 0x05:
+    case 0x0d:
+    case 0x15:
+    case 0x25:
+    case 0x2d:
+    case 0x35:
+    case 0x3d:
     if (
       opcode === 0x05 ||
       opcode === 0x0d ||
@@ -3954,6 +4098,7 @@
       this.writeReg(REG.EIP, (addr + 5) >>> 0);
       return true;
     }
+    case 0xf6:
     if (opcode === 0xf6) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4084,6 +4229,7 @@
       }
       return false;
     }
+    case 0x24:
     if (opcode === 0x24) {
       const imm = this.readMem8((addr + 1) >>> 0) & 0xff;
       const eax = this.readReg(REG.EAX);
@@ -4094,6 +4240,7 @@
       this.writeReg(REG.EIP, (addr + 2) >>> 0);
       return true;
     }
+    case 0xa8:
     if (opcode === 0xa8) {
       const imm = this.readMem8((addr + 1) >>> 0) & 0xff;
       const eax = this.readReg(REG.EAX);
@@ -4103,6 +4250,7 @@
       this.writeReg(REG.EIP, (addr + 2) >>> 0);
       return true;
     }
+    case 0xa9:
     if (opcode === 0xa9) {
       const imm = this.readMem32((addr + 1) >>> 0) >>> 0;
       const eax = this.readReg(REG.EAX) >>> 0;
@@ -4111,6 +4259,7 @@
       this.writeReg(REG.EIP, (addr + 5) >>> 0);
       return true;
     }
+    case 0x3c:
     if (opcode === 0x3c) {
       const imm = this.readMem8((addr + 1) >>> 0) & 0xff;
       const eax = this.readReg(REG.EAX);
@@ -4120,6 +4269,10 @@
       this.writeReg(REG.EIP, (addr + 2) >>> 0);
       return true;
     }
+    case 0x80:
+    case 0x81:
+    case 0x82:
+    case 0x83:
     if (opcode === 0x80 || opcode === 0x81 || opcode === 0x82 || opcode === 0x83) {
       const bytes = this.readMemBlock(addr, 20);
       if (!bytes) {
@@ -4198,6 +4351,10 @@
       this.writeReg(REG.EIP, (addr + len) >>> 0);
       return true;
     }
+    case 0x80:
+    case 0x81:
+    case 0x82:
+    case 0x83:
     if (opcode === 0x80 || opcode === 0x81 || opcode === 0x82 || opcode === 0x83) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4275,6 +4432,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size + immSize) >>> 0);
       return true;
     }
+    case 0x00:
+    case 0x02:
     if (opcode === 0x00 || opcode === 0x02) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4317,6 +4476,22 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x40:
+    case 0x41:
+    case 0x42:
+    case 0x43:
+    case 0x44:
+    case 0x45:
+    case 0x46:
+    case 0x47:
+    case 0x48:
+    case 0x49:
+    case 0x4a:
+    case 0x4b:
+    case 0x4c:
+    case 0x4d:
+    case 0x4e:
+    case 0x4f:
     if (opcode >= 0x40 && opcode <= 0x4f) {
       const regIdx = opcode & 7;
       const value = this.readReg32ByIndex(regIdx);
@@ -4331,6 +4506,8 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x39:
+    case 0x3b:
     if (opcode === 0x3b || opcode === 0x39) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4367,6 +4544,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x10:
+    case 0x12:
     if (opcode === 0x10 || opcode === 0x12) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4409,6 +4588,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x18:
+    case 0x1a:
     if (opcode === 0x18 || opcode === 0x1a) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4451,6 +4632,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x11:
+    case 0x13:
     if (opcode === 0x11 || opcode === 0x13) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4493,6 +4676,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x01:
+    case 0x03:
     if (opcode === 0x03 || opcode === 0x01) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4535,6 +4720,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x29:
+    case 0x2b:
     if (opcode === 0x2b || opcode === 0x29) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4577,6 +4764,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x84:
+    case 0x85:
     if (opcode === 0x85 || opcode === 0x84) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4615,6 +4804,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x87:
     if (opcode === 0x87) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4638,6 +4828,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x86:
     if (opcode === 0x86) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4661,6 +4852,8 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x19:
+    case 0x1b:
     if (opcode === 0x19 || opcode === 0x1b) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4703,6 +4896,9 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0xc0:
+    case 0xd0:
+    case 0xd2:
     if (opcode === 0xc0 || opcode === 0xd0 || opcode === 0xd2) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4747,6 +4943,9 @@
       this.writeReg(REG.EIP, (addr + len) >>> 0);
       return true;
     }
+    case 0xc1:
+    case 0xd1:
+    case 0xd3:
     if (opcode === 0xc1 || opcode === 0xd1 || opcode === 0xd3) {
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4792,6 +4991,7 @@
       this.writeReg(REG.EIP, (addr + len) >>> 0);
       return true;
     }
+    case 0xf7:
     if (opcode === 0xf7) {
       const bytes = this.readMemBlock(addr, 20);
       if (!bytes) {
@@ -4899,6 +5099,14 @@
       }
       return false;
     }
+    case 0x50:
+    case 0x51:
+    case 0x52:
+    case 0x53:
+    case 0x54:
+    case 0x55:
+    case 0x56:
+    case 0x57:
     if (opcode >= 0x50 && opcode <= 0x57) {
       const regIdx = opcode - 0x50;
       const value = this.readReg32ByIndex(regIdx);
@@ -4909,6 +5117,14 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x58:
+    case 0x59:
+    case 0x5a:
+    case 0x5b:
+    case 0x5c:
+    case 0x5d:
+    case 0x5e:
+    case 0x5f:
     if (opcode >= 0x58 && opcode <= 0x5f) {
       const regIdx = opcode - 0x58;
       let esp = this.readReg(REG.ESP);
@@ -4919,6 +5135,8 @@
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0x8c:
+    case 0x8e:
     if (opcode === 0x8c || opcode === 0x8e) { // mov r/m16, sreg | mov sreg, r/m16
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -4976,6 +5194,7 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x8f:
     if (opcode === 0x8f) { // POP r/m32
       const bytes = this.readMemBlock(addr, 16);
       if (!bytes) {
@@ -5005,6 +5224,22 @@
       this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
       return true;
     }
+    case 0x70:
+    case 0x71:
+    case 0x72:
+    case 0x73:
+    case 0x74:
+    case 0x75:
+    case 0x76:
+    case 0x77:
+    case 0x78:
+    case 0x79:
+    case 0x7a:
+    case 0x7b:
+    case 0x7c:
+    case 0x7d:
+    case 0x7e:
+    case 0x7f:
     if (opcode >= 0x70 && opcode <= 0x7f) {
       const promoted = this.promoteDynamicSoftInstruction(addr);
       if (promoted !== null) {
@@ -5017,6 +5252,7 @@
       this.writeReg(REG.EIP, take ? (next + rel8) >>> 0 : next);
       return true;
     }
+    case 0x0f:
     if (opcode === 0x0f) {
       const op2 = this.readMem8((addr + 1) >>> 0);
       if (op2 >= 0x80 && op2 <= 0x8f) {
@@ -6192,11 +6428,13 @@
         return true;
       }
     }
+    case 0xcc:
     if (opcode === 0xcc) { // int3
       this.handleInterrupt(3);
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xcd:
     if (opcode === 0xcd) {
       const intno = this.readMem8((addr + 1) >>> 0);
       this.repeatCurrentInstruction = false;
@@ -6209,34 +6447,47 @@
       this.repeatCurrentInstruction = false;
       return true;
     }
+    case 0x9b:
     if (opcode === 0x9b) {
       this.writeReg(REG.EIP, (addr + 1) >>> 0);
       return true;
     }
+    case 0xdc:
     if (opcode === 0xdc) {
       return this.handleFpuDc(addr);
     }
+    case 0xd9:
     if (opcode === 0xd9) {
       return this.handleFpuD9(addr);
     }
+    case 0xd8:
     if (opcode === 0xd8) {
       return this.handleFpuD8(addr);
     }
+    case 0xdd:
     if (opcode === 0xdd) {
       return this.handleFpuDd(addr);
     }
+    case 0xda:
     if (opcode === 0xda) {
       return this.handleFpuDa(addr);
     }
+    case 0xde:
     if (opcode === 0xde) {
       return this.handleFpuDe(addr);
     }
+    case 0xdf:
     if (opcode === 0xdf) {
       return this.handleFpuDf(addr);
     }
+    case 0xdb:
     if (opcode === 0xdb) {
       return this.handleFpuDb(addr);
     }
+    case 0xa0:
+    case 0xa1:
+    case 0xa2:
+    case 0xa3:
     if (opcode === 0xa0 || opcode === 0xa1 || opcode === 0xa2 || opcode === 0xa3) {
       const addrSize = this.addrSizeOverride === 16 ? 2 : 4;
       const imm = addrSize === 2
@@ -6260,7 +6511,9 @@
       this.writeReg(REG.EIP, (addr + len) >>> 0);
       return true;
     }
-    return false;
+    default:
+      return false;
+    }
       },
 
       executeSseInstruction(addr, prefix) {

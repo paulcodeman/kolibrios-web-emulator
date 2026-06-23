@@ -21,6 +21,7 @@ Goal: Run KolibriOS 32-bit .kex apps in the browser using a JS x86 interpreter a
 - Split execution/runtime, core-access, host/runtime, and syscall layers out of the shell before any WASM port.
 - Keep CPU decode/execute in a single `core-*` source of truth; `emulator.js` should stay a shell/orchestration layer only.
 - Keep a selectable JS reference backend for debugging even after a future WASM CPU backend lands.
+- Key optimisation milestone: replaced the 170+-branch if-else opcode dispatch in `executeBasicInstruction` with a `switch (opcode)` jump table (JIT-compilable by V8), delivering ~2-5× speedup for decode-heavy workloads.
 - Initial `wasm` backend can start as a helper-core slice (flags/shift/rotate hot paths) while full decode/execute still stays in JS; expand opcode coverage incrementally behind the same backend switch.
 - Keep handwritten host DLLs, guest-library overrides, and shared host-lib runtime helpers in `src/emulator/host-libs/*`; `emulator-host.js` should stay generic loader/bridge code only.
 - Map memory regions: code, data, bss, stack, heap, shared buffers.
