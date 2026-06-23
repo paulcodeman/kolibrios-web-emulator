@@ -1803,53 +1803,39 @@
         if (body && request.method !== "GET" && request.method !== "HEAD") {
           options.body = body;
         }
-        let retriedHttps = false;
-        const doFetch = (fetchUrl) => {
-          const fetchOpts = { ...options };
-          if (controller) {
-            fetchOpts.signal = controller.signal;
+        Promise.resolve(fetchImpl(url, options)).then(async (response) => {
+          if (!socket || socket.closed) {
+            return;
           }
-          Promise.resolve(fetchImpl(fetchUrl, fetchOpts)).then(async (response) => {
-            if (!socket || socket.closed) {
-              return;
-            }
-            const bodyBytes = request.method === "HEAD"
-              ? new Uint8Array(0)
-              : new Uint8Array(await response.arrayBuffer());
-            if (socket.closed) {
-              return;
-            }
-            socket.requestPending = false;
-            socket.requestComplete = true;
-            socket.remoteClosed = true;
-            socket.socketError = 0;
-            this.appendSocketReceiveChunk(
-              socket,
-              buildHttpResponseBytes(response.status >>> 0, response.statusText || "", response.headers, bodyBytes)
-            );
-          }).catch((err) => {
-            if (!socket || socket.closed) {
-              return;
-            }
-            const failure = typeof this.getHostFetchFailureInfo === "function"
-              ? this.getHostFetchFailureInfo(fetchUrl, err)
-              : null;
-            if (!retriedHttps && failure && failure.likelyCors && fetchUrl.startsWith("http://")) {
-              retriedHttps = true;
-              const httpsUrl = "https://" + fetchUrl.slice(7);
-              doFetch(httpsUrl);
-              return;
-            }
-            socket.requestPending = false;
-            socket.requestComplete = true;
-            socket.socketError = failure ? (failure.errno >>> 0) : (/abort|timeout/i.test(String(err && err.message ? err.message : err || "")) ? 60 : 61);
-            if (typeof this.logHostFetchFailure === "function") {
-              this.logHostFetchFailure("guest-http", fetchUrl, err);
-            }
-            this.notifyNetworkStackReady();
-          });
-        };
-        doFetch(url);
+          const bodyBytes = request.method === "HEAD"
+            ? new Uint8Array(0)
+            : new Uint8Array(await response.arrayBuffer());
+          if (socket.closed) {
+            return;
+          }
+          socket.requestPending = false;
+          socket.requestComplete = true;
+          socket.remoteClosed = true;
+          socket.socketError = 0;
+          this.appendSocketReceiveChunk(
+            socket,
+            buildHttpResponseBytes(response.status >>> 0, response.statusText || "", response.headers, bodyBytes)
+          );
+        }).catch((err) => {
+          if (!socket || socket.closed) {
+            return;
+          }
+          const failure = typeof this.getHostFetchFailureInfo === "function"
+            ? this.getHostFetchFailureInfo(url, err)
+            : null;
+          socket.requestPending = false;
+          socket.requestComplete = true;
+          socket.socketError = failure ? (failure.errno >>> 0) : (/abort|timeout/i.test(String(err && err.message ? err.message : err || "")) ? 60 : 61);
+          if (typeof this.logHostFetchFailure === "function") {
+            this.logHostFetchFailure("guest-http", url, err);
+          }
+          this.notifyNetworkStackReady();
+        });
         return true;
       },
 
