@@ -952,7 +952,10 @@
           return 0;
         }
         if (typeof nameOrOrdinal === "number" && Number.isFinite(nameOrOrdinal)) {
-          return 0;
+          const ordinal = nameOrOrdinal | 0;
+          const entryPtr = (tablePtr + ordinal * 8) >>> 0;
+          const value = this.readMem32((entryPtr + 4) >>> 0) >>> 0;
+          return value;
         }
         const wanted = String(nameOrOrdinal || "");
         if (!wanted) {
@@ -981,7 +984,9 @@
           return 0;
         }
         if (typeof nameOrOrdinal === "number" && Number.isFinite(nameOrOrdinal)) {
-          return 0;
+          const ordinal = nameOrOrdinal | 0;
+          const valueSlot = (tablePtr + ordinal * 8 + 4) >>> 0;
+          return valueSlot;
         }
         const wanted = String(nameOrOrdinal || "");
         if (!wanted) {
@@ -1983,6 +1988,17 @@
       loadBuiltInHostDll(path) {
         return this.loadRegisteredHostDll(path) >>> 0;
       },
+      resolveExternalCoffSymbol(name, requestingPath) {
+        if (!name) return 0;
+        const normalized = name.startsWith("_") ? name.slice(1) : name;
+        for (const [, loaded] of this.loadedDllLibraries) {
+          if (!loaded || !loaded.exportPtr || (loaded.path === requestingPath)) continue;
+          const resolved = this.findHostDllExport(loaded.exportPtr >>> 0, normalized);
+          if (resolved) return resolved >>> 0;
+        }
+        return 0;
+      },
+
       loadCoffLibrary(path) {
         const resolvedPath = this.resolveKosPath(path);
         const cacheKey = resolvedPath.toLowerCase();
@@ -2024,22 +2040,26 @@
         let imageSize = 0;
         for (let i = 0; i < sectionCount; i += 1) {
           const offset = (sectionTableOffset + i * COFF_SECTION_SIZE) >>> 0;
+          const virtualSize = view.getUint32((offset + 8) >>> 0, true) >>> 0;
           const sizeOfRawData = view.getUint32((offset + 16) >>> 0, true) >>> 0;
           const ptrRawData = view.getUint32((offset + 20) >>> 0, true) >>> 0;
           const ptrReloc = view.getUint32((offset + 24) >>> 0, true) >>> 0;
           const numReloc = view.getUint16((offset + 32) >>> 0, true) >>> 0;
           const characteristics = view.getUint32((offset + 36) >>> 0, true) >>> 0;
           const alignment = getCoffSectionAlignment(characteristics);
+          const allocSize = Math.max(virtualSize, sizeOfRawData) >>> 0;
           imageSize = alignValue(imageSize, alignment);
           sections.push({
             offset,
             rva: imageSize >>> 0,
+            virtualSize,
             sizeOfRawData,
+            allocSize,
             ptrRawData,
             ptrReloc,
             numReloc
           });
-          imageSize = (imageSize + sizeOfRawData) >>> 0;
+          imageSize = (imageSize + allocSize) >>> 0;
         }
         if (!imageSize) {
           return null;
@@ -2055,14 +2075,18 @@
 
         for (let i = 0; i < sections.length; i += 1) {
           const section = sections[i];
-          if (!section.sizeOfRawData) {
-            continue;
+          const dst = (ptr + section.rva) >>> 0;
+          if (section.sizeOfRawData && section.ptrRawData) {
+            if (section.ptrRawData + section.sizeOfRawData <= data.length) {
+              const slice = data.subarray(section.ptrRawData, section.ptrRawData + section.sizeOfRawData);
+              this.writeMemBlock(dst, slice);
+            }
           }
-          if (!section.ptrRawData || section.ptrRawData + section.sizeOfRawData > data.length) {
-            continue;
+          if (section.allocSize > section.sizeOfRawData) {
+            const zeroStart = (dst + section.sizeOfRawData) >>> 0;
+            const zeroSize = (section.allocSize - section.sizeOfRawData) >>> 0;
+            this.cpu.mem.fill(0, zeroStart, zeroStart + zeroSize);
           }
-          const slice = data.subarray(section.ptrRawData, section.ptrRawData + section.sizeOfRawData);
-          this.writeMemBlock((ptr + section.rva) >>> 0, slice);
         }
 
         const symbols = new Array(symbolCount);
@@ -2077,7 +2101,7 @@
           if (sectionNumber > 0 && sectionNumber <= sections.length) {
             absoluteValue = (ptr + sections[sectionNumber - 1].rva + value) >>> 0;
           } else if (sectionNumber === 0) {
-            absoluteValue = 0;
+            absoluteValue = this.resolveExternalCoffSymbol(name, resolvedPath) >>> 0;
           }
           symbols[i] = {
             name: readCoffSymbolName(data, view, offset, stringTableOffset, stringTableSize),
@@ -2097,6 +2121,10 @@
           }
         }
         if (!exportsPtr) {
+          if (this.heapAllocs && this.heapAllocs.has(ptr >>> 0)) {
+            this.heapAllocs.delete(ptr >>> 0);
+            this.heapInsertFreeBlock(ptr >>> 0, allocSize >>> 0);
+          }
           return null;
         }
 
