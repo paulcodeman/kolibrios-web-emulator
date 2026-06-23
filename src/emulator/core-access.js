@@ -711,52 +711,37 @@
 
       readMemBlock(addr, size) {
         const cpu = this.cpu;
-        if (!cpu) {
-          return null;
-        }
+        if (!cpu) return null;
         const mem = cpu.mem;
-        if (!mem) {
-          return null;
-        }
         const start = addr >>> 0;
         const blockSize = size >>> 0;
         if ((start + blockSize) > (mem.length >>> 0) && !this.checkInterpreterMem(start, blockSize)) {
           return null;
         }
-        const cacheMem0 = this.memBlockCacheMem0;
-        if (
-          cacheMem0 === mem &&
-          (this.memBlockCacheStart0 >>> 0) === start &&
-          (this.memBlockCacheSize0 >>> 0) === blockSize
-        ) {
-          return this.memBlockCacheView0;
-        }
-        const cacheMem1 = this.memBlockCacheMem1;
-        if (
-          cacheMem1 === mem &&
-          (this.memBlockCacheStart1 >>> 0) === start &&
-          (this.memBlockCacheSize1 >>> 0) === blockSize
-        ) {
-          const view1 = this.memBlockCacheView1;
-          this.memBlockCacheMem1 = cacheMem0;
-          this.memBlockCacheStart1 = this.memBlockCacheStart0 >>> 0;
-          this.memBlockCacheSize1 = this.memBlockCacheSize0 >>> 0;
-          this.memBlockCacheView1 = this.memBlockCacheView0 || null;
-          this.memBlockCacheMem0 = mem;
-          this.memBlockCacheStart0 = start >>> 0;
-          this.memBlockCacheSize0 = blockSize >>> 0;
-          this.memBlockCacheView0 = view1;
-          return view1;
+        const cache = this._memBlockCache;
+        if (cache) {
+          const entry0 = cache[0];
+          if (entry0.mem === mem && entry0.start === start && entry0.size === blockSize) {
+            return entry0.view;
+          }
+          for (let i = 1; i < cache.length; i += 1) {
+            const entry = cache[i];
+            if (entry.mem === mem && entry.start === start && entry.size === blockSize) {
+              cache[i] = cache[0];
+              cache[0] = entry;
+              return entry.view;
+            }
+          }
         }
         const view = mem.subarray(start, start + blockSize);
-        this.memBlockCacheMem1 = cacheMem0;
-        this.memBlockCacheStart1 = this.memBlockCacheStart0 >>> 0;
-        this.memBlockCacheSize1 = this.memBlockCacheSize0 >>> 0;
-        this.memBlockCacheView1 = this.memBlockCacheView0 || null;
-        this.memBlockCacheMem0 = mem;
-        this.memBlockCacheStart0 = start >>> 0;
-        this.memBlockCacheSize0 = blockSize >>> 0;
-        this.memBlockCacheView0 = view;
+        if (!cache) {
+          this._memBlockCache = [{ mem, start, size: blockSize, view }];
+        } else if (cache.length < 4) {
+          cache.unshift({ mem, start, size: blockSize, view });
+        } else {
+          cache.pop();
+          cache.unshift({ mem, start, size: blockSize, view });
+        }
         return view;
       },
 
