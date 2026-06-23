@@ -14,11 +14,11 @@
     if (!source || !source.length) {
       return "";
     }
-    let out = "";
+    const parts = [];
     for (let i = 0; i < source.length; i += 1) {
-      out += String.fromCharCode(source[i] & 0xff);
+      parts.push(String.fromCharCode(source[i] & 0xff));
     }
-    return out;
+    return parts.join("");
   }
 
   function buildLibiniOverrides() {

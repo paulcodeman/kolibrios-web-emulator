@@ -351,6 +351,31 @@
             this.fpuSet(0, Math.abs(st0));
           } else if (stIndex === 4) {
             this.fpuCompareValues(st0, 0.0);
+          } else if (stIndex === 5) { // fxam
+            const fpu = this.cpu ? this.cpu : null;
+            const val = fpu && stIndex < fpu.fpuSize ? fpu.fpu[0] : NaN;
+            let c3 = 0, c2 = 0, c0 = 0, c1 = 0;
+            if (!fpu || fpu.fpuSize === 0) {
+              c3 = 1; c0 = 1; // empty
+            } else if (Object.is(val, 0)) {
+              c3 = 1; // zero
+              if (Object.is(val, -0)) c1 = 1;
+            } else if (!isFinite(val)) {
+              if (isNaN(val)) { c0 = 1; } // NaN
+              else { c2 = 1; c0 = 1; } // Infinity
+            } else if (Math.abs(val) >= 2.2250738585072014e-308) {
+              c2 = 1; // normal
+              if (val < 0) c1 = 1;
+            } else {
+              c2 = 1; c3 = 1; // denormal
+              if (val < 0) c1 = 1;
+            }
+            let sw = fpu ? (fpu.fpuStatusWord & ~0x4700) : 0;
+            if (c3) sw |= 0x4000;
+            if (c2) sw |= 0x0400;
+            if (c1) sw |= 0x0200;
+            if (c0) sw |= 0x0100;
+            if (fpu) fpu.fpuStatusWord = sw;
           }
         } else if (reg === 5) { // constants
           switch (stIndex) {
@@ -378,16 +403,95 @@
             const st1 = this.fpuGet(1);
             this.fpuSet(1, x87Atan2(st1, st0));
             this.fpuPop();
-          } else if (stIndex === 6) {
-            if ((this.cpu && (this.cpu.fpuSize | 0) < 8)) {
-              this.fpuPush(0);
+          } else if (stIndex === 6) { // fdecstp
+            const fpu = this.cpu;
+            const size = fpu ? (fpu.fpuSize | 0) : 0;
+            if (size >= 2) {
+              const tmp = fpu.fpu[0];
+              for (let i = 0; i < size - 1; i += 1) {
+                fpu.fpu[i] = fpu.fpu[i + 1];
+              }
+              fpu.fpu[size - 1] = tmp;
             }
-          } else if (stIndex === 7) {
+          } else if (stIndex === 7) { // fincstp
+            const fpu = this.cpu;
+            const size = fpu ? (fpu.fpuSize | 0) : 0;
+            if (size >= 2) {
+              const tmp = fpu.fpu[size - 1];
+              for (let i = size - 1; i > 0; i -= 1) {
+                fpu.fpu[i] = fpu.fpu[i - 1];
+              }
+              fpu.fpu[0] = tmp;
+            }
+          }
+        } else if (reg === 6) {
+          const st0 = this.fpuPeek();
+          if (stIndex === 0) {
+            this.fpuSet(0, x87F2xm1(st0));
+          } else if (stIndex === 1) {
+            const st1 = this.fpuGet(1);
+            this.fpuSet(1, x87Fyl2x(st1, st0));
             this.fpuPop();
+          } else if (stIndex === 2) {
+            this.fpuSet(0, x87Tan(st0));
+            this.fpuPush(1.0);
+          } else if (stIndex === 3) {
+            const st1 = this.fpuGet(1);
+            this.fpuSet(1, x87Atan2(st1, st0));
+            this.fpuPop();
+          } else if (stIndex === 4) { // fxtract
+            const fpu = this.cpu;
+            const size = fpu ? (fpu.fpuSize | 0) : 0;
+            if (size >= 1) {
+              const val = fpu.fpu[0];
+              let exponent;
+              let significand;
+              if (val === 0) {
+                exponent = 0;
+                significand = 0;
+              } else {
+                const absVal = Math.abs(val);
+                exponent = Math.floor(Math.log2(absVal));
+                significand = val / Math.pow(2, exponent);
+              }
+              fpu.fpu[0] = significand;
+              if (size < 8) {
+                fpu.fpu[size] = exponent;
+                fpu.fpuSize = size + 1;
+              }
+            }
+          } else if (stIndex === 5) { // fprem1
+            const st1 = this.fpuGet(1);
+            this.fpuSet(0, x87Fprem1(st0, st1));
+          } else if (stIndex === 6) { // fdecstp
+            const size = this.cpu ? (this.cpu.fpuSize | 0) : 0;
+            if (size >= 2) {
+              const tmp = this.cpu.fpu[0];
+              for (let i = 0; i < size - 1; i += 1) {
+                this.cpu.fpu[i] = this.cpu.fpu[i + 1];
+              }
+              this.cpu.fpu[size - 1] = tmp;
+            }
+          } else if (stIndex === 7) { // fincstp
+            const size = this.cpu ? (this.cpu.fpuSize | 0) : 0;
+            if (size >= 2) {
+              const tmp = this.cpu.fpu[size - 1];
+              for (let i = size - 1; i > 0; i -= 1) {
+                this.cpu.fpu[i] = this.cpu.fpu[i - 1];
+              }
+              this.cpu.fpu[0] = tmp;
+            }
           }
         } else if (reg === 7) {
           const st0 = this.fpuPeek();
-          if (stIndex === 2) {
+          if (stIndex === 0) { // fprem
+            const st1 = this.fpuGet(1);
+            this.fpuSet(0, x87Fprem(st0, st1));
+          } else if (stIndex === 1) { // fyl2xp1
+            const st1 = this.fpuGet(1);
+            this.fpuSet(1, x87Fyl2xp1(st1, st0));
+            this.fpuPop();
+          } else if (stIndex === 2) {
             this.fpuSet(0, x87Sqrt(st0));
           } else if (stIndex === 3) {
             const sincos = x87SinCos(st0);
@@ -818,7 +922,11 @@
           this.writeReg(REG.EIP, (addr + len) >>> 0);
           return true;
         }
-        // other mod=3 cases not handled
+        if (reg === 0) { // ffreep st(i)
+          this.fpuPop();
+          this.writeReg(REG.EIP, (addr + len) >>> 0);
+          return true;
+        }
         return false;
       },
 

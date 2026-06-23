@@ -189,28 +189,28 @@
   function decodeCp866Bytes(bytes) {
     const assets = KosEmu.gfx && KosEmu.gfx.kolibriFontAssets ? KosEmu.gfx.kolibriFontAssets : null;
     const map = assets && assets.cp866CodePoints ? assets.cp866CodePoints : null;
-    let out = "";
+    const parts = [];
     for (let i = 0; i < bytes.length; i += 1) {
       const value = bytes[i] & 0xff;
       if (value === 0) {
         break;
       }
       const codePoint = map && map[value] !== undefined ? map[value] : value;
-      out += String.fromCodePoint(codePoint >>> 0);
+      parts.push(String.fromCodePoint(codePoint >>> 0));
     }
-    return out;
+    return parts.join("");
   }
 
   function decodeUtf16Bytes(bytes) {
-    let out = "";
+    const parts = [];
     for (let i = 0; i + 1 < bytes.length; i += 2) {
       const value = (bytes[i] | (bytes[i + 1] << 8)) >>> 0;
       if (value === 0) {
         break;
       }
-      out += String.fromCodePoint(value);
+      parts.push(String.fromCodePoint(value));
     }
-    return out;
+    return parts.join("");
   }
 
   function decodeUtf8Bytes(bytes) {
@@ -403,11 +403,11 @@
     if (!source || !source.length) {
       return "";
     }
-    let out = "";
+    const parts = [];
     for (let i = 0; i < source.length; i += 1) {
-      out += String.fromCharCode(source[i] & 0xff);
+      parts.push(String.fromCharCode(source[i] & 0xff));
     }
-    return out;
+    return parts.join("");
   }
 
   function encodeLatin1Bytes(text) {
@@ -1691,7 +1691,9 @@
           try {
             socket.fetchController.abort();
           } catch (_) {
-            // Ignore abort failures during socket teardown.
+            if (typeof this.log === "function") {
+              this.log("Socket abort during teardown (ignored)");
+            }
           }
         }
         if (socket.peer) {

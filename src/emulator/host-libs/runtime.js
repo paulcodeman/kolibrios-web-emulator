@@ -27,17 +27,17 @@
   }
 
   function decodeAsciiZ(bytes, offset, maxLen) {
-    let out = "";
     const start = offset >>> 0;
     const limit = Math.max(0, maxLen | 0);
+    const parts = [];
     for (let i = 0; i < limit; i += 1) {
       const value = bytes[start + i] & 0xff;
       if (value === 0) {
         break;
       }
-      out += String.fromCharCode(value);
+      parts.push(String.fromCharCode(value));
     }
-    return out;
+    return parts.join("");
   }
 
   function decodeLatin1(bytes) {
@@ -45,11 +45,11 @@
     if (!source || !source.length) {
       return "";
     }
-    let out = "";
+    const parts = [];
     for (let i = 0; i < source.length; i += 1) {
-      out += String.fromCharCode(source[i] & 0xff);
+      parts.push(String.fromCharCode(source[i] & 0xff));
     }
-    return out;
+    return parts.join("");
   }
 
   function encodeLatin1(value) {
@@ -1704,7 +1704,9 @@
               try {
                 state.controller.abort();
               } catch (_) {
-                // Ignore abort failures and still surface timeout.
+                if (typeof this.logHostFetchFailure === "function") {
+                  this.logHostFetchFailure("host-http", state.url || "", "controller abort during timeout");
+                }
               }
             }
             this.settleHostHttpTransferError(state, HTTP_FLAG_TIMEOUT_ERROR | HTTP_FLAG_TRANSFER_FAILED);
@@ -1821,7 +1823,9 @@
           try {
             state.controller.abort();
           } catch (_) {
-            // Ignore abort failures during teardown.
+            if (typeof this.logHostFetchFailure === "function") {
+              this.logHostFetchFailure("host-http", state.url || "", "controller abort during teardown");
+            }
           }
         }
         return 0;
@@ -1879,6 +1883,9 @@
         try {
           return mode === "unescape" ? decodeURIComponent(text) : encodeURIComponent(text);
         } catch (_) {
+          if (typeof this.log === "function") {
+            this.log(`URI transform failed for mode=${mode}, returning raw text`);
+          }
           return text;
         }
       },

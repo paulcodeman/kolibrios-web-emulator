@@ -124,37 +124,82 @@
       .replace(/"/g, "&quot;");
   }
 
-  function createCardMarkup(entry) {
-    return (
-      `<article class="card storage-card" data-app-id="${escapeHtml(entry.id)}">` +
-        `<div class="storage-shot" style="--storage-shot-accent:${escapeHtml(entry.shotAccent)};--storage-shot-accent-soft:${escapeHtml(entry.shotAccentSoft)}">` +
-          `<div class="storage-shot-window">` +
-            `<div class="storage-shot-toolbar"></div>` +
-            `<div class="storage-shot-body">` +
-              `<div class="storage-shot-grid"></div>` +
-              `<div class="storage-shot-title">${escapeHtml(entry.shotTitle)}</div>` +
-            `</div>` +
-          `</div>` +
-        `</div>` +
-        `<div class="storage-card-body">` +
-          `<div class="storage-card-top">` +
-            `<div>` +
-              `<div class="storage-app-name">${escapeHtml(entry.name)}</div>` +
-              `<div class="storage-app-path mono">${escapeHtml(entry.path)}</div>` +
-            `</div>` +
-            `<div class="storage-badge">${escapeHtml(entry.badge)}</div>` +
-          `</div>` +
-          `<p class="storage-card-description">${escapeHtml(entry.description)}</p>` +
-          `<div class="storage-card-footer">` +
-            `<div class="storage-card-state" data-role="state">Подготовка...</div>` +
-            `<div class="storage-actions">` +
-              `<button class="storage-download-btn" type="button">Скачать</button>` +
-              `<button class="primary storage-launch-btn" type="button">Запустить</button>` +
-            `</div>` +
-          `</div>` +
-        `</div>` +
-      `</article>`
-    );
+  function createCardElement(entry) {
+    const article = document.createElement("article");
+    article.className = "card storage-card";
+    article.dataset.appId = entry.id;
+
+    const shot = document.createElement("div");
+    shot.className = "storage-shot";
+    shot.style.setProperty("--storage-shot-accent", entry.shotAccent);
+    shot.style.setProperty("--storage-shot-accent-soft", entry.shotAccentSoft);
+    const shotWindow = document.createElement("div");
+    shotWindow.className = "storage-shot-window";
+    const toolbar = document.createElement("div");
+    toolbar.className = "storage-shot-toolbar";
+    shotWindow.appendChild(toolbar);
+    const shotBody = document.createElement("div");
+    shotBody.className = "storage-shot-body";
+    const grid = document.createElement("div");
+    grid.className = "storage-shot-grid";
+    shotBody.appendChild(grid);
+    const title = document.createElement("div");
+    title.className = "storage-shot-title";
+    title.textContent = entry.shotTitle;
+    shotBody.appendChild(title);
+    shotWindow.appendChild(shotBody);
+    shot.appendChild(shotWindow);
+    article.appendChild(shot);
+
+    const cardBody = document.createElement("div");
+    cardBody.className = "storage-card-body";
+    const top = document.createElement("div");
+    top.className = "storage-card-top";
+    const nameBlock = document.createElement("div");
+    const nameEl = document.createElement("div");
+    nameEl.className = "storage-app-name";
+    nameEl.textContent = entry.name;
+    nameBlock.appendChild(nameEl);
+    const pathEl = document.createElement("div");
+    pathEl.className = "storage-app-path mono";
+    pathEl.textContent = entry.path;
+    nameBlock.appendChild(pathEl);
+    top.appendChild(nameBlock);
+    const badge = document.createElement("div");
+    badge.className = "storage-badge";
+    badge.textContent = entry.badge;
+    top.appendChild(badge);
+    cardBody.appendChild(top);
+
+    const desc = document.createElement("p");
+    desc.className = "storage-card-description";
+    desc.textContent = entry.description;
+    cardBody.appendChild(desc);
+
+    const footer = document.createElement("div");
+    footer.className = "storage-card-footer";
+    const state = document.createElement("div");
+    state.className = "storage-card-state";
+    state.dataset.role = "state";
+    state.textContent = "Подготовка...";
+    footer.appendChild(state);
+    const actions = document.createElement("div");
+    actions.className = "storage-actions";
+    const dlBtn = document.createElement("button");
+    dlBtn.className = "storage-download-btn";
+    dlBtn.type = "button";
+    dlBtn.textContent = "Скачать";
+    actions.appendChild(dlBtn);
+    const launchBtn = document.createElement("button");
+    launchBtn.className = "primary storage-launch-btn";
+    launchBtn.type = "button";
+    launchBtn.textContent = "Запустить";
+    actions.appendChild(launchBtn);
+    footer.appendChild(actions);
+    cardBody.appendChild(footer);
+    article.appendChild(cardBody);
+
+    return article;
   }
 
   function findProcessState(process) {
@@ -224,11 +269,16 @@
     if (!catalogEl) {
       return new Map();
     }
-    catalogEl.innerHTML = CATALOG.map(createCardMarkup).join("");
+    const fragment = document.createDocumentFragment();
+    for (let i = 0; i < CATALOG.length; i += 1) {
+      fragment.appendChild(createCardElement(CATALOG[i]));
+    }
+    catalogEl.textContent = "";
+    catalogEl.appendChild(fragment);
     const cards = new Map();
     for (let i = 0; i < CATALOG.length; i += 1) {
       const entry = CATALOG[i];
-      const card = catalogEl.querySelector(`[data-app-id="${entry.id}"]`);
+      const card = catalogEl.querySelector(`[data-app-id="${CSS.escape(entry.id)}"]`);
       if (!card) {
         continue;
       }

@@ -626,7 +626,9 @@
       } catch (err) {
         try {
           await this.rootHandle.removeEntry(probeName);
-        } catch (cleanupErr) {}
+        } catch (cleanupErr) {
+          console.warn("removeEntry cleanup failed:", cleanupErr);
+        }
         return {
           ok: false,
           message: err instanceof Error ? err.message : String(err)

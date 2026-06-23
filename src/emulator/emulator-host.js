@@ -66,16 +66,16 @@
     }
     const assets = KosEmu.gfx && KosEmu.gfx.kolibriFontAssets ? KosEmu.gfx.kolibriFontAssets : null;
     const map = assets && assets.cp866CodePoints ? assets.cp866CodePoints : null;
-    let out = "";
+    const parts = [];
     for (let i = 0; i < source.length; i += 1) {
       const value = source[i] & 0xff;
       if (value === 0) {
         break;
       }
       const codePoint = map && map[value] !== undefined ? map[value] : value;
-      out += String.fromCodePoint(codePoint >>> 0);
+      parts.push(String.fromCodePoint(codePoint >>> 0));
     }
-    return out;
+    return parts.join("");
   }
 
   function decodeUtf16Z(bytes) {
@@ -83,15 +83,15 @@
     if (!source || source.length < 2) {
       return "";
     }
-    let out = "";
+    const parts = [];
     for (let i = 0; i + 1 < source.length; i += 2) {
       const value = ((source[i] & 0xff) | ((source[i + 1] & 0xff) << 8)) >>> 0;
       if (value === 0) {
         break;
       }
-      out += String.fromCodePoint(value);
+      parts.push(String.fromCodePoint(value));
     }
-    return out;
+    return parts.join("");
   }
 
   function decodeSpeakerNoteDivider(noteCode) {

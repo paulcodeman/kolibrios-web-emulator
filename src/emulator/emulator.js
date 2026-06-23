@@ -562,6 +562,56 @@ function x87Scale(st0, st1) {
   return x87ScaleJs(st0, st1);
 }
 
+function x87Fprem1Js(st0, st1) {
+  const a = Number(st0);
+  const b = Number(st1);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) {
+    return NaN;
+  }
+  const quotient = a / b;
+  const q = Math.round(quotient);
+  return a - b * q;
+}
+
+function x87Fprem1(st0, st1) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87Fprem1 === "function") {
+    return Number(backend.x87Fprem1(Number(st0), Number(st1)));
+  }
+  return x87Fprem1Js(st0, st1);
+}
+
+function x87FpremJs(st0, st1) {
+  const a = Number(st0);
+  const b = Number(st1);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) {
+    return NaN;
+  }
+  const quotient = a / b;
+  const q = Math.trunc(quotient);
+  return a - b * q;
+}
+
+function x87Fprem(st0, st1) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87Fprem === "function") {
+    return Number(backend.x87Fprem(Number(st0), Number(st1)));
+  }
+  return x87FpremJs(st0, st1);
+}
+
+function x87Fyl2xp1Js(y, x) {
+  return Number(y) * Math.log2(Number(x) + 1);
+}
+
+function x87Fyl2xp1(y, x) {
+  const backend = getActiveCpuHelperBackend();
+  if (backend && typeof backend.x87Fyl2xp1 === "function") {
+    return Number(backend.x87Fyl2xp1(Number(y), Number(x)));
+  }
+  return x87Fyl2xp1Js(y, x);
+}
+
 function sseSqrtJs(value) {
   return Math.sqrt(Number(value));
 }
