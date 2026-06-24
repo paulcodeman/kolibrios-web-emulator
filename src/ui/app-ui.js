@@ -1804,7 +1804,8 @@
       if (pct >= 100) {
         emu.maxInstructions = Math.max(baseline, 2000000);
       } else {
-        emu.maxInstructions = Math.max(1, Math.round(baseline * pct / 100));
+        const ratio = pct / 100;
+        emu.maxInstructions = Math.max(1, Math.round(baseline * ratio * ratio * ratio));
       }
       const label = document.getElementById("speedValue");
       if (label) {
