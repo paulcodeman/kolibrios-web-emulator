@@ -4,121 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>KolibriOS KEX Emulator</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <link rel="stylesheet" href="src/style.css" />
   </head>
-  <body>
-    <div id="app">
-      <header class="app-header">
-        <div class="title-block">
-          <div class="title">KolibriOS KEX Emulator</div>
-          <div class="subtitle">Browser-first, GPU-backed canvas</div>
-        </div>
-        <div class="status" id="status">Idle</div>
-      </header>
-
-      <section class="controls">
-        <label class="file-picker">
-          <input id="fileInput" type="file" accept=".kex,.bin,.com" />
-          <span>Select .kex</span>
-        </label>
-        <a class="button-link" href="launcher.html">Open Desktop</a>
-        <a class="button-link" href="marketplace.html">Open Marketplace</a>
-        <button id="pickRootBtn" type="button">Pick FS Root</button>
-        <button id="clearRootBtn" type="button" disabled>Clear FS Root</button>
-        <div id="fsRootStatus" class="fs-root-status">FS root: not mounted</div>
-        <button id="runBtn" class="primary" disabled>Run</button>
-        <button id="stopBtn" disabled>Stop</button>
-        <label class="toggle cpu-backend-control">
-          <span>CPU</span>
-          <select id="cpuBackendSelect">
-            <option value="js">JS CPU</option>
-            <option value="wasm">WASM CPU</option>
-            <option value="auto">Auto CPU</option>
-          </select>
-        </label>
-        <label class="toggle">
-          <input id="traceSyscalls" type="checkbox" />
-          <span>Trace syscalls</span>
-        </label>
-        <label class="toggle">
-          <input id="traceImages" type="checkbox" />
-          <span>Trace images</span>
-        </label>
-        <label class="toggle">
-          <input id="traceOpcodes" type="checkbox" />
-          <span>Trace opcodes</span>
-        </label>
-      </section>
-
-      <section class="main">
-        <div class="screen-panel" id="screenPanel">
-          <div class="screen-panel-header">
-            <div class="screen-title">Workspace</div>
-            <button id="fullscreenBtn" class="screen-action" type="button">Fullscreen</button>
-          </div>
-          <div class="workspace" id="workspace">
-            <div class="workspace-empty" id="workspaceEmpty">Run or drop a .kex here to start it.</div>
-          </div>
-          <div class="screen-footer" id="sessionInfo">Session idle</div>
-        </div>
-
-        <div class="side-panel">
-          <div class="card">
-            <div class="card-title">Image Info</div>
-            <pre id="info" class="mono">No image loaded.</pre>
-          </div>
-          <div class="card">
-            <div class="card-title">Registers</div>
-            <pre id="regs" class="mono reg-grid">(no process)</pre>
-          </div>
-          <div class="card">
-            <div class="card-title">Control</div>
-            <div class="exec-controls">
-              <button id="pauseBtn" class="exec-btn" disabled>Pause</button>
-              <button id="stepBtn" class="exec-btn" disabled>Step</button>
-              <label class="speed-label">
-                <span>Speed</span>
-                <input id="speedSlider" type="range" min="1" max="2000000" value="800000" class="speed-slider">
-              </label>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-title">Log</div>
-            <pre id="log" class="mono">Ready.</pre>
-          </div>
-        </div>
-      </section>
+  <body class="landing-page">
+    <div class="landing">
+      <div class="landing-header">
+        <div class="landing-title">KolibriOS KEX Emulator</div>
+        <div class="landing-subtitle">Browser-first, GPU-backed canvas</div>
+      </div>
+      <div class="landing-cards">
+        <a href="launcher.html" class="landing-card">
+          <div class="landing-card-icon"><i class="fa-solid fa-display"></i></div>
+          <div class="landing-card-title">KolibriOS Desktop</div>
+          <div class="landing-card-desc">Full desktop environment with window manager and applications</div>
+        </a>
+        <a href="ide/index.html" class="landing-card">
+          <div class="landing-card-icon"><i class="fa-solid fa-code"></i></div>
+          <div class="landing-card-title">IDE</div>
+          <div class="landing-card-desc">Write and compile assembly programs for KolibriOS</div>
+        </a>
+        <a href="apps.html" class="landing-card">
+          <div class="landing-card-icon"><i class="fa-solid fa-cubes"></i></div>
+          <div class="landing-card-title">Launcher Apps</div>
+          <div class="landing-card-desc">Load and run individual .kex applications</div>
+        </a>
+        <a href="marketplace.html" class="landing-card">
+          <div class="landing-card-icon"><i class="fa-solid fa-store"></i></div>
+          <div class="landing-card-title">Marketplace</div>
+          <div class="landing-card-desc">Browse and download KolibriOS applications</div>
+        </a>
+      </div>
     </div>
-
-    <script src="src/boot.js"></script>
-    <script src="src/vendor/lzma_worker-min.js"></script>
-    <script src="src/vendor/fflate-umd.js"></script>
-    <script src="src/core/utils.js"></script>
-    <script src="src/core/loader.js"></script>
-    <script src="src/gfx/text.js"></script>
-    <script src="src/gfx/kolibri-font-assets.js"></script>
-    <script src="src/gfx/kolibri-font.js"></script>
-    <script src="src/gfx/kolibri-skin-assets.js"></script>
-    <script src="src/gfx/kolibri-skin.js"></script>
-    <script src="src/gfx/surface.js"></script>
-    <script src="src/emulator/core-access.js"></script>
-    <script src="src/emulator/host-libs/registry.js"></script>
-    <script src="src/emulator/host-libs/http.obj.js"></script>
-    <script src="src/emulator/host-libs/cnv_png.obj.js"></script>
-    <script src="src/emulator/host-libs/libimg.obj.js"></script>
-    <script src="src/emulator/host-libs/libini.obj.js"></script>
-    <script src="src/emulator/host-libs/runtime.js"></script>
-    <script src="src/emulator/emulator-host.js"></script>
-    <script src="src/emulator/core-runtime.js"></script>
-    <script src="src/emulator/core-execute.js"></script>
-    <script src="src/emulator/emulator-syscalls.js"></script>
-    <script src="src/emulator/wasm-cpu.generated.js"></script>
-    <script src="src/emulator/wasm-cpu-runtime.js"></script>
-    <script src="src/emulator/emulator.js"></script>
-    <script src="src/ui/browser-fs.js"></script>
-    <script src="src/ui/app-ui.js"></script>
-    <script src="src/ui/session-shared.js"></script>
-    <script src="src/ui/session-manager.js"></script>
-    <script src="src/app.js"></script>
   </body>
 </html>

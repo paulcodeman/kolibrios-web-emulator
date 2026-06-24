@@ -8,6 +8,8 @@ Current status
 - Headless Node runner exists for opcode discovery without DOM/graphics.
 - UI has toggles for syscall/opcode tracing and image hash tracing.
 - PLASMA renders and animates (palette updates); BCDCLK uses draw/syscall timing instead of image blits.
+- IDE in `ide/` folder: CodeMirror editor, example ASM sources, FASM.KEX + includes.
+- URL param `?load=path.kex` loads a .kex on page startup; `?ide` hides toolbars/sidebar for iframe embedding.
 
 Conventions
 - Default to ASCII in files unless a specific non-ASCII requirement exists.
@@ -38,7 +40,7 @@ When implementing
 Commands
 - Headless run: `node tools/node-runner.js <file.kex> [max_ms]`
 - Autotest (BCDCLK): `node tools/autotest-bcdclk.js [path-to-bcdclk.kex] [max_ms]`
-- Browser run: open `index.html` directly (file://, no server)
+- Browser run: open `index.html` (landing) or `apps.html` (app launcher) directly (file://, no server)
 
 References
 - sysfuncs.txt is the primary syscall specification.

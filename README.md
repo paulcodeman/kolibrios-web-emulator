@@ -16,7 +16,7 @@ It runs as a static HTML/JS app, requires no server, and includes a headless Nod
 
 Local browser run:
 
-Open `index.html` directly in a browser via `file://`.
+Open `index.html` (landing page) in a browser via `file://`. Use `apps.html` for the .kex app launcher, or `launcher.html` for the full KolibriOS desktop.
 
 Headless run:
 
@@ -42,7 +42,9 @@ The project is a static HTML/JS app, so the same entry point can also be opened 
 
 ## Layout
 
-- `index.html` - browser entry point
+- `index.html` - landing page with cards for Desktop, IDE, and Apps
+- `apps.html` - .kex app launcher (run individual applications)
+- `launcher.html` - full KolibriOS desktop environment
 - `src/` - emulator core, graphics, UI, and bundled vendor files
 - `tools/` - headless harness, capture tools, and autotests
 - `sysfuncs.txt` - primary syscall reference

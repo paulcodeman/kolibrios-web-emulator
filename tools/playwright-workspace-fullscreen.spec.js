@@ -1,7 +1,7 @@
 const path = require("path");
 const { test, expect } = require("playwright/test");
 
-const INDEX_URL = `file:///${path.resolve(__dirname, "..", "index.html").replace(/\\/g, "/")}`;
+const INDEX_URL = `file:///${path.resolve(__dirname, "..", "apps.html").replace(/\\/g, "/")}`;
 
 test("workspace fullscreen toggle", async ({ page }) => {
   await page.addInitScript(() => {

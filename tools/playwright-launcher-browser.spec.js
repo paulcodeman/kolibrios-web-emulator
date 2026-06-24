@@ -4,7 +4,7 @@ const { test, expect } = require("playwright/test");
 const { buildHostCandidates } = require("./kos-fs");
 
 const ROOT_DIR = process.env.KOS_ROOT || "C:\\Users\\Paul\\Desktop\\Kem\\kolibri_root";
-const INDEX_URL = `file:///${path.resolve(__dirname, "..", "index.html").replace(/\\/g, "/")}`;
+const INDEX_URL = `file:///${path.resolve(__dirname, "..", "apps.html").replace(/\\/g, "/")}`;
 const LAUNCHER_PATH = path.join(ROOT_DIR, "LAUNCHER");
 const FILES = [
   "LAUNCHER",

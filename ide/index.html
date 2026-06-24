@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KOS IDE</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/theme/dracula.min.css" />
+<link rel="stylesheet" href="ide.css" />
+</head>
+<body>
+<div id="ide">
+  <div id="editorPane">
+    <div id="toolbar">
+      <h1>KOS IDE</h1>
+      <select id="exampleSelect"></select>
+      <button id="runBtn">▶ Run</button>
+      <button id="stopBtn">⏹ Stop</button>
+      <span id="status"></span>
+    </div>
+    <div id="editor"></div>
+  </div>
+  <div id="emulatorPane">
+    <iframe id="emuFrame" src="../apps.html?ide"></iframe>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.js"></script>
+<script src="ide.js"></script>
+</body>
+</html>
