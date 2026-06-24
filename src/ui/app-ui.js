@@ -1792,15 +1792,16 @@
 
     setSpeed() {
       if (!this.speedSlider) return;
-      const value = parseInt(this.speedSlider.value, 10);
+      const pct = parseInt(this.speedSlider.value, 10);
+      const instructions = Math.max(1, Math.round(pct * pct * 200));
       const active = this.sessionManager && this.sessionManager.getActiveProcess();
       const emu = active && active.emulator;
       if (emu && typeof emu.maxInstructions !== "undefined") {
-        emu.maxInstructions = value;
+        emu.maxInstructions = instructions;
       }
       const label = document.getElementById("speedValue");
       if (label) {
-        label.textContent = value >= 2000000 ? "Max" : Math.round(value / 1000) + "K";
+        label.textContent = pct >= 100 ? "Max" : pct + "%";
       }
     }
 
