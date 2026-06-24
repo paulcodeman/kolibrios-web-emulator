@@ -1793,7 +1793,7 @@
     setSpeed() {
       if (!this.speedSlider) return;
       const pct = parseInt(this.speedSlider.value, 10);
-      const instructions = Math.max(1, Math.round(pct * pct * 200));
+      const instructions = Math.max(1, Math.round(pct * pct * pct * 2));
       const active = this.sessionManager && this.sessionManager.getActiveProcess();
       const emu = active && active.emulator;
       if (emu && typeof emu.maxInstructions !== "undefined") {
