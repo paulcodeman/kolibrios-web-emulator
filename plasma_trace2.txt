@@ -1,0 +1,8 @@
+Found 13 syscall sites (no patch).
+Soft scan warnings: decode failed at 0x33
+Image loaded: temp_plasma.kex
+Mapped 16.00 MB; entry=0x33 stack=0x1300
+Entry bytes: b8 44 00 00 00 bb 0b 00 00 00 cd 40 e8 60 01 00
+Emulation started (JS interpreter).
+Emulation stopped.
+Stopped after 2000 ms

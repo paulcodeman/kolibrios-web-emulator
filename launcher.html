@@ -19,10 +19,11 @@
     </nav>
     <div id="app" class="launcher-app">
       <div class="launcher-toolbar">
-        <div class="launcher-status" id="status">Booting desktop...</div>
-        <button id="restoreDefaultsBtn" class="screen-action launcher-action" type="button">Restore Defaults</button>
-        <button id="mountFolderBtn" class="screen-action launcher-action" type="button">Mount Folder</button>
+        <div class="launcher-status" id="status"><i class="fa-solid fa-spinner fa-pulse"></i> Booting desktop...</div>
+        <button id="restoreDefaultsBtn" class="screen-action launcher-action" type="button"><i class="fa-solid fa-rotate-left"></i> Restore Defaults</button>
+        <button id="mountFolderBtn" class="screen-action launcher-action" type="button"><i class="fa-solid fa-folder-open"></i> Mount Folder</button>
         <label class="screen-action launcher-action launcher-select" for="cpuBackendSelect">
+          <i class="fa-solid fa-microchip"></i>
           <span>CPU</span>
           <select id="cpuBackendSelect">
             <option value="js" selected>JS CPU</option>
@@ -30,14 +31,14 @@
             <option value="auto">Auto CPU</option>
           </select>
         </label>
-        <button id="fullscreenBtn" class="screen-action launcher-action" type="button">Fullscreen</button>
+        <button id="fullscreenBtn" class="screen-action launcher-action" type="button"><i class="fa-solid fa-expand"></i> Fullscreen</button>
       </div>
 
       <div class="workspace launcher-workspace" id="workspace">
-        <div class="workspace-empty" id="workspaceEmpty">Starting bundled KolibriOS desktop...</div>
+        <div class="workspace-empty" id="workspaceEmpty"><i class="fa-solid fa-cloud-arrow-down"></i> Starting bundled KolibriOS desktop...</div>
       </div>
 
-      <div class="launcher-session-info" id="sessionInfo">Session idle</div>
+      <div class="launcher-session-info" id="sessionInfo"><i class="fa-solid fa-circle-info"></i> Session idle</div>
 
       <div class="launcher-hidden-ui" aria-hidden="true">
         <input id="fileInput" type="file" accept=".kex,.bin,.com" tabindex="-1" />

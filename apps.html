@@ -23,16 +23,17 @@
       <section class="controls">
         <label class="file-picker">
           <input id="fileInput" type="file" accept=".kex,.bin,.com" />
-          <span>Select .kex</span>
+          <i class="fa-solid fa-folder-open"></i> <span>Select .kex</span>
         </label>
-        <a class="button-link" href="launcher.html">Open Desktop</a>
-        <a class="button-link" href="marketplace.html">Open Marketplace</a>
-        <button id="pickRootBtn" type="button">Pick FS Root</button>
-        <button id="clearRootBtn" type="button" disabled>Clear FS Root</button>
-        <div id="fsRootStatus" class="fs-root-status">FS root: not mounted</div>
-        <button id="runBtn" class="primary" disabled>Run</button>
-        <button id="stopBtn" disabled>Stop</button>
+        <a class="button-link" href="launcher.html"><i class="fa-solid fa-display"></i> Desktop</a>
+        <a class="button-link" href="marketplace.html"><i class="fa-solid fa-store"></i> Marketplace</a>
+        <button id="pickRootBtn" type="button"><i class="fa-solid fa-folder-tree"></i> Pick FS Root</button>
+        <button id="clearRootBtn" type="button" disabled><i class="fa-solid fa-trash-can"></i> Clear FS Root</button>
+        <div id="fsRootStatus" class="fs-root-status"><i class="fa-solid fa-hard-drive"></i> FS root: not mounted</div>
+        <button id="runBtn" class="primary" disabled><i class="fa-solid fa-play"></i> Run</button>
+        <button id="stopBtn" disabled><i class="fa-solid fa-stop"></i> Stop</button>
         <label class="toggle cpu-backend-control">
+          <i class="fa-solid fa-microchip"></i>
           <span>CPU</span>
           <select id="cpuBackendSelect">
             <option value="js">JS CPU</option>
@@ -42,14 +43,17 @@
         </label>
         <label class="toggle">
           <input id="traceSyscalls" type="checkbox" />
+          <i class="fa-solid fa-bug"></i>
           <span>Trace syscalls</span>
         </label>
         <label class="toggle">
           <input id="traceImages" type="checkbox" />
+          <i class="fa-solid fa-camera"></i>
           <span>Trace images</span>
         </label>
         <label class="toggle">
           <input id="traceOpcodes" type="checkbox" />
+          <i class="fa-solid fa-code"></i>
           <span>Trace opcodes</span>
         </label>
       </section>
@@ -57,40 +61,43 @@
       <section class="main">
         <div class="screen-panel" id="screenPanel">
           <div class="screen-panel-header">
-            <div class="screen-title">Workspace</div>
-            <button id="fullscreenBtn" class="screen-action" type="button">Fullscreen</button>
+            <div class="screen-title"><i class="fa-solid fa-display"></i> Workspace</div>
+            <button id="fullscreenBtn" class="screen-action" type="button"><i class="fa-solid fa-expand"></i> Fullscreen</button>
           </div>
           <div class="workspace" id="workspace">
-            <div class="workspace-empty" id="workspaceEmpty">Run or drop a .kex here to start it.</div>
+            <div class="workspace-empty" id="workspaceEmpty"><i class="fa-solid fa-download"></i> Run or drop a .kex here to start it.</div>
           </div>
-          <div class="screen-footer" id="sessionInfo">Session idle</div>
+          <div class="screen-footer" id="sessionInfo"><i class="fa-solid fa-circle-info"></i> Session idle</div>
         </div>
 
         <div class="side-panel">
-          <div class="card">
-            <div class="card-title">Image Info</div>
-            <pre id="info" class="mono">No image loaded.</pre>
-          </div>
-          <div class="card">
-            <div class="card-title">Registers</div>
-            <pre id="regs" class="mono reg-grid">(no process)</pre>
-          </div>
-          <div class="card">
-            <div class="card-title">Control</div>
-            <div class="exec-controls">
-              <button id="pauseBtn" class="exec-btn" disabled>Pause</button>
-              <button id="stepBtn" class="exec-btn" disabled>Step</button>
-              <label class="speed-label">
-                <span>Speed</span>
-                <input id="speedSlider" type="range" min="0" max="100" value="100" class="speed-slider">
-                <span id="speedValue" class="speed-value">Max</span>
-              </label>
+            <div class="card">
+              <div class="card-title"><i class="fa-solid fa-image"></i> Image Info</div>
+              <pre id="info" class="mono">No image loaded.</pre>
             </div>
-          </div>
-          <div class="card">
-            <div class="card-title">Log</div>
-            <pre id="log" class="mono">Ready.</pre>
-          </div>
+            <div class="card">
+              <div class="card-title"><i class="fa-solid fa-microchip"></i> Registers</div>
+              <pre id="regs" class="mono reg-grid">(no process)</pre>
+            </div>
+            <div class="card">
+              <div class="card-title"><i class="fa-solid fa-sliders"></i> Control</div>
+              <div class="exec-controls">
+                <div class="exec-btn-row">
+                  <button id="pauseBtn" class="exec-btn" disabled><i class="fa-solid fa-pause"></i> Pause</button>
+                  <button id="stepBtn" class="exec-btn" disabled><i class="fa-solid fa-forward-step"></i> Step</button>
+                </div>
+                <label class="speed-label">
+                  <i class="fa-solid fa-gauge-high"></i>
+                  <span>Speed</span>
+                  <input id="speedSlider" type="range" min="0" max="100" value="100" class="speed-slider">
+                  <span id="speedValue" class="speed-value">Max</span>
+                </label>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title"><i class="fa-solid fa-list"></i> Log</div>
+              <pre id="log" class="mono">Ready.</pre>
+            </div>
         </div>
       </section>
     </div>

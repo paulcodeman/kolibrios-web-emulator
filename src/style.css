@@ -10,6 +10,10 @@
   --shadow: rgba(40, 32, 24, 0.12);
   --mono: "Cascadia Code", "Fira Code", "Consolas", monospace;
   --sans: "Trebuchet MS", "Lucida Sans Unicode", "Lucida Grande", sans-serif;
+  --radius: 8px;
+  --radius-sm: 4px;
+  --transition: 160ms ease;
+  --navbar-height: 52px;
 }
 
 * {
@@ -143,7 +147,8 @@ body.launcher-page.launcher-overlays-visible .launcher-session-info {
   transform: translateX(-50%) translateY(0);
 }
 
-.launcher-hidden-ui {
+.launcher-hidden-ui,
+.storage-hidden-ui {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -168,12 +173,12 @@ body.storage-page #app {
   max-width: none;
   margin: 0;
   padding: 0;
-  min-height: calc(100vh - 52px);
+  min-height: calc(100vh - var(--navbar-height));
 }
 
 .storage-app {
   position: relative;
-  min-height: calc(100vh - 52px);
+  min-height: calc(100vh - var(--navbar-height));
 }
 
 .storage-screen-panel {
@@ -188,8 +193,8 @@ body.storage-page .storage-workspace {
   position: absolute;
   inset: 0;
   width: 100%;
-  height: calc(100vh - 52px);
-  min-height: calc(100vh - 52px);
+  height: calc(100vh - var(--navbar-height));
+  min-height: calc(100vh - var(--navbar-height));
   border: none;
   box-shadow: none;
   overflow: visible;
@@ -255,6 +260,7 @@ body.storage-page .storage-workspace .workspace-empty {
 
 .storage-hero {
   padding: 18px;
+  border-radius: var(--radius);
 }
 
 .storage-hero-title {
@@ -286,8 +292,9 @@ body.storage-page .storage-workspace .workspace-empty {
   height: 100%;
   background: rgba(255, 255, 255, 0.96);
   border-color: rgba(118, 132, 150, 0.18);
+  border-radius: var(--radius);
   box-shadow: 0 10px 24px rgba(34, 44, 64, 0.06);
-  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
 }
 
 .storage-card:hover {
@@ -438,19 +445,6 @@ body.storage-page .storage-workspace .workspace-empty {
   z-index: 40;
 }
 
-.storage-hidden-ui {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
-}
-
 body.storage-page .workspace-desktop,
 body.storage-page .workspace-desktop-canvas {
   pointer-events: none;
@@ -487,6 +481,7 @@ body.storage-page .workspace-window-chrome {
   padding: 16px 18px;
   background: var(--panel);
   border: 1px solid var(--border);
+  border-radius: var(--radius);
   box-shadow: 0 8px 20px var(--shadow);
 }
 
@@ -507,6 +502,7 @@ body.storage-page .workspace-window-chrome {
   font-size: 12px;
   padding: 6px 10px;
   border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: #fef7ea;
 }
 
@@ -524,6 +520,7 @@ body.storage-page .workspace-window-chrome {
   gap: 8px;
   padding: 8px 12px;
   border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: var(--panel);
   cursor: pointer;
   font-family: var(--mono);
@@ -542,6 +539,7 @@ body.storage-page .workspace-window-chrome {
   gap: 8px;
   padding: 6px 10px;
   border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: var(--panel);
   font-family: var(--mono);
   font-size: 12px;
@@ -589,6 +587,7 @@ body.storage-page .workspace-window-chrome {
   color: var(--muted);
   padding: 8px 10px;
   border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
   background: rgba(255, 250, 241, 0.85);
   min-width: 240px;
 }
@@ -596,6 +595,7 @@ body.storage-page .workspace-window-chrome {
 button {
   padding: 8px 14px;
   border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: var(--panel);
   cursor: pointer;
   font-family: var(--mono);
@@ -607,6 +607,7 @@ button {
   justify-content: center;
   padding: 8px 14px;
   border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: var(--panel);
   color: var(--ink);
   cursor: pointer;
@@ -640,6 +641,7 @@ select:disabled {
 .screen-panel {
   background: var(--panel);
   border: 1px solid var(--border);
+  border-radius: var(--radius);
   box-shadow: 0 10px 24px var(--shadow);
   padding: 12px;
   display: flex;
@@ -784,15 +786,15 @@ body.launcher-page .navbar {
 }
 
 body.launcher-page .launcher-app {
-  padding-top: 52px;
+  padding-top: var(--navbar-height);
 }
 
 body.launcher-page .launcher-workspace {
   position: fixed;
-  inset: 52px 0 0;
+  inset: var(--navbar-height) 0 0;
   width: 100vw;
-  height: calc(100vh - 52px);
-  min-height: calc(100vh - 52px);
+  height: calc(100vh - var(--navbar-height));
+  min-height: calc(100vh - var(--navbar-height));
   overflow: hidden;
   border: none;
   background: #000;
@@ -919,8 +921,10 @@ body.launcher-page .launcher-workspace::before {
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
+  border-radius: var(--radius);
   box-shadow: 0 6px 16px var(--shadow);
   padding: 12px;
+  transition: transform var(--transition), box-shadow var(--transition);
 }
 
 .card-title {
@@ -956,6 +960,15 @@ body.launcher-page .launcher-workspace::before {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.exec-btn-row {
+  display: flex;
+  gap: 6px;
+}
+
+.exec-btn-row .exec-btn {
+  flex: 1;
 }
 
 .exec-btn {
@@ -1057,20 +1070,13 @@ body.launcher-page .launcher-workspace::before {
   }
 }
 
-/* === Unified modern additions === */
-:root {
-  --radius: 8px;
-  --radius-sm: 4px;
-  --transition: 160ms ease;
-}
-
-/* Shared navbar */
+/* Navbar */
 .navbar {
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 0 20px;
-  height: 52px;
+  height: var(--navbar-height);
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   box-shadow: 0 2px 12px var(--shadow);
@@ -1123,45 +1129,6 @@ body.launcher-page .launcher-workspace::before {
   font-size: 11px;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
-}
-
-/* Border-radius additions */
-.app-header,
-.card,
-.screen-panel {
-  border-radius: var(--radius);
-}
-
-.landing-card {
-  border-radius: var(--radius);
-}
-
-.file-picker,
-.toggle,
-button,
-.button-link,
-.status,
-.fs-root-status {
-  border-radius: var(--radius-sm);
-}
-
-button.primary {
-  border-radius: var(--radius-sm);
-}
-
-.storage-card {
-  border-radius: var(--radius);
-}
-
-.storage-hero {
-  border-radius: var(--radius);
-}
-
-/* Hover lift on cards */
-.card,
-.storage-card,
-.landing-card {
-  transition: transform var(--transition), box-shadow var(--transition);
 }
 
 /* Landing page */
@@ -1218,10 +1185,11 @@ body.landing-page .navbar {
   padding: 36px 24px;
   background: var(--panel);
   border: 1px solid var(--border);
+  border-radius: var(--radius);
   box-shadow: 0 8px 24px var(--shadow);
   text-decoration: none;
   color: var(--ink);
-  transition: transform 160ms ease, box-shadow 160ms ease;
+  transition: transform var(--transition), box-shadow var(--transition);
   cursor: pointer;
 }
 

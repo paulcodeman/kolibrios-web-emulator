@@ -1,15 +1,8 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
 html, body {
   height: 100%;
   overflow: hidden;
   background: #1e1e2e;
   color: #cdd6f4;
-  font-family: 'Segoe UI', system-ui, sans-serif;
 }
 
 body {

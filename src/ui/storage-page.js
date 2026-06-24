@@ -106,14 +106,14 @@
       : null;
     if (active && !active.removed) {
       const label = getBaseName(active.displayPath || active.processPath || active.fileName || "app");
-      app.setStatus(`Активно: ${label}`);
+      app.setStatus(`Active: ${label}`);
       return;
     }
     if (app.browserFsRoot) {
-      app.setStatus("Каталог готов");
+      app.setStatus("Catalog ready");
       return;
     }
-    app.setStatus("Подключение каталога...");
+    app.setStatus("Connecting catalog...");
   }
 
   function escapeHtml(value) {
@@ -181,19 +181,19 @@
     const state = document.createElement("div");
     state.className = "storage-card-state";
     state.dataset.role = "state";
-    state.textContent = "Подготовка...";
+    state.textContent = "Preparing...";
     footer.appendChild(state);
     const actions = document.createElement("div");
     actions.className = "storage-actions";
     const dlBtn = document.createElement("button");
     dlBtn.className = "storage-download-btn";
     dlBtn.type = "button";
-    dlBtn.textContent = "Скачать";
+    dlBtn.textContent = "Download";
     actions.appendChild(dlBtn);
     const launchBtn = document.createElement("button");
     launchBtn.className = "primary storage-launch-btn";
     launchBtn.type = "button";
-    launchBtn.textContent = "Запустить";
+    launchBtn.textContent = "Launch";
     actions.appendChild(launchBtn);
     footer.appendChild(actions);
     cardBody.appendChild(footer);
@@ -301,7 +301,7 @@
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             card.dataset.error = message;
-            app.storageStatusOverride = "Запуск не удался";
+            app.storageStatusOverride = "Launch failed";
             app.log(`Storage launch failed for ${entry.path}: ${message}`);
             app.updateSessionState();
           }
@@ -337,18 +337,18 @@
       }
       if (launchBtn) {
         launchBtn.disabled = !app.browserFsRoot && !state.active;
-        launchBtn.textContent = state.active ? "Стоп" : "Запустить";
+        launchBtn.textContent = state.active ? "Stop" : "Launch";
       }
       card.classList.toggle("storage-card-running", state.active);
       if (state.active && stateEl) {
-        stateEl.textContent = `Запущено: PID ${state.pid}`;
+        stateEl.textContent = `Running: PID ${state.pid}`;
         card.dataset.error = "";
       } else if (!app.browserFsRoot && stateEl) {
-        stateEl.textContent = "Подключение root...";
+        stateEl.textContent = "Connecting root...";
       } else if (errorText && stateEl) {
-        stateEl.textContent = `Ошибка: ${errorText}`;
+        stateEl.textContent = `Error: ${errorText}`;
       } else if (stateEl) {
-        stateEl.textContent = "Готово";
+        stateEl.textContent = "Ready";
       }
     }
   }
@@ -395,7 +395,7 @@
       })
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
-        app.storageStatusOverride = "Каталог недоступен";
+        app.storageStatusOverride = "Catalog unavailable";
         app.log(`Storage boot failed: ${message}`);
         app.updateSessionState();
       });
