@@ -4511,7 +4511,9 @@
       const hasParentContext = !!(parentSlot || parentPid);
       const parent = this.processBySlot.get(parentSlot) || this.processByPid.get(parentPid) || null;
       const rawPath = request && request.path ? String(request.path) : "";
-      const processArgs = request && request.params ? String(request.params) : "";
+      const processArgs = request && request.params
+        ? (Array.isArray(request.params) ? request.params.join(" ") : String(request.params))
+        : "";
       if (!rawPath) {
         return { errorCode: 33, pid: 0 };
       }

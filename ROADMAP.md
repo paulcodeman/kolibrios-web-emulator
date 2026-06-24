@@ -56,6 +56,12 @@ Goal: Run KolibriOS 32-bit .kex apps in the browser using a JS x86 interpreter a
 - Add regression tests and golden screenshots.
 - Add debugging tools (register view, memory dump, syscall trace).
 
+## Milestone 6b - IDE / Development Environment
+- Created `ide/` folder with CodeMirror-based editor, example sources, and FASM.KEX + includes.
+- IDE page (`ide/index.html`) shows editor + emulator iframe side by side.
+- Pre-compiled examples run directly via `?load=` URL parameter.
+- FASM.KEX ready for future in-emulator compilation pipeline.
+
 ## Milestone 7 - KolibriOS 32-bit Core Completion
 - Treat this as a KolibriOS userland target, not full IA-32 completeness.
 - Build and maintain a corpus of stock Kolibri apps, launcher services, and SDK-built apps that exercise different runtime/library paths.

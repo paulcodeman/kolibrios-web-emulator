@@ -4618,9 +4618,16 @@
             this.writeReg(REG.EAX, prev >>> 0);
             break;
           }
-          case 26:
+          case 26: {
+            const bufPtr = this.readReg(REG.ECX) >>> 0;
+            const bufSize = this.readReg(REG.EDX) >>> 0;
+            const cmdLine = this.processArgs || "";
+            if (bufPtr && bufSize > 0) {
+              this.writeCString(bufPtr, cmdLine, bufSize);
+            }
             this.writeReg(REG.EAX, 0);
             break;
+          }
           case 27:
             this.sysLoadFile();
             break;
