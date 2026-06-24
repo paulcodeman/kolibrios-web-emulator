@@ -12,9 +12,15 @@ html, body {
   font-family: 'Segoe UI', system-ui, sans-serif;
 }
 
+body {
+  display: flex;
+  flex-direction: column;
+}
+
 #ide {
   display: flex;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 #editorPane {

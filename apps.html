@@ -4,18 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>KolibriOS Emulator — Apps</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <link rel="stylesheet" href="src/style.css" />
   </head>
   <body>
-    <div id="app">
-      <header class="app-header">
-        <div class="title-block">
-          <div class="title">KolibriOS Emulator</div>
-          <div class="subtitle">Run KolibriOS applications in your browser</div>
-        </div>
-        <div class="status" id="status">Idle</div>
-      </header>
+    <nav class="navbar">
+      <a href="index.html" class="navbar-brand">KolibriOS Emulator</a>
+      <div class="navbar-links">
+        <a href="launcher.html"><i class="fa-solid fa-display"></i> Desktop</a>
+        <a href="apps.html" class="active"><i class="fa-solid fa-cubes"></i> Apps</a>
+        <a href="marketplace.html"><i class="fa-solid fa-store"></i> Marketplace</a>
+        <a href="ide/index.html"><i class="fa-solid fa-code"></i> IDE</a>
+      </div>
+      <div class="status" id="status">Idle</div>
+    </nav>
 
+    <div id="app">
       <section class="controls">
         <label class="file-picker">
           <input id="fileInput" type="file" accept=".kex,.bin,.com" />
