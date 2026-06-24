@@ -997,6 +997,13 @@ body.launcher-page .launcher-workspace::before {
   accent-color: var(--accent);
 }
 
+.speed-value {
+  min-width: 40px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 @media (max-width: 900px) {
   .main {
     grid-template-columns: 1fr;

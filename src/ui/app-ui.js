@@ -507,6 +507,7 @@
       }
       if (this.speedSlider) {
         this.speedSlider.addEventListener("input", () => this.setSpeed());
+        this.setSpeed();
       }
       if (this.cpuBackendSelect) {
         this.cpuBackendSelect.addEventListener("change", () => this.applyCpuBackendConfig());
@@ -1796,6 +1797,10 @@
       const emu = active && active.emulator;
       if (emu && typeof emu.maxInstructions !== "undefined") {
         emu.maxInstructions = value;
+      }
+      const label = document.getElementById("speedValue");
+      if (label) {
+        label.textContent = value >= 2000000 ? "Max" : Math.round(value / 1000) + "K";
       }
     }
 
