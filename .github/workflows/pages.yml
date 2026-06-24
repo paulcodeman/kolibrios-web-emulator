@@ -35,8 +35,8 @@ jobs:
       - name: Prepare site artifact
         run: |
           mkdir -p dist
-          cp index.html dist/index.html
-          cp -R src dist/
+          cp *.html dist/
+          cp -R src ide assets_kolibrios dist/
           touch dist/.nojekyll
 
       - name: Upload Pages artifact
