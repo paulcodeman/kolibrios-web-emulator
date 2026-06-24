@@ -2,52 +2,58 @@
 
 Browser-first JavaScript emulator for KolibriOS `.kex` applications.
 
-It runs as a static HTML/JS app, requires no server, and includes a headless Node.js runner for opcode and syscall debugging.
+Runs as a static HTML/JS app (no server required). Supports both browser and headless Node.js execution.
 
-## Status
+## Features
 
-- Static browser UI with `.kex` loader and KPCK unpacking
 - Interpreter-only CPU core with growing opcode and FPU coverage
-- GPU-backed rendering surface in the browser
-- `int 0x40` syscall dispatch and tracing toggles
-- Headless Node.js runner for verification and opcode discovery
-
-## Run
-
-Local browser run:
-
-Open `index.html` (landing page) in a browser via `file://`. Use `apps.html` for the .kex app launcher, or `launcher.html` for the full KolibriOS desktop.
-
-Headless run:
-
-```bash
-node tools/node-runner.js <file.kex> [max_ms]
-```
-
-BCDCLK autotest:
-
-```bash
-node tools/autotest-bcdclk.js [path-to-bcdclk.kex] [max_ms]
-```
+- GPU-backed rendering (WebGL2 with 2D fallback)
+- `int 0x40` syscall dispatch with live tracing toggles
+- KPCK-packed .kex unpacking via in-browser LZMA
+- Speed control with auto-calibration (measures baseline, cubic ratio mapping)
+- FASM IDE with syntax highlighting and compile-and-run
+- App marketplace with download/launch management
 
 ## Live Demo
-
-Try it in the browser:
 
 ```text
 https://paulcodeman.github.io/kolibrios-web-emulator/
 ```
 
-The project is a static HTML/JS app, so the same entry point can also be opened locally via `file://`.
+## Pages
 
-## Layout
+| Page | Description |
+|---|---|
+| `index.html` | Landing page with 4 cards (Desktop / IDE / Apps / Marketplace) |
+| `launcher.html` | Full KolibriOS desktop environment (auto-boots bundled OS) |
+| `apps.html` | Individual .kex app launcher with side panel and speed control |
+| `marketplace.html` | App catalog with download and one-click launch |
+| `ide/index.html` | FASM code editor with compile-and-run via embedded emulator |
 
-- `index.html` - landing page with cards for Desktop, IDE, and Apps
-- `apps.html` - .kex app launcher (run individual applications)
-- `launcher.html` - full KolibriOS desktop environment
-- `src/` - emulator core, graphics, UI, and bundled vendor files
-- `tools/` - headless harness, capture tools, and autotests
-- `sysfuncs.txt` - primary syscall reference
+## Run Locally
+
+Open any `.html` file directly in a browser via `file://`. No HTTP server needed.
+
+### Headless
+
+```bash
+node tools/node-runner.js <file.kex> [max_ms]
+```
+
+### Autotests
+
+```bash
+node tools/autotest-bcdclk.js [path-to-bcdclk.kex] [max_ms]
+```
+
+## Project Layout
+
+- `src/` — emulator core, GPU surface, UI modules, bundled vendor libs
+- `ide/` — FASM code editor (CodeMirror), examples, includes
+- `tools/` — headless runner, autotests, benchmarking, build scripts
+- `assets_kolibrios/` — built-in KolibriOS root filesystem
+- `.github/workflows/pages.yml` — GitHub Actions deploy to Pages
+- `sysfuncs.txt` — primary `int 0x40` syscall reference
 
 ## License
 
