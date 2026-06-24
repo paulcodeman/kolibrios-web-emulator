@@ -1793,11 +1793,18 @@
     setSpeed() {
       if (!this.speedSlider) return;
       const pct = parseInt(this.speedSlider.value, 10);
-      const instructions = Math.max(1, Math.round(pct * pct * pct * 2));
       const active = this.sessionManager && this.sessionManager.getActiveProcess();
       const emu = active && active.emulator;
-      if (emu && typeof emu.maxInstructions !== "undefined") {
-        emu.maxInstructions = instructions;
+      this.applySpeed(emu, pct);
+    }
+
+    applySpeed(emu, pct) {
+      if (!emu) return;
+      const baseline = emu._perfBaseline || emu.maxInstructions || 800000;
+      if (pct >= 100) {
+        emu.maxInstructions = Math.max(baseline, 2000000);
+      } else {
+        emu.maxInstructions = Math.max(1, Math.round(baseline * pct / 100));
       }
       const label = document.getElementById("speedValue");
       if (label) {

@@ -85,6 +85,9 @@
         const busyStart = typeof this.getWallClockMs === "function" ? this.getWallClockMs() : Date.now();
         this.cpuBusyActiveStartMs = busyStart;
         this.beginInterpreterSlice(busyStart);
+        if (!this._perfCalibrated) {
+          this.maxInstructions = 10000000;
+        }
         const budget = Math.max(
           1,
           typeof this.getInterpreterBudget === "function"
@@ -212,6 +215,20 @@
         this.presentYieldPending = false;
         const delay = this.yieldRequested ? this.yieldDelay : 0;
         this.scheduleStep(delay);
+        if (!this._perfCalibrated && executed > 0) {
+          if (!this._perfSamples) this._perfSamples = [];
+          this._perfSamples.push(executed);
+          if (this._perfSamples.length >= 120) {
+            let sum = 0;
+            for (let i = 0; i < this._perfSamples.length; i++) sum += this._perfSamples[i];
+            this._perfBaseline = Math.round(sum / this._perfSamples.length);
+            this._perfCalibrated = true;
+            this._perfSamples = [];
+            if (typeof this.onPerfCalibrated === "function") {
+              this.onPerfCalibrated(this._perfBaseline);
+            }
+          }
+        }
       },
 
       handleUnknownOpcodeAt(eip) {

@@ -801,6 +801,12 @@
         this.setWindowShape(shape);
       };
       emulator.onStopped = (reason) => this.handleStopped(reason);
+      emulator.onPerfCalibrated = (baseline) => {
+        if (typeof this.app.applySpeed === "function") {
+          const pct = this.app.speedSlider ? parseInt(this.app.speedSlider.value, 10) : 100;
+          this.app.applySpeed(emulator, pct);
+        }
+      };
       const originalPresent = this.surface.present.bind(this.surface);
       this.surface.present = () => {
         originalPresent();
