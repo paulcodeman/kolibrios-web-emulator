@@ -3376,6 +3376,12 @@
       return this.desktopBackgroundData.slice();
     }
 
+    setAppCursor(cssCursor) {
+      if (this.shellEl) {
+        this.shellEl.style.cursor = cssCursor || 'default';
+      }
+    }
+
     setDesktopBackgroundSize(width, height) {
       const w = Math.max(0, width | 0);
       const h = Math.max(0, height | 0);

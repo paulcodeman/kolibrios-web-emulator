@@ -4129,10 +4129,27 @@
           case 4: {
             if (!this.nextCursorHandle) {
               this.nextCursorHandle = 1;
+              this.loadedCursors = new Map();
             }
+            const dx = this.readReg(REG.EDX) & 0xffff;
+            const ecx = this.readReg(REG.ECX) >>> 0;
             const handle = this.nextCursorHandle;
             this.nextCursorHandle += 1;
-            this.currentCursorHandle = handle;
+            let cursorCss = '';
+            if (dx === 2) {
+              const hotXY = this.readReg(REG.EDX) >>> 0;
+              const hotX = (hotXY >>> 24) & 0xff;
+              const hotY = (hotXY >>> 16) & 0xff;
+              const pixelBytes = 32 * 32 * 4;
+              const pixels = ecx ? this.readMemBlock(ecx, pixelBytes) : null;
+              if (pixels && pixels.length >= pixelBytes) {
+                cursorCss = this.argbPixelsToCssCursor(pixels, 32, 32, hotX, hotY);
+              }
+            }
+            if (cursorCss) {
+              this.loadedCursors.set(handle, cursorCss);
+              this.currentCursorHandle = handle;
+            }
             this.writeReg(REG.EAX, handle >>> 0);
             return;
           }
@@ -4140,14 +4157,54 @@
             const prev = this.currentCursorHandle || 0;
             const handle = this.readReg(REG.ECX) >>> 0;
             this.currentCursorHandle = handle >>> 0;
+            if (handle === 0) {
+              this.applyCursorCss('');
+            } else {
+              const cursors = this.loadedCursors || new Map();
+              const css = cursors.get(handle) || '';
+              this.applyCursorCss(css);
+            }
             this.writeReg(REG.EAX, prev >>> 0);
             return;
           }
           case 6: {
             const handle = this.readReg(REG.ECX) >>> 0;
+            if (this.loadedCursors) {
+              this.loadedCursors.delete(handle);
+            }
             if (this.currentCursorHandle === handle) {
               this.currentCursorHandle = 0;
+              this.applyCursorCss('');
             }
+            return;
+          }
+          case 8: {
+            if (!this.nextCursorHandle) {
+              this.nextCursorHandle = 1;
+              this.loadedCursors = new Map();
+            }
+            const ecx = this.readReg(REG.ECX) >>> 0;
+            const handle = this.nextCursorHandle;
+            this.nextCursorHandle += 1;
+            if (ecx) {
+              const pixelBytes = 32 * 32 * 4 + 8;
+              const buf = this.readMemBlock(ecx, pixelBytes);
+              if (buf && buf.length >= pixelBytes) {
+                const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+                const w = view.getUint32(0, true);
+                const h = view.getUint32(4, true);
+                const hotX = buf[buf.length - 2];
+                const hotY = buf[buf.length - 1];
+                if (w <= 64 && h <= 64 && w > 0 && h > 0) {
+                  const pixels = buf.subarray(8, 8 + w * h * 4);
+                  const css = this.argbPixelsToCssCursor(pixels, w, h, hotX, hotY);
+                  if (css) {
+                    this.loadedCursors.set(handle, css);
+                  }
+                }
+              }
+            }
+            this.writeReg(REG.EAX, handle >>> 0);
             return;
           }
           case 7: {
@@ -4165,6 +4222,41 @@
               this.log(`Unhandled syscall 37 sub ${sub}`);
             }
             return;
+        }
+      },
+
+      applyCursorCss(css) {
+        if (this.hostSession && typeof this.hostSession.setAppCursor === 'function') {
+          this.hostSession.setAppCursor(css || '');
+        }
+      },
+
+      argbPixelsToCssCursor(pixels, width, height, hotX, hotY) {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return '';
+          const imageData = ctx.createImageData(width, height);
+          const src = new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength);
+          const dst = imageData.data;
+          for (let i = 0; i < width * height; i++) {
+            const off = i * 4;
+            const a = src[off + 3];
+            const r = src[off + 2];
+            const g = src[off + 1];
+            const b = src[off];
+            dst[off] = (r * a / 255) | 0;
+            dst[off + 1] = (g * a / 255) | 0;
+            dst[off + 2] = (b * a / 255) | 0;
+            dst[off + 3] = a;
+          }
+          ctx.putImageData(imageData, 0, 0);
+          const dataUrl = canvas.toDataURL('image/png');
+          return `url('${dataUrl}') ${hotX} ${hotY}, auto`;
+        } catch (e) {
+          return '';
         }
       },
 

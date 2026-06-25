@@ -551,7 +551,10 @@
           this.mouseScrollX = ((this.mouseScrollX | 0) + (wheelX | 0)) | 0;
         }
         if (pressMask) {
-          const button = this.findDefinedButtonAt(this.mouseX | 0, this.mouseY | 0);
+          const button = this.findDefinedButtonAt(
+            (this.mouseX - this.windowClientOffsetX) | 0,
+            (this.mouseY - this.windowClientOffsetY) | 0
+          );
           this.activeButtonSerial = button ? (button.serial >>> 0) : 0;
           if (button) {
             buttonEventQueued = !!this.queuePressedButton(button);
