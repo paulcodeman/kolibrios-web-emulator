@@ -73,6 +73,7 @@ class WebGLSurface {
   constructor(canvas, gl, width, height) {
     this.canvas = canvas;
     this.gl = gl;
+    this.maxTexSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     this.contextLost = false;
     this.webglSlotOwned = false;
     this.boundContextLost = (event) => this.handleContextLost(event);
@@ -90,7 +91,13 @@ class WebGLSurface {
   }
 
   resize(width, height) {
-    const size = resolveSurfaceSize(width, height);
+    let size = resolveSurfaceSize(width, height);
+    if (size.width > this.maxTexSize || size.height > this.maxTexSize) {
+      size = resolveSurfaceSize(
+        Math.min(size.width, this.maxTexSize),
+        Math.min(size.height, this.maxTexSize)
+      );
+    }
     if (size.width === this.width && size.height === this.height) {
       return;
     }
