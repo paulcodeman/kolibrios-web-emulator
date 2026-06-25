@@ -2563,7 +2563,6 @@
         nextMem.set(this.cpu.mem);
         this.cpu.mem = nextMem;
         this.cpu.view = new DataView(nextMem.buffer);
-        this.cpu.u32 = new Uint32Array(nextMem.buffer);
         this.memLimit = nextSize >>> 0;
         if (this.heapEnabled) {
           this.heapLowSize = Math.max(0, nextSize - (this.heapLowBase >>> 0)) >>> 0;

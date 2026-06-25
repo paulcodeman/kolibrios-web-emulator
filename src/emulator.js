@@ -4302,7 +4302,6 @@ class Emulator {
     this.cpu = {
       mem,
       view: new DataView(mem.buffer),
-      u32: new Uint32Array(mem.buffer),
       regs,
       fpu: new Float64Array(8),
       fpuSize: 0,
