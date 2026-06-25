@@ -2650,6 +2650,10 @@
       this.writeReg(REG.EIP, next);
       return true;
     }
+    const _fastHandler = this._opcodeFastTable && this._opcodeFastTable[opcode];
+    if (_fastHandler) {
+      return _fastHandler.call(this, addr);
+    }
     switch (opcode) {
     case 0x06:
     case 0x0e:
@@ -7783,6 +7787,140 @@
 
     
     });
+
+    // Fast opcode dispatch table
+    const _ft = new Array(256);
+    Emulator.prototype._opcodeFastTable = _ft;
+
+    // NOP
+    _ft[0x90] = function(addr) {
+      this.writeReg(REG.EIP, (addr + 1) >>> 0);
+      return true;
+    };
+
+    // PUSH reg32 (0x50-0x57)
+    for (let i = 0x50; i <= 0x57; i++) {
+      const ri = i - 0x50;
+      _ft[i] = function(addr) {
+        const value = this.readReg32ByIndex(ri);
+        let esp = this.readReg(REG.ESP);
+        esp = (esp - 4) >>> 0;
+        this.writeMem32(esp, value);
+        this.writeReg(REG.ESP, esp);
+        this.writeReg(REG.EIP, (addr + 1) >>> 0);
+        return true;
+      };
+    }
+
+    // POP reg32 (0x58-0x5f)
+    for (let i = 0x58; i <= 0x5f; i++) {
+      const ri = i - 0x58;
+      _ft[i] = function(addr) {
+        let esp = this.readReg(REG.ESP);
+        const value = this.readMem32(esp);
+        esp = (esp + 4) >>> 0;
+        this.writeReg(REG.ESP, esp);
+        this.writeReg32ByIndex(ri, value);
+        this.writeReg(REG.EIP, (addr + 1) >>> 0);
+        return true;
+      };
+    }
+
+    // RET near (0xc3)
+    _ft[0xc3] = function(addr) {
+      const promoted = this.promoteDynamicSoftInstruction(addr);
+      if (promoted !== null) {
+        return !!promoted;
+      }
+      let esp = this.readReg(REG.ESP);
+      const target = this.readMem32(esp);
+      esp = (esp + 4) >>> 0;
+      this.writeReg(REG.ESP, esp);
+      this.writeReg(REG.EIP, target >>> 0);
+      return true;
+    };
+
+    // JMP short (0xeb)
+    _ft[0xeb] = function(addr) {
+      const promoted = this.promoteDynamicSoftInstruction(addr);
+      if (promoted !== null) {
+        return !!promoted;
+      }
+      const rel8 = (this.readMem8((addr + 1) >>> 0) << 24) >> 24;
+      const next = (addr + 2) >>> 0;
+      this.writeReg(REG.EIP, (next + rel8) >>> 0);
+      return true;
+    };
+
+    // Jcc short (0x70-0x7f)
+    for (let i = 0x70; i <= 0x7f; i++) {
+      const op = i;
+      _ft[i] = function(addr) {
+        const promoted = this.promoteDynamicSoftInstruction(addr);
+        if (promoted !== null) {
+          return !!promoted;
+        }
+        const rel8 = (this.readMem8((addr + 1) >>> 0) << 24) >> 24;
+        const flags = this.readReg(REG.EFLAGS);
+        const take = evalJccCondition(op & 0x0f, flags);
+        const next = (addr + 2) >>> 0;
+        this.writeReg(REG.EIP, take ? (next + rel8) >>> 0 : next);
+        return true;
+      };
+    }
+
+    // MOV r/m32, r32 (0x89) / MOV r32, r/m32 (0x8b) / LEA r32, m (0x8d)
+    for (let i = 0x89; i <= 0x8d; i += 2) {
+      const opcode = i;
+      _ft[i] = function(addr) {
+        const bytes = this.readMemBlock(addr, 16);
+        if (!bytes) {
+          return false;
+        }
+        const modrmInfo = this.getCachedModRmInfo(addr, bytes, 1);
+        if (opcode === 0x8d) {
+          let value = 0;
+          if (modrmInfo.mod === 3) {
+            value = this.readReg32ByIndex(modrmInfo.rm);
+          } else {
+            const ea = this.calcEffectiveAddress(modrmInfo);
+            if (ea === null) {
+              return false;
+            }
+            value = ea >>> 0;
+          }
+          this.writeReg32ByIndex(modrmInfo.reg, value >>> 0);
+          this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
+          return true;
+        }
+        if (opcode === 0x8b) {
+          let value = 0;
+          if (modrmInfo.mod === 3) {
+            value = this.readReg32ByIndex(modrmInfo.rm);
+          } else {
+            const ea = this.calcEffectiveAddress(modrmInfo);
+            if (ea === null) {
+              return false;
+            }
+            value = this.readMem32(ea);
+          }
+          this.writeReg32ByIndex(modrmInfo.reg, value >>> 0);
+        } else {
+          const value = this.readReg32ByIndex(modrmInfo.reg);
+          if (modrmInfo.mod === 3) {
+            this.writeReg32ByIndex(modrmInfo.rm, value);
+          } else {
+            const ea = this.calcEffectiveAddress(modrmInfo);
+            if (ea === null) {
+              return false;
+            }
+            this.writeMem32(ea, value);
+          }
+        }
+        this.writeReg(REG.EIP, (addr + 1 + modrmInfo.size) >>> 0);
+        return true;
+      };
+    }
   }
 
   KosEmu.emu.installCoreExecute = installCoreExecute;

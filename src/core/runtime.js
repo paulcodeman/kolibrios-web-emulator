@@ -96,6 +96,8 @@
         );
         try {
           while (executed < budget && this.running && !this.yieldRequested) {
+            this.shouldYieldForTimeslice();
+            if (this.yieldRequested) break;
             const eip = regs[REG.EIP] >>> 0;
             this.lastEip = eip;
             if (this.syscallSiteSet.has(eip)) {
@@ -106,7 +108,6 @@
               }
               this.repeatCurrentInstruction = false;
               executed += 1;
-              this.shouldYieldForTimeslice();
               continue;
             }
             const softSite = this.softInstructions ? this.getSoftInstructionSite(eip) : null;
@@ -115,7 +116,6 @@
               const cached = this.executeCachedBasicBlock(eip, budget - executed);
               if (cached > 0) {
                 executed += cached;
-                this.shouldYieldForTimeslice();
                 continue;
               }
               if (!this.running) {
@@ -124,7 +124,6 @@
               const built = this.executeAndBuildBasicBlock(eip, budget - executed);
               if (built > 0) {
                 executed += built;
-                this.shouldYieldForTimeslice();
                 continue;
               }
               if (!this.running) {
@@ -133,12 +132,10 @@
             }
             if (softSite && this.handleSoftInstruction(eip, softSite)) {
               executed += 1;
-              this.shouldYieldForTimeslice();
               continue;
             }
             if (this.invokeHostCallStub && this.invokeHostCallStub(eip)) {
               executed += 1;
-              this.shouldYieldForTimeslice();
               continue;
             }
             const b0 = this.readMem8(eip);
@@ -151,13 +148,11 @@
               }
               this.repeatCurrentInstruction = false;
               executed += 1;
-              this.shouldYieldForTimeslice();
               continue;
             }
             const cached = this.executeCachedBasicBlock(eip, budget - executed);
             if (cached > 0) {
               executed += cached;
-              this.shouldYieldForTimeslice();
               continue;
             }
             if (!this.running) {
@@ -166,7 +161,6 @@
             const built = this.executeAndBuildBasicBlock(eip, budget - executed);
             if (built > 0) {
               executed += built;
-              this.shouldYieldForTimeslice();
               continue;
             }
             if (!this.running) {
@@ -181,7 +175,6 @@
               break;
             }
             executed += 1;
-            this.shouldYieldForTimeslice();
           }
         } catch (err) {
           this.cpuBusyActiveStartMs = 0;
@@ -2240,6 +2233,9 @@
         const start = addr >>> 0;
         const byteCount = size >>> 0;
         if (!byteCount) {
+          return;
+        }
+        if (this.processReservedSize && start >= this.processReservedSize) {
           return;
         }
         if (!this.writeMayAffectTrackedCode(start, byteCount)) {
