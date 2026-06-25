@@ -745,15 +745,14 @@
         }
       },
 
-      findDefinedButtonAt(screenX, screenY) {
+      findDefinedButtonAt(localX, localY) {
         for (let i = this.buttons.length - 1; i >= 0; i -= 1) {
           const button = this.buttons[i];
-          const pos = this.applyWindowOffset(button.x, button.y);
           if (
-            screenX >= (pos.x | 0) &&
-            screenY >= (pos.y | 0) &&
-            screenX < ((pos.x + button.width) | 0) &&
-            screenY < ((pos.y + button.height) | 0)
+            localX >= button.x &&
+            localY >= button.y &&
+            localX < (button.x + button.width) &&
+            localY < (button.y + button.height)
           ) {
             return button;
           }
