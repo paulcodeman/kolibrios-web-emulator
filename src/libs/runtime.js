@@ -2097,14 +2097,15 @@
           }
           const value = view.getUint32((offset + 8) >>> 0, true) >>> 0;
           const sectionNumber = view.getInt16((offset + 12) >>> 0, true);
+          const symName = readCoffSymbolName(data, view, offset, stringTableOffset, stringTableSize);
           let absoluteValue = value >>> 0;
           if (sectionNumber > 0 && sectionNumber <= sections.length) {
             absoluteValue = (ptr + sections[sectionNumber - 1].rva + value) >>> 0;
           } else if (sectionNumber === 0) {
-            absoluteValue = this.resolveExternalCoffSymbol(name, resolvedPath) >>> 0;
+            absoluteValue = this.resolveExternalCoffSymbol(symName, resolvedPath) >>> 0;
           }
           symbols[i] = {
-            name: readCoffSymbolName(data, view, offset, stringTableOffset, stringTableSize),
+            name: symName,
             absoluteValue
           };
         }
