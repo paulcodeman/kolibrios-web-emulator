@@ -3,7 +3,7 @@ const os = require("os");
 const path = require("path");
 const vm = require("vm");
 const { createNodeFileProviders } = require("./kos-fs");
-const sessionShared = require("../src/ui/session-shared.js");
+const sessionShared = require("../src/ui/session.js");
 const { writeSurfacePng } = require("./surface-snapshot");
 
 const DEFAULT_CPU_FREQ_HZ = 2400000000;
@@ -28,29 +28,29 @@ const REG = {
 
 const SCRIPT_LIST = [
   "../src/boot.js",
-  "../src/core/utils.js",
-  "../src/core/loader.js",
-  "../src/gfx/text.js",
+  "../src/format/bytes.js",
+  "../src/format/kex-loader.js",
+  "../src/gfx/font-5x7.js",
   "../src/gfx/kolibri-font-assets.js",
   "../src/gfx/kolibri-font.js",
   "../src/gfx/kolibri-skin-assets.js",
   "../src/gfx/kolibri-skin.js",
   "../src/gfx/surface.js",
-  "../src/emulator/core-access.js",
-  "../src/emulator/host-libs/registry.js",
-  "../src/emulator/host-libs/http.obj.js",
-  "../src/emulator/host-libs/cnv_png.obj.js",
-  "../src/emulator/host-libs/libimg.obj.js",
-  "../src/emulator/host-libs/libini.obj.js",
-  "../src/emulator/host-libs/runtime.js",
-  "../src/emulator/emulator-host.js",
-  "../src/emulator/core-runtime.js",
-  "../src/emulator/core-execute.js",
-  "../src/emulator/emulator-syscalls.js",
-  "../src/emulator/wasm-cpu.generated.js",
-  "../src/emulator/wasm-cpu-runtime.js",
-  "../src/emulator/emulator.js",
-  "../src/ui/app-ui.js",
+  "../src/core/access.js",
+  "../src/libs/registry.js",
+  "../src/libs/http.obj.js",
+  "../src/libs/cnv_png.obj.js",
+  "../src/libs/libimg.obj.js",
+  "../src/libs/libini.obj.js",
+  "../src/libs/runtime.js",
+  "../src/host/environment.js",
+  "../src/core/runtime.js",
+  "../src/core/execute.js",
+  "../src/syscall/dispatcher.js",
+  "../src/core/wasm.js",
+  "../src/core/wasm-glue.js",
+  "../src/emulator.js",
+  "../src/ui/app.js",
   "../src/app.js"
 ];
 

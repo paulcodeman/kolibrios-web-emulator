@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 
 const DEFAULT_SOURCE_ROOT = "C:\\kos";
-const DEFAULT_OUTPUT = path.resolve(__dirname, "..", "assets_kolibrios", "builtin-root.js");
+const DEFAULT_OUTPUT = path.resolve(__dirname, "..", "assets_kolibrios", "builtin-root-data.js");
 
 function walkFiles(rootDir) {
   const out = [];

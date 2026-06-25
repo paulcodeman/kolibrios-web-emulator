@@ -4,8 +4,8 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
-const SOURCE_FILE = path.join(REPO_ROOT, "src", "emulator", "wasm-cpu.zig");
-const OUTPUT_FILE = path.join(REPO_ROOT, "src", "emulator", "wasm-cpu.generated.js");
+const SOURCE_FILE = path.join(REPO_ROOT, "src", "core", "wasm.zig");
+const OUTPUT_FILE = path.join(REPO_ROOT, "src", "core", "wasm.js");
 const TEMP_WASM = path.join(REPO_ROOT, ".tools", "wasm-cpu.wasm");
 
 function findZigBinary() {
@@ -58,7 +58,7 @@ function writeGeneratedAsset(bytes, zigVersion) {
     byteLength: ${bytes.length},
     sha256: "${sha256}",
     zigVersion: "${zigVersion}",
-    source: "src/emulator/wasm-cpu.zig"
+    source: "src/core/wasm.zig"
   };
 })();
 `;
