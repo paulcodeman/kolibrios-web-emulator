@@ -2703,6 +2703,7 @@
           srcRow += stride;
           dstRow += dstStride;
         }
+        this.surface.dirty = true;
         return true;
       },
 

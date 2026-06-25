@@ -3458,6 +3458,7 @@
             surface.buffer32[(y * width) + x] = grid;
           }
         }
+        surface.dirty = true;
         return;
       }
 
@@ -3483,6 +3484,7 @@
         }
       }
     }
+    surface.dirty = true;
 
     presentDesktopSurface() {
       if (this.desktopSurface && typeof this.desktopSurface.present === "function") {

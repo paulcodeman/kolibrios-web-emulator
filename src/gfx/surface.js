@@ -130,6 +130,7 @@ class WebGLSurface {
     this.height = size.height;
     this.buffer32 = nextBuffer.buffer32;
     this.buffer8 = nextBuffer.buffer8;
+    this.dirty = true;
   }
 
   claimWebGLSlot() {
@@ -160,6 +161,7 @@ class WebGLSurface {
 
   clear(color) {
     this.buffer32.fill(packColor(color));
+    this.dirty = true;
   }
 
   setPixel(x, y, color) {
@@ -167,6 +169,7 @@ class WebGLSurface {
       return;
     }
     this.buffer32[y * this.width + x] = packColor(color);
+    this.dirty = true;
   }
 
   present() {
@@ -179,6 +182,10 @@ class WebGLSurface {
       this.releaseWebGLSlot();
       return;
     }
+    if (!this.dirty) {
+      return;
+    }
+    this.dirty = false;
     gl.disable(gl.BLEND);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -205,6 +212,7 @@ class WebGLSurface {
       return false;
     }
     this.buffer32.fill(packColor(0x000000));
+    this.dirty = true;
     this.present();
     const pixel = new Uint8Array(4);
     try {
@@ -373,10 +381,12 @@ class Canvas2DSurface {
     this.height = size.height;
     this.imageData = nextImageData;
     this.buffer32 = new Uint32Array(this.imageData.data.buffer);
+    this.dirty = true;
   }
 
   clear(color) {
     this.buffer32.fill(packColor(color));
+    this.dirty = true;
   }
 
   setPixel(x, y, color) {
@@ -384,14 +394,18 @@ class Canvas2DSurface {
       return;
     }
     this.buffer32[y * this.width + x] = packColor(color);
+    this.dirty = true;
   }
 
   present() {
+    if (!this.dirty) return;
+    this.dirty = false;
     this.ctx.putImageData(this.imageData, 0, 0);
   }
 
   verifyPresent() {
     this.buffer32.fill(packColor(0x000000));
+    this.dirty = true;
     this.present();
     const pixel = this.ctx.getImageData(0, 0, 1, 1).data;
     return pixel[0] === 0 && pixel[1] === 0 && pixel[2] === 0 && pixel[3] === 255;

@@ -585,17 +585,15 @@
         const cpu = this.cpu;
         if (!cpu) return 0;
         const start = addr >>> 0;
-        const mem = cpu.mem;
-        const len = mem.length >>> 0;
-        if ((start + 1) > len && !this.checkInterpreterMem(start, 1)) return 0;
-        return mem[start] >>> 0;
+        if (start >= cpu.mem.length && !this.checkInterpreterMem(start, 1)) return 0;
+        return cpu.mem[start] >>> 0;
       },
 
       writeMem8(addr, value) {
         const cpu = this.cpu;
         if (!cpu) return;
         const start = addr >>> 0;
-        if (!this.checkInterpreterMem(start, 1)) return;
+        if (start >= cpu.mem.length && !this.checkInterpreterMem(start, 1)) return;
         this.invalidateBasicBlocksForWrite(start, 1);
         cpu.mem[start] = value & 0xff;
       },
@@ -604,17 +602,18 @@
         const cpu = this.cpu;
         if (!cpu) return 0;
         const start = addr >>> 0;
-        const mem = cpu.mem;
-        if ((start + 4) > (mem.length >>> 0) && !this.checkInterpreterMem(start, 4)) return 0;
-        return (mem[start] | (mem[start + 1] << 8) | (mem[start + 2] << 16) | (mem[start + 3] << 24)) >>> 0;
+        if ((start + 4) > cpu.mem.length) {
+          if (!this.checkInterpreterMem(start, 4)) return 0;
+        }
+        if ((start & 3) === 0) return cpu.u32[start >>> 2] >>> 0;
+        return cpu.view.getUint32(start, true) >>> 0;
       },
 
       readMemFloat32(addr) {
         const cpu = this.cpu;
         if (!cpu) return 0;
         const start = addr >>> 0;
-        const len = cpu.mem.length >>> 0;
-        if ((start + 4) > len && !this.checkInterpreterMem(start, 4)) return 0;
+        if ((start + 4) > cpu.mem.length && !this.checkInterpreterMem(start, 4)) return 0;
         return cpu.view.getFloat32(start, true);
       },
 
@@ -622,8 +621,7 @@
         const cpu = this.cpu;
         if (!cpu) return 0;
         const start = addr >>> 0;
-        const len = cpu.mem.length >>> 0;
-        if ((start + 8) > len && !this.checkInterpreterMem(start, 8)) return 0;
+        if ((start + 8) > cpu.mem.length && !this.checkInterpreterMem(start, 8)) return 0;
         return cpu.view.getFloat64(start, true);
       },
 
@@ -631,8 +629,7 @@
         const cpu = this.cpu;
         if (!cpu) return;
         const start = addr >>> 0;
-        const len = cpu.mem.length >>> 0;
-        if ((start + 4) > len && !this.checkInterpreterMem(start, 4)) return;
+        if ((start + 4) > cpu.mem.length && !this.checkInterpreterMem(start, 4)) return;
         this.invalidateBasicBlocksForWrite(start, 4);
         cpu.view.setFloat32(start, value, true);
       },
@@ -641,8 +638,7 @@
         const cpu = this.cpu;
         if (!cpu) return;
         const start = addr >>> 0;
-        const len = cpu.mem.length >>> 0;
-        if ((start + 8) > len && !this.checkInterpreterMem(start, 8)) return;
+        if ((start + 8) > cpu.mem.length && !this.checkInterpreterMem(start, 8)) return;
         this.invalidateBasicBlocksForWrite(start, 8);
         cpu.view.setFloat64(start, value, true);
       },
@@ -651,9 +647,8 @@
         const cpu = this.cpu;
         if (!cpu) return 0;
         const start = addr >>> 0;
-        const mem = cpu.mem;
-        if ((start + 2) > (mem.length >>> 0) && !this.checkInterpreterMem(start, 2)) return 0;
-        return (mem[start] | (mem[start + 1] << 8)) & 0xffff;
+        if ((start + 2) > cpu.mem.length && !this.checkInterpreterMem(start, 2)) return 0;
+        return cpu.view.getUint16(start, true);
       },
 
       writeMem16(addr, value) {
@@ -662,10 +657,7 @@
         const start = addr >>> 0;
         if (!this.checkInterpreterMem(start, 2)) return;
         this.invalidateBasicBlocksForWrite(start, 2);
-        const mem = cpu.mem;
-        const v = value & 0xffff;
-        mem[start] = v & 0xff;
-        mem[start + 1] = (v >>> 8) & 0xff;
+        cpu.view.setUint16(start, value & 0xffff, true);
       },
 
       readMem16Signed(addr) {
@@ -693,12 +685,12 @@
         const start = addr >>> 0;
         if (!this.checkInterpreterMem(start, 4)) return;
         this.invalidateBasicBlocksForWrite(start, 4);
-        const mem = cpu.mem;
         const v = value >>> 0;
-        mem[start] = v & 0xff;
-        mem[start + 1] = (v >>> 8) & 0xff;
-        mem[start + 2] = (v >>> 16) & 0xff;
-        mem[start + 3] = (v >>> 24) & 0xff;
+        if ((start & 3) === 0) {
+          cpu.u32[start >>> 2] = v;
+        } else {
+          cpu.view.setUint32(start, v, true);
+        }
       },
 
       readMemBlock(addr, size) {
@@ -707,7 +699,7 @@
         const mem = cpu.mem;
         const start = addr >>> 0;
         const blockSize = size >>> 0;
-        if ((start + blockSize) > (mem.length >>> 0) && !this.checkInterpreterMem(start, blockSize)) {
+        if ((start + blockSize) > mem.length && !this.checkInterpreterMem(start, blockSize)) {
           return null;
         }
         const cache = this._memBlockCache;
