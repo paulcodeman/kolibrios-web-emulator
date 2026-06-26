@@ -588,7 +588,7 @@ EYES_END: ; end of code`
           { regex: /[a-zA-Z_.][\w.]*:/, token: 'tag' },
           {
             regex: /[a-zA-Z_.][\w.]*/,
-            token: function(stream, state, match) {
+            token: function(match) {
               var word = match[0].toLowerCase().replace(/\s+/g, '_');
               if (builtins.has(word)) return 'builtin';
               if (registers.has(word)) return 'variable-2';
