@@ -25,19 +25,83 @@
     <div id="toolbar">
       <h1><i class="fa-solid fa-code"></i> KOS IDE</h1>
       <select id="exampleSelect"></select>
-      <button id="runBtn"><i class="fa-solid fa-play"></i> Run</button>
+      <button id="compileRunBtn" class="primary"><i class="fa-solid fa-play"></i> Assemble &amp; Run</button>
       <button id="stopBtn"><i class="fa-solid fa-stop"></i> Stop</button>
       <span id="status"></span>
     </div>
     <div id="editor"></div>
   </div>
   <div id="emulatorPane">
-    <iframe id="emuFrame" src="../apps.html?ide"></iframe>
+    <div class="screen-panel" id="screenPanel">
+      <div class="workspace" id="workspace">
+        <div class="workspace-empty" id="workspaceEmpty"><i class="fa-solid fa-download"></i> Assemble &amp; Run a program to start.</div>
+      </div>
+      <div class="screen-footer" id="sessionInfo"><i class="fa-solid fa-circle-info"></i> Session idle</div>
+    </div>
+    <div class="side-panel">
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-sliders"></i> Control</div>
+        <div class="exec-controls">
+          <div class="exec-btn-row">
+            <button id="pauseBtn" class="exec-btn" disabled><i class="fa-solid fa-pause"></i> Pause</button>
+            <button id="stepBtn" class="exec-btn" disabled><i class="fa-solid fa-forward-step"></i> Step</button>
+          </div>
+          <label class="speed-label">
+            <i class="fa-solid fa-gauge-high"></i>
+            <span>Speed</span>
+            <input id="speedSlider" type="range" min="0" max="100" value="100" class="speed-slider">
+            <span id="speedValue" class="speed-value">Max</span>
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-microchip"></i> Registers</div>
+        <pre id="regs" class="mono reg-grid">(no process)</pre>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="fa-solid fa-list"></i> Log</div>
+        <pre id="log" class="mono">Ready.</pre>
+      </div>
+    </div>
   </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/mode/simple.min.js"></script>
+
+<script src="../src/boot.js"></script>
+<script src="../src/vendor/lzma_worker-min.js"></script>
+<script src="../src/vendor/fflate-umd.js"></script>
+<script src="../src/format/bytes.js"></script>
+<script src="../src/format/kex-loader.js"></script>
+<script src="../src/gfx/font-5x7.js"></script>
+<script src="../src/gfx/kolibri-font-assets.js"></script>
+<script src="../src/gfx/kolibri-font.js"></script>
+<script src="../src/gfx/kolibri-skin-assets.js"></script>
+<script src="../src/gfx/kolibri-skin.js"></script>
+<script src="../src/gfx/surface.js"></script>
+<script src="../src/core/access.js"></script>
+<script src="../src/libs/registry.js"></script>
+<script src="../src/libs/http.obj.js"></script>
+<script src="../src/libs/cnv_png.obj.js"></script>
+<script src="../src/libs/libimg.obj.js"></script>
+<script src="../src/libs/libini.obj.js"></script>
+<script src="../src/libs/runtime.js"></script>
+<script src="../src/host/environment.js"></script>
+<script src="../src/core/runtime.js"></script>
+<script src="../src/core/execute.js"></script>
+<script src="../src/syscall/dispatcher.js"></script>
+<script src="../src/core/wasm.js"></script>
+<script src="../src/core/wasm-glue.js"></script>
+<script src="../src/emulator.js"></script>
+<script src="../src/ui/fs.js"></script>
+<script src="../src/ui/app.js"></script>
+<script src="../src/ui/session.js"></script>
+<script src="../src/ui/session-manager.js"></script>
+<script src="../src/ui/fs-root.js"></script>
+<script src="../assets_kolibrios/builtin-root-data.js"></script>
+<script src="../src/app.js"></script>
+
 <script src="ide.js"></script>
 </body>
 </html>

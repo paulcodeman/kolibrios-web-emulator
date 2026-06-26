@@ -1,21 +1,5 @@
 (function() {
-  CodeMirror.defineSimpleMode('fasm', {
-    start: [
-      { regex: /;.*$/, token: 'comment' },
-      { regex: /0x[0-9a-fA-F]+/, token: 'number' },
-      { regex: /\d+/, token: 'number' },
-      { regex: /'[^']*'/, token: 'string' },
-      { regex: /"[^"]*"/, token: 'string' },
-      { regex: /[a-zA-Z_.][\w.]*:/, token: 'tag' },
-      { regex: /\b(org|use32|use16|use64|align|db|dd|dw|dp|dt|rb|rd|rw|rp|rt|include|incbin|macro|end\s*macro|virtual|end\s*virtual|repeat|end\s*repeat|while|end\s*while|if|else|end\s*if|match|end\s*match|restore|purge|struc|end\s*struc|format|section|segment|public|extrn|extrn|assume|even|times|load|store|fixed|float|du|ru|rd|rp|rb|rw|display|assert|postpone|end\s*postpone|namespace|end\s*namespace|iterate|end\s*iterate|rept|end\s*rept|irp|end\s*irp|irps|end\s*irps|match|end\s*match|calminstruction|end\s*calminstruction|calminstruction\s*string|calminstruction\s*number|calminstruction\s*identifier)\b/i, token: 'builtin' },
-      { regex: /\b(eax|ebx|ecx|edx|esi|edi|esp|ebp|eip|ax|bx|cx|dx|si|di|sp|bp|al|ah|bl|bh|cl|ch|dl|dh|sil|dil|bpl|spl|r8|r9|r10|r11|r12|r13|r14|r15|mm0|mm1|mm2|mm3|mm4|mm5|mm6|mm7|xmm0|xmm1|xmm2|xmm3|xmm4|xmm5|xmm6|xmm7|ymm0|ymm1|ymm2|ymm3|ymm4|ymm5|ymm6|ymm7|st0|st1|st2|st3|st4|st5|st6|st7|cr0|cr1|cr2|cr3|cr4|dr0|dr1|dr2|dr3|dr4|dr5|dr6|dr7)\b/i, token: 'variable-2' },
-      { regex: /\b(mov|add|sub|mul|div|imul|idiv|inc|dec|and|or|xor|not|neg|shl|shr|sal|sar|rol|ror|rcl|rcr|push|pop|pusha|popa|pushf|popf|pushad|popad|call|ret|retf|retn|jmp|je|jne|jz|jnz|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jp|jnp|jcxz|jecxz|loop|loope|loopne|loope|int|into|int3|syscall|sysenter|sysexit|cmp|test|xchg|cmpxchg|xadd|bsf|bsr|lea|nop|hlt|cli|sti|cld|std|cmc|clc|stc|lahf|sahf|cbw|cwd|cdq|cwde|cdqe|movsb|movsw|movsd|movsq|stosb|stosw|stosd|stosq|lodsb|lodsw|lodsd|lodsq|scasb|scasw|scasd|scasq|cmpsb|cmpsw|cmpsd|cmpsq|insb|insw|insd|outsb|outsw|outsd|rep|repe|repne|repz|repnz|enter|leave|bound|invlpg|cpuid|rdtsc|rdtscp|rdmsr|wrmsr|rdpmc|in|out|fadd|fsub|fmul|fdiv|fcom|fcomp|fcompp|fild|fist|fistp|fild|fld|fst|fstp|fldz|fld1|fldpi|fchs|fabs|fsqrt|frndint|fpatan|fptan|fprem|fprem1|f2xm1|fyl2x|fyl2xp1|fscale|fsin|fcos|fsincos|fxch|fxam|fincstp|fdecstp|fstenv|fldenv|fsave|frstor|fstsw|fstcw|fldcw|wait|fnop|fclex|emms|pause|bswap|bt|bts|btr|btc|sete|setne|setz|setnz|setg|setl|setge|setle|seta|setb|setae|setbe|seto|setno|sets|setns)\b/i, token: 'keyword' }
-    ],
-    meta: { lineComment: ';' }
-  });
-
-  let compileIdSeq = 0;
-  const pendingCompiles = new Map();
+  console.log('IDE: top-level, readyState=' + document.readyState + ', CodeMirror=' + typeof CodeMirror);
 
   const examples = [
     {
@@ -576,48 +560,94 @@ EYES_END: ; end of code`
   ];
 
   const exampleSelect = document.getElementById('exampleSelect');
-  const runBtn = document.getElementById('runBtn');
-  const stopBtn = document.getElementById('stopBtn');
+  const compileRunBtn = document.getElementById('compileRunBtn');
   const statusEl = document.getElementById('status');
-  const emuFrame = document.getElementById('emuFrame');
 
   let editor;
+  let app;
+
+  function initEditor() {
+    console.log('IDE: initEditor start, CodeMirror=', typeof CodeMirror, 'defineSimpleMode=', typeof (CodeMirror && CodeMirror.defineSimpleMode));
+    try {
+      if (typeof CodeMirror !== 'function' || typeof CodeMirror.defineSimpleMode !== 'function') {
+        statusEl.textContent = 'CodeMirror not available';
+        console.log('IDE: CodeMirror unavailable');
+        return false;
+      }
+      CodeMirror.defineSimpleMode('fasm', {
+        start: [
+          { regex: /;.*$/, token: 'comment' },
+          { regex: /0x[0-9a-fA-F]+/, token: 'number' },
+          { regex: /\d+/, token: 'number' },
+          { regex: /'[^']*'/, token: 'string' },
+          { regex: /"[^"]*"/, token: 'string' },
+          { regex: /[a-zA-Z_.][\w.]*:/, token: 'tag' },
+          { regex: /\b(org|use32|use16|use64|align|db|dd|dw|dp|dt|rb|rd|rw|rp|rt|include|incbin|macro|end\s*macro|virtual|end\s*virtual|repeat|end\s*repeat|while|end\s*while|if|else|end\s*if|match|end\s*match|restore|purge|struc|end\s*struc|format|section|segment|public|extrn|extrn|assume|even|times|load|store|fixed|float|du|ru|rd|rp|rb|rw|display|assert|postpone|end\s*postpone|namespace|end\s*namespace|iterate|end\s*iterate|rept|end\s*rept|irp|end\s*irp|irps|end\s*irps|match|end\s*match|calminstruction|end\s*calminstruction|calminstruction\s*string|calminstruction\s*number|calminstruction\s*identifier)\b/i, token: 'builtin' },
+          { regex: /\b(eax|ebx|ecx|edx|esi|edi|esp|ebp|eip|ax|bx|cx|dx|si|di|sp|bp|al|ah|bl|bh|cl|ch|dl|dh|sil|dil|bpl|spl|r8|r9|r10|r11|r12|r13|r14|r15|mm0|mm1|mm2|mm3|mm4|mm5|mm6|mm7|xmm0|xmm1|xmm2|xmm3|xmm4|xmm5|xmm6|xmm7|ymm0|ymm1|ymm2|ymm3|ymm4|ymm5|ymm6|ymm7|st0|st1|st2|st3|st4|st5|st6|st7|cr0|cr1|cr2|cr3|cr4|dr0|dr1|dr2|dr3|dr4|dr5|dr6|dr7)\b/i, token: 'variable-2' },
+          { regex: /\b(mov|add|sub|mul|div|imul|idiv|inc|dec|and|or|xor|not|neg|shl|shr|sal|sar|rol|ror|rcl|rcr|push|pop|pusha|popa|pushf|popf|pushad|popad|call|ret|retf|retn|jmp|je|jne|jz|jnz|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jp|jnp|jcxz|jecxz|loop|loope|loopne|loope|int|into|int3|syscall|sysenter|sysexit|cmp|test|xchg|cmpxchg|xadd|bsf|bsr|lea|nop|hlt|cli|sti|cld|std|cmc|clc|stc|lahf|sahf|cbw|cwd|cdq|cwde|cdqe|movsb|movsw|movsd|movsq|stosb|stosw|stosd|stosq|lodsb|lodsw|lodsd|lodsq|scasb|scasw|scasd|scasq|cmpsb|cmpsw|cmpsd|cmpsq|insb|insw|insd|outsb|outsw|outsd|rep|repe|repne|repz|repnz|enter|leave|bound|invlpg|cpuid|rdtsc|rdtscp|rdmsr|wrmsr|rdpmc|in|out|fadd|fsub|fmul|fdiv|fcom|fcomp|fcompp|fild|fist|fistp|fild|fld|fst|fstp|fldz|fld1|fldpi|fchs|fabs|fsqrt|frndint|fpatan|fptan|fprem|fprem1|f2xm1|fyl2x|fyl2xp1|fscale|fsin|fcos|fsincos|fxch|fxam|fincstp|fdecstp|fstenv|fldenv|fsave|frstor|fstsw|fstcw|fldcw|wait|fnop|fclex|emms|pause|bswap|bt|bts|btr|btc|sete|setne|setz|setnz|setg|setl|setge|setle|seta|setb|setae|setbe|seto|setno|sets|setns)\b/i, token: 'keyword' }
+        ],
+        meta: { lineComment: ';' }
+      });
+
+      const editorEl = document.getElementById('editor');
+      if (!editorEl) {
+        statusEl.textContent = 'Editor element not found';
+        return false;
+      }
+
+      editor = CodeMirror(editorEl, {
+        value: '; KOS IDE\n; Select an example to begin.',
+        mode: 'fasm',
+        theme: 'monokai',
+        lineNumbers: true,
+        indentUnit: 2,
+        tabSize: 2,
+        matchBrackets: true,
+        viewportMargin: Infinity
+      });
+
+      examples.forEach((ex, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = ex.name;
+        exampleSelect.appendChild(opt);
+      });
+
+      exampleSelect.addEventListener('change', () => loadSource(parseInt(exampleSelect.value)));
+      loadSource(0);
+      return true;
+    } catch (e) {
+      statusEl.textContent = 'Editor init error: ' + e.message;
+      return false;
+    }
+  }
+
+  function connectApp() {
+    app = window.__app;
+    if (!app) {
+      connectApp._retries = (connectApp._retries || 0) + 1;
+      if (connectApp._retries > 100) {
+        statusEl.textContent = 'Emulator offline';
+        return;
+      }
+      setTimeout(connectApp, 100);
+      return;
+    }
+
+    compileRunBtn.addEventListener('click', () => compileAndRun());
+
+    if (!app.browserFsRoot) {
+      mountBundledRoot();
+    }
+
+    statusEl.textContent = 'Ready. Assemble & Run to compile and execute.';
+  }
 
   function init() {
-    editor = CodeMirror(document.getElementById('editor'), {
-      value: '; KOS IDE\n; Select an example to begin.',
-      mode: 'fasm',
-      theme: 'monokai',
-      lineNumbers: true,
-      indentUnit: 2,
-      tabSize: 2,
-      matchBrackets: true,
-      viewportMargin: Infinity
-    });
-
-    examples.forEach((ex, i) => {
-      const opt = document.createElement('option');
-      opt.value = i;
-      opt.textContent = ex.name;
-      exampleSelect.appendChild(opt);
-    });
-
-    exampleSelect.addEventListener('change', () => loadSource(parseInt(exampleSelect.value)));
-    runBtn.addEventListener('click', () => runExample(parseInt(exampleSelect.value)));
-    stopBtn.addEventListener('click', stopEmulator);
-
-    window.addEventListener('message', (e) => {
-      const data = e.data;
-      if (data && data.type === 'compile-result') {
-        const cb = pendingCompiles.get(data.id);
-        if (cb) {
-          pendingCompiles.delete(data.id);
-          cb(data);
-        }
-      }
-    });
-
-    loadSource(0);
+    console.log('IDE: init, app=', !!window.__app, 'statusEl=', !!statusEl);
+    const editorOk = initEditor();
+    console.log('IDE: initEditor result:', editorOk);
+    connectApp();
   }
 
   function loadSource(index) {
@@ -626,36 +656,95 @@ EYES_END: ; end of code`
     statusEl.textContent = 'Ready. Assemble & Run to compile and execute.';
   }
 
-  function postMessage(data) {
-    emuFrame.contentWindow.postMessage(data, '*');
-  }
-
-  function runExample(index) {
-    const ex = examples[index];
+  async function compileAndRun() {
     statusEl.textContent = 'Compiling...';
-    runBtn.disabled = true;
+    compileRunBtn.disabled = true;
 
-    const id = ++compileIdSeq;
-    pendingCompiles.set(id, (result) => {
-      runBtn.disabled = false;
-      if (result.success) {
-        statusEl.textContent = 'Running...';
-        postMessage({ type: 'kex-binary', name: 'compiled.kex', buffer: result.kex });
-      } else {
-        statusEl.textContent = `Error: ${result.error}`;
+    try {
+      const source = editor.getValue();
+
+      if (!app.browserFsRoot) {
+        mountBundledRoot();
+        if (!app.browserFsRoot) {
+          throw new Error('No filesystem available');
+        }
       }
-    });
 
-    emuFrame.src = '../apps.html?ide';
-    emuFrame.onload = () => {
-      postMessage({ type: 'compile', id, source: editor.getValue(), fileName: 'source.asm' });
-      emuFrame.onload = null;
-    };
+      const encoder = new TextEncoder();
+      const sourceBytes = encoder.encode(source);
+      const srcResult = app.browserFsRoot.mutationProvider('create-file', '/tmp0/1/source.asm', { data: sourceBytes.buffer });
+      app.log(`Write source result: ${JSON.stringify(srcResult)}`);
+
+      if (!srcResult || srcResult.errorCode !== 0) {
+        throw new Error(`Failed to write source (error ${srcResult ? srcResult.errorCode : '?'})`);
+      }
+
+      const paramsStr = '/tmp0/1/source.asm /tmp0/1/out.kex';
+      app.log(`Launching FASM with params: "${paramsStr}"`);
+      const launchResult = app.sessionManager.startApplication({
+        path: '/develop/FASM',
+        params: paramsStr
+      });
+
+      if (launchResult.errorCode !== 0) {
+        throw new Error(`FASM launch failed (error ${launchResult.errorCode})`);
+      }
+
+      const pid = launchResult.pid;
+      const kexBytes = await pollForOutput(pid, '/tmp0/1/out.kex', 30000);
+      if (!kexBytes) {
+        throw new Error('FASM did not produce output');
+      }
+
+      app.loadImageFromBuffer('compiled.kex', kexBytes.buffer, 'IDE');
+      app.launchCurrentImage();
+    } catch (err) {
+      statusEl.textContent = `Error: ${err.message}`;
+      app.log(`Compile error: ${err.message}`);
+    } finally {
+      compileRunBtn.disabled = false;
+    }
   }
 
-  function stopEmulator() {
-    emuFrame.src = '../apps.html?ide';
-    statusEl.textContent = 'Stopped';
+  function pollForOutput(pid, outPath, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    return new Promise((resolve) => {
+      const poll = () => {
+        if (Date.now() > deadline) {
+          resolve(null);
+          return;
+        }
+        const proc = app.sessionManager.processByPid.get(pid);
+        if (!proc || proc.removed) {
+          const bytes = app.browserFsRoot.fileProvider(outPath);
+          resolve(bytes || null);
+          return;
+        }
+        setTimeout(poll, 100);
+      };
+      setTimeout(poll, 100);
+    });
+  }
+
+  function mountBundledRoot() {
+    const KosEmu = globalThis.KosEmu;
+    const manifest = (KosEmu.assets || {}).builtinKolibriRoot;
+    const bundledRoot = KosEmu.ui.bundledRoot;
+    if (!manifest || !bundledRoot || typeof bundledRoot.createBundledRoot !== 'function') {
+      app.log('Bundled root unavailable for IDE');
+      return;
+    }
+    try {
+      const root = bundledRoot.createBundledRoot(manifest);
+      app.browserFsRoot = root;
+      app.savedFsRootLabel = '';
+      app.savedFsRootPendingPermission = false;
+      if (typeof app.updateFsRootStatus === 'function') app.updateFsRootStatus();
+      if (typeof app.updateSessionState === 'function') app.updateSessionState();
+      app.log('Mounted built-in FS root for IDE.');
+    } catch (err) {
+      app.log(`Failed to mount built-in root: ${err.message}`);
+    }
   }
 
   if (document.readyState === 'loading') {

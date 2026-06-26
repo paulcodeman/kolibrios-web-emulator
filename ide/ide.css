@@ -21,6 +21,7 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 400px;
+  min-height: 0;
   border-right: 1px solid #45475a;
 }
 
@@ -57,13 +58,18 @@ body {
   cursor: pointer;
 }
 
-#runBtn {
+#compileRunBtn {
   background: #a6e3a1;
   color: #1e1e2e;
 }
 
-#runBtn:hover {
+#compileRunBtn:hover {
   background: #94e2d5;
+}
+
+#compileRunBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 #stopBtn {
@@ -75,6 +81,11 @@ body {
   background: #eba0ac;
 }
 
+#stopBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 #status {
   margin-left: auto;
   font-size: 12px;
@@ -83,7 +94,9 @@ body {
 
 #editor {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
+  background: #272822;
 }
 
 .CodeMirror {
@@ -91,15 +104,191 @@ body {
   font-size: 13px;
 }
 
+.CodeMirror pre,
+.CodeMirror-lines {
+  color: #f8f8f2;
+}
+
 #emulatorPane {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 400px;
+  overflow-y: auto;
+  background: #11111b;
 }
 
-#emuFrame {
+#emulatorPane .screen-panel {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #11111b;
   border: none;
+  border-bottom: 1px solid #45475a;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  gap: 0;
+}
+
+#emulatorPane .workspace {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  position: relative;
+  background: #000;
+  border: none;
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+#emulatorPane .workspace::before {
+  display: none;
+}
+
+#emulatorPane .workspace-empty {
+  position: absolute;
+  inset: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #585b70;
+  font-size: 14px;
+  text-align: center;
+  border: 1px dashed #45475a;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+#emulatorPane .screen-footer {
+  padding: 4px 12px;
+  font-size: 11px;
+  color: #585b70;
+}
+
+#emulatorPane .side-panel {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  grid-template-rows: auto 1fr;
+  gap: 8px;
+  padding: 8px;
+  max-height: 50%;
   width: 100%;
+  flex-shrink: 0;
+}
+
+#emulatorPane .side-panel > .card:nth-child(1) { grid-column: 1; grid-row: 1; }
+#emulatorPane .side-panel > .card:nth-child(2) { grid-column: 1; grid-row: 2; }
+#emulatorPane .side-panel > .card:nth-child(3) {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
+}
+
+#emulatorPane .card {
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+#emulatorPane .card-title {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #585b70;
+  margin-bottom: 6px;
+}
+
+#emulatorPane .mono {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  color: #cdd6f4;
+}
+
+#emulatorPane .side-panel > .card:nth-child(3) #log {
+  flex: 1;
+  min-height: 0;
+}
+
+#emulatorPane .reg-grid {
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+  max-height: 300px;
+}
+
+#emulatorPane .reg-grid .flags {
+  color: #f5c2e7;
+}
+
+#emulatorPane .exec-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#emulatorPane .exec-btn-row {
+  display: flex;
+  gap: 6px;
+}
+
+#emulatorPane .exec-btn-row .exec-btn {
+  flex: 1;
+}
+
+#emulatorPane .exec-btn {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  background: #313244;
+  color: #cdd6f4;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#emulatorPane .exec-btn:hover:not(:disabled) {
+  background: #cba6f7;
+  color: #1e1e2e;
+}
+
+#emulatorPane .exec-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#emulatorPane .speed-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  color: #585b70;
+}
+
+#emulatorPane .speed-slider {
+  flex: 1;
+  height: 4px;
+  cursor: pointer;
+  accent-color: #cba6f7;
+}
+
+#emulatorPane .speed-value {
+  min-width: 40px;
+  text-align: right;
+  font-size: 11px;
+  color: #585b70;
 }
