@@ -703,7 +703,7 @@ EYES_END: ; end of code`
       }
 
       const pid = launchResult.pid;
-      const kexBytes = await pollForOutput(pid, '/tmp0/1/out.kex', 30000);
+      const kexBytes = await KosEmu.pollForOutput(app, pid, '/tmp0/1/out.kex', 30000);
       if (!kexBytes) {
         throw new Error('FASM did not produce output');
       }
@@ -716,26 +716,6 @@ EYES_END: ; end of code`
     } finally {
       compileRunBtn.disabled = false;
     }
-  }
-
-  function pollForOutput(pid, outPath, timeoutMs) {
-    const deadline = Date.now() + timeoutMs;
-    return new Promise((resolve) => {
-      const poll = () => {
-        if (Date.now() > deadline) {
-          resolve(null);
-          return;
-        }
-        const proc = app.sessionManager.processByPid.get(pid);
-        if (!proc || proc.removed) {
-          const bytes = app.browserFsRoot.fileProvider(outPath);
-          resolve(bytes || null);
-          return;
-        }
-        setTimeout(poll, 100);
-      };
-      setTimeout(poll, 100);
-    });
   }
 
   function mountBundledRoot() {

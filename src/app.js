@@ -10,6 +10,7 @@
   KosEmu.createSurface = createSurface;
   KosEmu.createHeadlessSurface = createHeadlessSurface;
   KosEmu.formatKexInfo = formatKexInfo;
+  KosEmu.pollForOutput = pollForOutput;
 
   if (typeof window !== "undefined" && window.document) {
     window.addEventListener("DOMContentLoaded", () => {
@@ -75,8 +76,7 @@
       return;
     }
     try {
-      const root = bundledRoot.createBundledRoot(manifest);
-      app.browserFsRoot = root;
+      app.browserFsRoot = bundledRoot.createBundledRoot(manifest);
       app.savedFsRootLabel = "";
       app.savedFsRootPendingPermission = false;
       if (typeof app.updateFsRootStatus === "function") {
