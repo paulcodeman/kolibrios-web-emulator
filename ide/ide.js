@@ -574,7 +574,7 @@ EYES_END: ; end of code`
         console.log('IDE: CodeMirror unavailable');
         return false;
       }
-      const builtins = new Set('org use32 use16 use64 align db dd dw dp dt rb rd rw rp rt include incbin macro end_macro virtual end_virtual repeat end_repeat while end_while if else end_if match end_match restore purge struc end_struc format section segment public extrn assume even times load store fixed float du ru rp display assert postpone end_postpone namespace end_namespace iterate end_iterate rept end_rept irp end_irp irps end_irps calminstruction end_calminstruction'.split(' '));
+      const builtins = new Set('org use32 use16 use64 align db dd dw dp dt rb rd rw rp rt include incbin macro end virtual repeat while if else match restore purge struc ends format section segment public extrn assume even times load store fixed float du ru rp display assert postpone namespace iterate rept irp irps calminstruction'.split(' '));
       const registers = new Set('eax ebx ecx edx esi edi esp ebp eip ax bx cx dx si di sp bp al ah bl bh cl ch dl dh sil dil bpl spl r8 r9 r10 r11 r12 r13 r14 r15 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 xmm0 xmm1 xmm2 xmm3 xmm4 xmm5 xmm6 xmm7 ymm0 ymm1 ymm2 ymm3 ymm4 ymm5 ymm6 ymm7 st0 st1 st2 st3 st4 st5 st6 st7 cr0 cr1 cr2 cr3 cr4 dr0 dr1 dr2 dr3 dr4 dr5 dr6 dr7'.split(' '));
       const instructions = new Set('mov add sub mul div imul idiv inc dec and or xor not neg shl shr sal sar rol ror rcl rcr push pop pusha popa pushf popf pushad popad call ret retf retn jmp je jne jz jnz jg jl jge jle ja jb jae jbe jo jno js jns jp jnp jcxz jecxz loop loope loopne int into int3 syscall sysenter sysexit cmp test xchg cmpxchg xadd bsf bsr lea nop hlt cli sti cld std cmc clc stc lahf sahf cbw cwd cdq cwde cdqe movsb movsw movsd movsq stosb stosw stosd stosq lodsb lodsw lodsd lodsq scasb scasw scasd scasq cmpsb cmpsw cmpsd cmpsq insb insw insd outsb outsw outsd rep repe repne repz repnz enter leave bound invlpg cpuid rdtsc rdtscp rdmsr wrmsr rdpmc in out fadd fsub fmul fdiv fcom fcomp fcompp fild fist fistp fld fst fstp fldz fld1 fldpi fchs fabs fsqrt frndint fpatan fptan fprem fprem1 f2xm1 fyl2x fyl2xp1 fscale fsin fcos fsincos fxch fxam fincstp fdecstp fstenv fldenv fsave frstor fstsw fstcw fldcw wait fnop fclex emms pause bswap bt bts btr btc sete setne setz setnz setg setl setge setle seta setb setae setbe seto setno sets setns'.split(' '));
 
@@ -588,11 +588,11 @@ EYES_END: ; end of code`
           { regex: /[a-zA-Z_.][\w.]*:/, token: 'tag' },
           {
             regex: /[a-zA-Z_.][\w.]*/,
-            token: function(word) {
-              var lo = word.toLowerCase();
-              if (builtins.has(lo.replace(/\s+/g, '_'))) return 'builtin';
-              if (registers.has(lo)) return 'variable-2';
-              if (instructions.has(lo)) return 'keyword';
+            token: function(stream, state, match) {
+              var word = match[0].toLowerCase().replace(/\s+/g, '_');
+              if (builtins.has(word)) return 'builtin';
+              if (registers.has(word)) return 'variable-2';
+              if (instructions.has(word)) return 'keyword';
               return 'variable';
             }
           }
