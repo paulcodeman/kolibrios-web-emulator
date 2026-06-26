@@ -656,6 +656,7 @@ EYES_END: ; end of code`
 
   function init() {
     console.log('IDE: init, app=', !!window.__app, 'statusEl=', !!statusEl);
+    statusEl.textContent = '';
     const editorOk = initEditor();
     console.log('IDE: initEditor result:', editorOk);
     connectApp();
