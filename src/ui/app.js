@@ -540,7 +540,7 @@
       this.applyCpuBackendConfig({ silent: true });
       this.updateFullscreenButton();
       this.updateSessionState();
-      this.setStatus("Session ready");
+      this.setStatus("Idle");
       this.restorePersistedRootFolder();
       this.scheduleBrowserKeyboardLanguageRefresh(0);
       this.startRegisterUpdateLoop();
@@ -1490,7 +1490,7 @@
           this.setStatus("Mount failed");
           return;
         }
-        this.setStatus("Session ready");
+        this.setStatus("Idle");
       } finally {
         this.fsRootBusy = false;
         this.updateFsRootStatus();
@@ -1572,7 +1572,7 @@
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.log(`FS root restore failed: ${message}`);
-        this.setStatus("Session ready");
+        this.setStatus("Idle");
       } finally {
         this.fsRootBusy = false;
         this.updateFsRootStatus();
@@ -1626,7 +1626,7 @@
         if (message !== "The user aborted a request.") {
           this.log(`FS root selection failed: ${message}`);
         }
-        this.setStatus("Session ready");
+        this.setStatus("Idle");
       } finally {
         this.fsRootBusy = false;
         this.updateFsRootStatus();
@@ -1874,7 +1874,7 @@
         if (this.currentImage) {
           this.setStatus(`Loaded ${this.currentImage.fileName}`);
         } else {
-          this.setStatus("Session ready");
+          this.setStatus("Idle");
         }
       }
     }
