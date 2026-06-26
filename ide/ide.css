@@ -118,6 +118,34 @@ body {
   background: #11111b;
 }
 
+#emulatorPane .screen-panel-header {
+  padding: 4px 12px;
+  background: #181825;
+  border-bottom: 1px solid #45475a;
+}
+
+#emulatorPane .screen-panel-header .screen-title {
+  color: #585b70;
+}
+
+#emulatorPane .screen-panel-header .workspace-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#emulatorPane .screen-panel-header .toggle {
+  background: #313244;
+  border-color: #45475a;
+  color: #cdd6f4;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+#emulatorPane .screen-panel-header .toggle input {
+  accent-color: #cba6f7;
+}
+
 #emulatorPane .screen-panel {
   flex: 1;
   display: flex;
