@@ -51,6 +51,8 @@ node tools/autotest-bcdclk.js [path-to-bcdclk.kex] [max_ms]
 - `src/` — emulator core, GPU surface, UI modules, bundled vendor libs
 - `ide/` — FASM code editor (CodeMirror), examples, includes
 - `tools/` — headless runner, autotests, benchmarking, build scripts
+
+Hotspot benchmark: `node tools/benchmark-hotspots.js` (add `--headless temp_plasma.kex` to measure headless timer starvation).
 - `assets_kolibrios/` — built-in KolibriOS root filesystem
 - `.github/workflows/pages.yml` — GitHub Actions deploy to Pages
 - `sysfuncs.txt` — primary `int 0x40` syscall reference

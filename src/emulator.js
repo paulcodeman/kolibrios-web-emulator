@@ -3523,6 +3523,7 @@ class Emulator {
     this.scratchBytes16A = new Uint8Array(16);
     this.scratchBytes16B = new Uint8Array(16);
     this.scratchBytes16C = new Uint8Array(16);
+    this.scratchImagePalette = new Uint32Array(256);
     this.strictMem = false;
     this.memLimit = 0;
     this.memGrowMax = 64 * 1024 * 1024;
@@ -3651,6 +3652,7 @@ class Emulator {
     this.cpuBusyActiveStartMs = 0;
     this.decodeCache = new Map();
     this.decodeCachePageMap = new Map();
+    this.codeCacheChunkMasks = new Map();
     this.decodeCacheMax = 50000;
     this.decodeCacheHits = 0;
     this.decodeCacheMisses = 0;
@@ -3929,6 +3931,7 @@ class Emulator {
     }
     this.decodeCache.clear();
     this.decodeCachePageMap.clear();
+    this.codeCacheChunkMasks.clear();
     this.decodeCacheHits = 0;
     this.decodeCacheMisses = 0;
     this.basicBlockStartCache.clear();

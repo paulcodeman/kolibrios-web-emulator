@@ -89,9 +89,11 @@ function createInstructionEmulator(cpuBackend) {
   emulator.cpu = {
     mem,
     view: new DataView(mem.buffer),
+    u32: new Uint32Array(mem.buffer),
     regs,
     fpu: new Float64Array(8),
     fpuSize: 0,
+    fpuTop: 0,
     fpuStatusWord: 0,
     mmx: new Uint32Array(16),
     xmm: new Uint32Array(32),

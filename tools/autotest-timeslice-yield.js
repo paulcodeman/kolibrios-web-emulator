@@ -20,12 +20,20 @@ function createTimedEmulator(windowDefined) {
   const surface = createHeadlessSurface(32, 32);
   const emulator = new Emulator(surface, () => {});
   let now = 0;
-  let eip = 0;
   let executed = 0;
   let scheduled = null;
+  const mem = new Uint8Array(256);
+  const regs = new Uint32Array(10);
+  mem.fill(0x90);
+  regs[REG_EIP] = 0;
 
   emulator.running = true;
-  emulator.cpu = {};
+  emulator.cpu = {
+    mem,
+    view: new DataView(mem.buffer),
+    u32: new Uint32Array(mem.buffer),
+    regs
+  };
   emulator.windowDefined = !!windowDefined;
   emulator.useImmediateScheduler = true;
   emulator.maxInstructions = 20;
@@ -37,17 +45,15 @@ function createTimedEmulator(windowDefined) {
   emulator.softInstructions = false;
 
   emulator.getWallClockMs = () => now;
-  emulator.readReg = (reg) => (reg === REG_EIP ? (eip >>> 0) : 0);
+  emulator.readReg = (reg) => regs[reg] >>> 0;
   emulator.writeReg = (reg, value) => {
-    if (reg === REG_EIP) {
-      eip = value >>> 0;
-    }
+    regs[reg] = value >>> 0;
   };
   emulator.readMem8 = () => 0x90;
   emulator.executeBasicInstruction = () => {
     executed += 1;
     now += 3;
-    eip = (eip + 1) >>> 0;
+    regs[REG_EIP] = (regs[REG_EIP] + 1) >>> 0;
     return true;
   };
   emulator.scheduleStep = (delay) => {
@@ -67,7 +73,7 @@ function createTimedEmulator(windowDefined) {
     },
     resetRun(nextWindowDefined) {
       now = 0;
-      eip = 0;
+      regs[REG_EIP] = 0;
       executed = 0;
       scheduled = null;
       emulator.running = true;

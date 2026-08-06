@@ -29,11 +29,22 @@ try {
   surface.clear(0xffffff);
 
   const emulator = new Emulator(surface, () => {});
-  const mem = new Uint8Array(256);
+  const mem = new Uint8Array(2048);
   const view = new DataView(mem.buffer);
-  emulator.readMem8 = (addr) => mem[addr >>> 0] & 0xff;
-  emulator.readMem16 = (addr) => view.getUint16(addr >>> 0, true) >>> 0;
-  emulator.readMem32 = (addr) => view.getUint32(addr >>> 0, true) >>> 0;
+  emulator.cpu = {
+    mem,
+    view,
+    u32: new Uint32Array(mem.buffer),
+    regs: new Uint32Array(10),
+    fpu: new Float64Array(8),
+    fpuSize: 0,
+    fpuTop: 0,
+    fpuStatusWord: 0,
+    mmx: new Uint32Array(16),
+    xmm: new Uint32Array(32),
+    xmmF: new Float32Array(32),
+    memFaultLogged: false
+  };
 
   const fullWidth = 5;
   const fullHeight = 2;
@@ -65,7 +76,21 @@ try {
   assertEq(getSurfaceRgb(surface, 0, 1), 0x002200, "bottom-left pixel");
   assertEq(getSurfaceRgb(surface, 1, 1), 0x003300, "bottom-right pixel");
 
-  console.log("Autotest OK: function 65 row offset semantics match partial PresentRect blits.");
+  const indexedPtr = 256;
+  const palettePtr = 512;
+  mem.set([0, 1, 2, 3], indexedPtr);
+  const paletteColors = [0x102030, 0x405060, 0x708090, 0xa0b0c0];
+  for (let i = 0; i < paletteColors.length; i += 1) {
+    view.setUint32(palettePtr + i * 4, paletteColors[i], true);
+  }
+  emulator.drawImageFromMemory(indexedPtr, (2 << 16) | 2, 4 << 16, 8, palettePtr, 0);
+
+  assertEq(getSurfaceRgb(surface, 4, 0), 0x102030, "indexed top-left pixel");
+  assertEq(getSurfaceRgb(surface, 5, 0), 0x405060, "indexed top-right pixel");
+  assertEq(getSurfaceRgb(surface, 4, 1), 0x708090, "indexed bottom-left pixel");
+  assertEq(getSurfaceRgb(surface, 5, 1), 0xa0b0c0, "indexed bottom-right pixel");
+
+  console.log("Autotest OK: function 65 fast 8/32-bpp paths preserve palette and row-offset semantics.");
 } catch (err) {
   console.error(err instanceof Error ? err.stack || err.message : String(err));
   process.exit(2);

@@ -2572,6 +2572,21 @@
           }
           return;
         }
+        if (
+          (bpp === 8 || bpp === 9) &&
+          this.blitIndexed8ToSurfaceBuffer(srcPtr, width, height, baseX, baseY, stride, bpp, palettePtr)
+        ) {
+          if (!this.inRedraw) {
+            this.presentIfNeeded();
+          }
+          return;
+        }
+        if (bpp === 32 && this.blit32ToSurfaceBuffer(srcPtr, width, height, baseX, baseY, stride)) {
+          if (!this.inRedraw) {
+            this.presentIfNeeded();
+          }
+          return;
+        }
     
         for (let y = 0; y < height; y += 1) {
           const rowBase = (srcPtr + y * stride) >>> 0;
@@ -2699,6 +2714,95 @@
             const g = mem[src++];
             const r = mem[src++];
             dst[out++] = (255 << 24) | (b << 16) | (g << 8) | r;
+          }
+          srcRow += stride;
+          dstRow += dstStride;
+        }
+        return true;
+      },
+
+      blitIndexed8ToSurfaceBuffer(srcPtr, width, height, baseX, baseY, stride, bpp, palettePtr) {
+        if (!this.cpu || !this.canBlitDirectToSurface(baseX, baseY, width, height)) {
+          return false;
+        }
+        const mem = this.cpu.mem;
+        const start = srcPtr >>> 0;
+        const lastRowBase = start + Math.max(0, height - 1) * stride;
+        if (start >= mem.length || lastRowBase + width > mem.length) {
+          return false;
+        }
+        const usePalette = (bpp | 0) === 8 && (palettePtr >>> 0) !== 0;
+        const palette = this.scratchImagePalette;
+        if (!(palette instanceof Uint32Array) || palette.length < 256) {
+          return false;
+        }
+        if (usePalette) {
+          const paletteStart = palettePtr >>> 0;
+          if (paletteStart >= mem.length || paletteStart + 1024 > mem.length) {
+            return false;
+          }
+          const view = this.cpu.view;
+          for (let i = 0; i < 256; i += 1) {
+            const color = view.getUint32(paletteStart + i * 4, true) & 0x00ffffff;
+            palette[i] = (
+              (255 << 24) |
+              ((color & 0xff) << 16) |
+              (color & 0xff00) |
+              ((color >>> 16) & 0xff)
+            ) >>> 0;
+          }
+        }
+        const dst = this.surface.buffer32;
+        const dstStride = this.surface.width | 0;
+        let srcRow = start;
+        let dstRow = baseY * dstStride + baseX;
+        for (let y = 0; y < height; y += 1) {
+          let src = srcRow;
+          let out = dstRow;
+          if (usePalette) {
+            for (let x = 0; x < width; x += 1) {
+              dst[out++] = palette[mem[src++]];
+            }
+          } else {
+            for (let x = 0; x < width; x += 1) {
+              const value = mem[src++];
+              dst[out++] = (0xff000000 | (value * 0x010101)) >>> 0;
+            }
+          }
+          srcRow += stride;
+          dstRow += dstStride;
+        }
+        return true;
+      },
+
+      blit32ToSurfaceBuffer(srcPtr, width, height, baseX, baseY, stride) {
+        if (!this.cpu || !this.canBlitDirectToSurface(baseX, baseY, width, height)) {
+          return false;
+        }
+        const mem = this.cpu.mem;
+        const start = srcPtr >>> 0;
+        const rowSpan = width * 4;
+        const lastRowBase = start + Math.max(0, height - 1) * stride;
+        if (start >= mem.length || lastRowBase + rowSpan > mem.length) {
+          return false;
+        }
+        const dst = this.surface.buffer32;
+        const dstStride = this.surface.width | 0;
+        const view = this.cpu.view;
+        let srcRow = start;
+        let dstRow = baseY * dstStride + baseX;
+        for (let y = 0; y < height; y += 1) {
+          let src = srcRow;
+          let out = dstRow;
+          for (let x = 0; x < width; x += 1) {
+            const color = view.getUint32(src, true) & 0x00ffffff;
+            src += 4;
+            dst[out++] = (
+              (255 << 24) |
+              ((color & 0xff) << 16) |
+              (color & 0xff00) |
+              ((color >>> 16) & 0xff)
+            ) >>> 0;
           }
           srcRow += stride;
           dstRow += dstStride;

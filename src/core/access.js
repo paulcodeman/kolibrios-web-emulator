@@ -1,5 +1,34 @@
 (() => {
   const KosEmu = globalThis.KosEmu;
+  const DECODE_CACHE_SPAN = 15;
+  const CODE_CACHE_CHUNK_SHIFT = 6;
+
+  function codeRangeMask(startBit, endBit) {
+    const width = (endBit - startBit) | 0;
+    if (width <= 0) return 0;
+    if (width >= 32) return 0xffffffff >>> 0;
+    return ((0xffffffff >>> (32 - width)) << startBit) >>> 0;
+  }
+
+  function markCodeCacheRange(emulator, startAddr, endAddr) {
+    const masks = emulator && emulator.codeCacheChunkMasks;
+    const start = startAddr >>> 0;
+    const end = endAddr >>> 0;
+    if (!masks || end <= start) return;
+    const firstChunk = start >>> CODE_CACHE_CHUNK_SHIFT;
+    const lastChunk = (end - 1) >>> CODE_CACHE_CHUNK_SHIFT;
+    for (let chunk = firstChunk; chunk <= lastChunk; chunk += 1) {
+      let pair = masks.get(chunk);
+      if (!pair) {
+        pair = new Uint32Array(2);
+        masks.set(chunk, pair);
+      }
+      const rangeStart = chunk === firstChunk ? (start & 63) : 0;
+      const rangeEnd = chunk === lastChunk ? (((end - 1) & 63) + 1) : 64;
+      pair[0] |= codeRangeMask(Math.min(rangeStart, 32), Math.min(rangeEnd, 32));
+      pair[1] |= codeRangeMask(Math.max(0, rangeStart - 32), Math.max(0, rangeEnd - 32));
+    }
+  }
 
   function installCoreAccess(Emulator, shared) {
     if (!Emulator || !Emulator.prototype) {
@@ -251,12 +280,12 @@
         if (!this.decodeCache.has(start)) {
           const pageMap = this.decodeCachePageMap;
           if (pageMap) {
-            const end = (start + 7) >>> 0;
+            const end = (start + DECODE_CACHE_SPAN - 1) >>> 0;
             if (end < start) {
               pageMap.clear();
             } else {
-              const firstPage = start >>> 12;
-              const lastPage = end >>> 12;
+              const firstPage = start >>> CODE_CACHE_CHUNK_SHIFT;
+              const lastPage = end >>> CODE_CACHE_CHUNK_SHIFT;
               for (let page = firstPage; page <= lastPage; page += 1) {
                 const key = page >>> 0;
                 let set = pageMap.get(key);
@@ -267,6 +296,7 @@
                 set.add(start);
               }
             }
+            markCodeCacheRange(this, start, (end + 1) >>> 0);
           }
         }
         this.decodeCache.set(start, entry);
@@ -594,7 +624,9 @@
         if (!cpu) return;
         const start = addr >>> 0;
         if (start >= cpu.mem.length && !this.checkInterpreterMem(start, 1)) return;
-        this.invalidateBasicBlocksForWrite(start, 1);
+        if (this.codeCacheChunkMasks && this.codeCacheChunkMasks.size) {
+          this.invalidateBasicBlocksForWrite(start, 1);
+        }
         cpu.mem[start] = value & 0xff;
       },
 
@@ -630,7 +662,9 @@
         if (!cpu) return;
         const start = addr >>> 0;
         if ((start + 4) > cpu.mem.length && !this.checkInterpreterMem(start, 4)) return;
-        this.invalidateBasicBlocksForWrite(start, 4);
+        if (this.codeCacheChunkMasks && this.codeCacheChunkMasks.size) {
+          this.invalidateBasicBlocksForWrite(start, 4);
+        }
         cpu.view.setFloat32(start, value, true);
       },
 
@@ -639,7 +673,9 @@
         if (!cpu) return;
         const start = addr >>> 0;
         if ((start + 8) > cpu.mem.length && !this.checkInterpreterMem(start, 8)) return;
-        this.invalidateBasicBlocksForWrite(start, 8);
+        if (this.codeCacheChunkMasks && this.codeCacheChunkMasks.size) {
+          this.invalidateBasicBlocksForWrite(start, 8);
+        }
         cpu.view.setFloat64(start, value, true);
       },
 
@@ -656,7 +692,9 @@
         if (!cpu) return;
         const start = addr >>> 0;
         if (!this.checkInterpreterMem(start, 2)) return;
-        this.invalidateBasicBlocksForWrite(start, 2);
+        if (this.codeCacheChunkMasks && this.codeCacheChunkMasks.size) {
+          this.invalidateBasicBlocksForWrite(start, 2);
+        }
         cpu.view.setUint16(start, value & 0xffff, true);
       },
 
@@ -684,7 +722,9 @@
         if (!cpu) return;
         const start = addr >>> 0;
         if (!this.checkInterpreterMem(start, 4)) return;
-        this.invalidateBasicBlocksForWrite(start, 4);
+        if (this.codeCacheChunkMasks && this.codeCacheChunkMasks.size) {
+          this.invalidateBasicBlocksForWrite(start, 4);
+        }
         const v = value >>> 0;
         if ((start & 3) === 0) {
           cpu.u32[start >>> 2] = v;
@@ -754,7 +794,9 @@
         if (!this.checkInterpreterMem(start, 8)) {
           return false;
         }
-        this.invalidateBasicBlocksForWrite(start, 8);
+        if (this.codeCacheChunkMasks && this.codeCacheChunkMasks.size) {
+          this.invalidateBasicBlocksForWrite(start, 8);
+        }
         const view = this.cpu.view;
         view.setUint32(start, words[0] >>> 0, true);
         view.setUint32((start + 4) >>> 0, words[1] >>> 0, true);
@@ -790,7 +832,9 @@
         if (!this.checkInterpreterMem(start, 16)) {
           return false;
         }
-        this.invalidateBasicBlocksForWrite(start, 16);
+        if (this.codeCacheChunkMasks && this.codeCacheChunkMasks.size) {
+          this.invalidateBasicBlocksForWrite(start, 16);
+        }
         const view = this.cpu.view;
         view.setUint32(start, words[0] >>> 0, true);
         view.setUint32((start + 4) >>> 0, words[1] >>> 0, true);
@@ -863,7 +907,9 @@
         if (!this.checkInterpreterMem(start, bytes.length)) {
           return;
         }
-        this.invalidateBasicBlocksForWrite(start, bytes.length);
+        if (this.codeCacheChunkMasks && this.codeCacheChunkMasks.size) {
+          this.invalidateBasicBlocksForWrite(start, bytes.length);
+        }
         this.cpu.mem.set(bytes, start);
       },
 
@@ -891,7 +937,9 @@
           return false;
         }
         const start = addr >>> 0;
-        this.invalidateBasicBlocksForWrite(start, byteCount);
+        if (this.codeCacheChunkMasks && this.codeCacheChunkMasks.size) {
+          this.invalidateBasicBlocksForWrite(start, byteCount);
+        }
         const mem = this.cpu.mem;
         const patLen = pattern.length >>> 0;
         if (byteCount <= patLen) {

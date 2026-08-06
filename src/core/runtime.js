@@ -1,5 +1,44 @@
 (() => {
   const KosEmu = globalThis.KosEmu;
+  const DECODE_CACHE_SPAN = 15;
+  const CODE_CACHE_CHUNK_SHIFT = 6;
+
+  function codeRangeMask(startBit, endBit) {
+    const width = (endBit - startBit) | 0;
+    if (width <= 0) return 0;
+    if (width >= 32) return 0xffffffff >>> 0;
+    return ((0xffffffff >>> (32 - width)) << startBit) >>> 0;
+  }
+
+  function markCodeCacheRange(emulator, startAddr, endAddr) {
+    const masks = emulator && emulator.codeCacheChunkMasks;
+    const start = startAddr >>> 0;
+    const end = endAddr >>> 0;
+    if (!masks || end <= start) return;
+    const firstChunk = start >>> CODE_CACHE_CHUNK_SHIFT;
+    const lastChunk = (end - 1) >>> CODE_CACHE_CHUNK_SHIFT;
+    for (let chunk = firstChunk; chunk <= lastChunk; chunk += 1) {
+      let pair = masks.get(chunk);
+      if (!pair) {
+        pair = new Uint32Array(2);
+        masks.set(chunk, pair);
+      }
+      const rangeStart = chunk === firstChunk ? (start & 63) : 0;
+      const rangeEnd = chunk === lastChunk ? (((end - 1) & 63) + 1) : 64;
+      pair[0] |= codeRangeMask(Math.min(rangeStart, 32), Math.min(rangeEnd, 32));
+      pair[1] |= codeRangeMask(Math.max(0, rangeStart - 32), Math.max(0, rangeEnd - 32));
+    }
+  }
+
+  function codeMaskOverlapsRange(pair, chunk, start, end) {
+    if (!pair) return false;
+    const chunkStart = chunk << CODE_CACHE_CHUNK_SHIFT;
+    const rangeStart = Math.max(0, start - chunkStart);
+    const rangeEnd = Math.min(64, end - chunkStart);
+    const low = codeRangeMask(Math.min(rangeStart, 32), Math.min(rangeEnd, 32));
+    const high = codeRangeMask(Math.max(0, rangeStart - 32), Math.max(0, rangeEnd - 32));
+    return (((pair[0] & low) | (pair[1] & high)) >>> 0) !== 0;
+  }
 
   function installCoreRuntime(Emulator, shared) {
     if (!Emulator || !Emulator.prototype) {
@@ -390,8 +429,9 @@
         }
         this.basicBlockStartCache.set(start, state);
         if (this.basicBlockStartPageSet) {
-          this.basicBlockStartPageSet.add(start >>> 12);
+          this.basicBlockStartPageSet.add(start >>> CODE_CACHE_CHUNK_SHIFT);
         }
+        markCodeCacheRange(this, start, (start + DECODE_CACHE_SPAN) >>> 0);
         this.basicBlockStartMisses = ((this.basicBlockStartMisses | 0) + 1) | 0;
         return state;
       },
@@ -742,8 +782,8 @@
             block.simplePlan.wordCount
           );
         }
-        const startPage = start >>> 12;
-        const endPage = (Math.max(start, end - 1) >>> 12);
+        const startPage = start >>> CODE_CACHE_CHUNK_SHIFT;
+        const endPage = Math.max(start, end - 1) >>> CODE_CACHE_CHUNK_SHIFT;
         for (let page = startPage; page <= endPage; page += 1) {
           let set = this.basicBlockPageMap.get(page);
           if (!set) {
@@ -753,6 +793,7 @@
           set.add(start);
           block.pages.push(page);
         }
+        markCodeCacheRange(this, start, end);
         this.basicBlockCache.set(start, block);
         this.basicBlockBuilds += 1;
         return true;
@@ -2082,13 +2123,13 @@
         if (!pageMap || !pageMap.size) {
           return;
         }
-        const end = (key + 7) >>> 0;
+        const end = (key + DECODE_CACHE_SPAN - 1) >>> 0;
         if (end < key) {
           pageMap.clear();
           return;
         }
-        const firstPage = key >>> 12;
-        const lastPage = end >>> 12;
+        const firstPage = key >>> CODE_CACHE_CHUNK_SHIFT;
+        const lastPage = end >>> CODE_CACHE_CHUNK_SHIFT;
         for (let page = firstPage; page <= lastPage; page += 1) {
           const set = pageMap.get(page >>> 0);
           if (!set) {
@@ -2115,29 +2156,39 @@
         if (end < start) {
           return null;
         }
-        const starts = new Set();
+        let starts = null;
+        const addOverlapping = (decodeStart) => {
+          const key = decodeStart >>> 0;
+          const decodeEnd = (key + DECODE_CACHE_SPAN) >>> 0;
+          if (decodeEnd < key || (start < decodeEnd && end >= key)) {
+            if (!starts) {
+              starts = new Set();
+            }
+            starts.add(key);
+          }
+        };
         if (byteCount <= 0x1000) {
-          const firstPage = start >>> 12;
-          const lastPage = end >>> 12;
+          const firstPage = start >>> CODE_CACHE_CHUNK_SHIFT;
+          const lastPage = end >>> CODE_CACHE_CHUNK_SHIFT;
           for (let page = firstPage; page <= lastPage; page += 1) {
             const set = pageMap.get(page >>> 0);
             if (!set) {
               continue;
             }
             for (const blockStart of set) {
-              starts.add(blockStart >>> 0);
+              addOverlapping(blockStart);
             }
           }
           return starts;
         }
         for (const [page, set] of pageMap.entries()) {
-          const pageStart = (page << 12) >>> 0;
-          const pageEnd = (pageStart + 0xfff) >>> 0;
+          const pageStart = (page << CODE_CACHE_CHUNK_SHIFT) >>> 0;
+          const pageEnd = (pageStart + ((1 << CODE_CACHE_CHUNK_SHIFT) - 1)) >>> 0;
           if (pageStart > end || pageEnd < start) {
             continue;
           }
           for (const blockStart of set) {
-            starts.add(blockStart >>> 0);
+            addOverlapping(blockStart);
           }
         }
         return starts;
@@ -2170,29 +2221,43 @@
         if (end < start) {
           return null;
         }
-        const starts = new Set();
+        let starts = null;
+        const addOverlapping = (blockStart) => {
+          const key = blockStart >>> 0;
+          const block = this.basicBlockCache.get(key);
+          const endExclusive = (end + 1) >>> 0;
+          if (
+            block &&
+            (endExclusive < start || (start < (block.end >>> 0) && endExclusive > (block.start >>> 0)))
+          ) {
+            if (!starts) {
+              starts = new Set();
+            }
+            starts.add(key);
+          }
+        };
         if (byteCount <= 0x1000) {
-          const firstPage = start >>> 12;
-          const lastPage = end >>> 12;
+          const firstPage = start >>> CODE_CACHE_CHUNK_SHIFT;
+          const lastPage = end >>> CODE_CACHE_CHUNK_SHIFT;
           for (let page = firstPage; page <= lastPage; page += 1) {
             const set = this.basicBlockPageMap.get(page);
             if (!set) {
               continue;
             }
             for (const blockStart of set) {
-              starts.add(blockStart >>> 0);
+              addOverlapping(blockStart);
             }
           }
           return starts;
         }
         for (const [page, set] of this.basicBlockPageMap.entries()) {
-          const pageStart = (page << 12) >>> 0;
-          const pageEnd = (pageStart + 0xfff) >>> 0;
+          const pageStart = (page << CODE_CACHE_CHUNK_SHIFT) >>> 0;
+          const pageEnd = (pageStart + ((1 << CODE_CACHE_CHUNK_SHIFT) - 1)) >>> 0;
           if (pageStart > end || pageEnd < start) {
             continue;
           }
           for (const blockStart of set) {
-            starts.add(blockStart >>> 0);
+            addOverlapping(blockStart);
           }
         }
         return starts;
@@ -2204,25 +2269,35 @@
         if (!byteCount) {
           return false;
         }
-        const hasDecodePages = !!(this.decodeCachePageMap && this.decodeCachePageMap.size);
-        const hasBlockPages = !!(this.basicBlockPageMap && this.basicBlockPageMap.size);
-        const hasStartPages = !!(this.basicBlockStartPageSet && this.basicBlockStartPageSet.size);
-        if (!hasDecodePages && !hasBlockPages && !hasStartPages) {
+        const masks = this.codeCacheChunkMasks;
+        if (!masks || !masks.size) {
           return false;
         }
         const end = (start + byteCount - 1) >>> 0;
         if (end < start) {
           return true;
         }
-        const firstPage = start >>> 12;
-        const lastPage = end >>> 12;
-        for (let page = firstPage; page <= lastPage; page += 1) {
-          const key = page >>> 0;
-          if (
-            (hasDecodePages && this.decodeCachePageMap.has(key)) ||
-            (hasBlockPages && this.basicBlockPageMap.has(key)) ||
-            (hasStartPages && this.basicBlockStartPageSet.has(key))
-          ) {
+        const firstChunk = start >>> CODE_CACHE_CHUNK_SHIFT;
+        const lastChunk = end >>> CODE_CACHE_CHUNK_SHIFT;
+        const chunkCount = (lastChunk - firstChunk + 1) >>> 0;
+        if (chunkCount > 256) {
+          const endExclusive = (end + 1) >>> 0;
+          for (const [chunk, pair] of masks.entries()) {
+            const key = chunk >>> 0;
+            if (
+              key >= firstChunk &&
+              key <= lastChunk &&
+              codeMaskOverlapsRange(pair, key, start, endExclusive)
+            ) {
+              return true;
+            }
+          }
+          return false;
+        }
+        const endExclusive = (end + 1) >>> 0;
+        for (let chunk = firstChunk; chunk <= lastChunk; chunk += 1) {
+          const key = chunk >>> 0;
+          if (codeMaskOverlapsRange(masks.get(key), key, start, endExclusive)) {
             return true;
           }
         }
@@ -2253,8 +2328,8 @@
             if (invalidateEnd < invalidateStart) {
               touchesStartPages = true;
             } else {
-              const firstPage = invalidateStart >>> 12;
-              const lastPage = invalidateEnd >>> 12;
+              const firstPage = invalidateStart >>> CODE_CACHE_CHUNK_SHIFT;
+              const lastPage = invalidateEnd >>> CODE_CACHE_CHUNK_SHIFT;
               for (let page = firstPage; page <= lastPage; page += 1) {
                 if (this.basicBlockStartPageSet.has(page >>> 0)) {
                   touchesStartPages = true;

@@ -24,11 +24,12 @@ try {
 
     const emulator = new Emulator(surface, () => {});
     emulator.running = true;
-    emulator.cpu = {};
+    emulator.cpu = { regs: new Uint32Array(10) };
     emulator.windowDefined = true;
     emulator.useImmediateScheduler = true;
     emulator.maxInstructions = 3;
     emulator.backgroundMaxInstructions = 3;
+    emulator._perfCalibrated = true;
     emulator.syscallSiteSet = new Set();
     emulator.softInstructions = false;
     emulator.readReg = () => 0;
@@ -70,11 +71,12 @@ try {
     let now = 0;
     emulator.getWallClockMs = () => now;
     emulator.running = true;
-    emulator.cpu = {};
+    emulator.cpu = { regs: new Uint32Array(10) };
     emulator.windowDefined = true;
     emulator.useImmediateScheduler = true;
     emulator.maxInstructions = 20;
     emulator.backgroundMaxInstructions = 20;
+    emulator._perfCalibrated = true;
     emulator.maxSliceMs = 5;
     emulator.sliceTimeCheckInterval = 1;
     emulator.syscallSiteSet = new Set();
