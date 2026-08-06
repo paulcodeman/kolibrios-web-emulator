@@ -2814,6 +2814,12 @@
         const srcPtr = this.readReg(REG.EBX) >>> 0;
         const size = this.readReg(REG.ECX) >>> 0;
         const pos = this.readReg(REG.EDX) >>> 0;
+        // KolibriOS function 7 rejects dimensions whose 16-bit sign bit is
+        // set. This also prevents wrapped negative sizes from being treated
+        // as enormous images and reading into adjacent guest data.
+        if ((size & 0x80008000) !== 0) {
+          return;
+        }
         this.drawImageFromMemory(srcPtr, size, pos, 24, 0, 0);
       },
 
