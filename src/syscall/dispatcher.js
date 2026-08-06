@@ -4122,8 +4122,8 @@
           return;
         }
         if (sub === 10) {
-          const ticks100 = BigInt(this.readTimeCounter32() >>> 0);
-          const ns = ticks100 * 10000000n;
+          const elapsedMs = BigInt(this.readTimeCounter32() >>> 0);
+          const ns = elapsedMs * 1000000n;
           this.writeReg(REG.EAX, Number(ns & 0xffffffffn) >>> 0);
           this.writeReg(REG.EDX, Number((ns >> 32n) & 0xffffffffn) >>> 0);
           return;
