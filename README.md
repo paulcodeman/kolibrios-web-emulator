@@ -32,7 +32,14 @@ https://paulcodeman.github.io/kolibrios-web-emulator/
 
 ## Run Locally
 
-Open any `.html` file directly in a browser via `file://`. No HTTP server needed.
+The app is static. For consistent loading of local resources, serve the checkout:
+
+```sh
+python -m http.server 8000 --bind 127.0.0.1
+```
+
+Open `http://127.0.0.1:8000/`. Direct `file://` opening is browser-dependent;
+resource requests and optional features can be subject to browser restrictions.
 
 ### Headless
 
@@ -60,3 +67,10 @@ Hotspot benchmark: `node tools/benchmark-hotspots.js` (add `--headless temp_plas
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Status
+
+CPU instruction, FPU and KolibriOS syscall coverage is incomplete. The demo URL,
+page names, `.kex` paths and SDK-facing interfaces are kept stable. An available
+web page is not proof that every KolibriOS application runs correctly; binary
+execution and hardware compatibility were not tested during documentation work.
